@@ -22,6 +22,11 @@ data/composer_templates.json
 docs/plans/
 docs/prompts/
 
+# ---------- README screenshots ----------
+# Screenshots may contain personal project output / generated images.
+# Use a placeholder for now and only commit curated public screenshots.
+docs/screenshots/
+
 # ---------- Environment / Secrets ----------
 .env
 .env.local
