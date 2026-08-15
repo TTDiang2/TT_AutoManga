@@ -317,11 +317,12 @@ export function Canvas() {
       <div className="composer-canvas-scroll">
         <div
           ref={canvasRef}
-          className="composer-canvas"
+          className={`composer-canvas ${activeTool === 'text' || activeTool === 'bubble' ? 'composer-canvas-place-mode' : ''}`}
           style={{
             width: currentPage.width,
             height: currentPage.height,
             transform: `scale(${zoom})`,
+            cursor: activeTool === 'text' || activeTool === 'bubble' ? 'crosshair' : 'default',
           }}
           onClick={handleCanvasClick}
         >

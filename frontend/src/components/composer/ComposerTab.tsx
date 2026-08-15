@@ -14,6 +14,71 @@ import { renderPageToImage } from './pageRenderer';
 import './composer.css';
 import type { BubbleType } from '../../types';
 
+/**
+ * Tiny SVG preview of each bubble type, used in the toolbar picker so users
+ * can compare the six styles at a glance instead of reading English names.
+ * Colors match the actual canvas rendering in composer.css.
+ */
+function BubbleIcon({ type }: { type: BubbleType }) {
+  const stroke = '#333';
+  const fill = '#fff';
+
+  if (type === 'speech') {
+    return (
+      <svg width="28" height="22" viewBox="0 0 28 22" aria-hidden>
+        <ellipse cx="14" cy="10" rx="10" ry="7" fill={fill} stroke={stroke} strokeWidth="1.5" />
+        <path d="M9 15 L7 20 L12 16 Z" fill={fill} stroke={stroke} strokeWidth="1.5" />
+      </svg>
+    );
+  }
+  if (type === 'thought') {
+    return (
+      <svg width="28" height="22" viewBox="0 0 28 22" aria-hidden>
+        <ellipse cx="13" cy="9" rx="9" ry="6" fill={fill} stroke={stroke} strokeWidth="1.5" strokeDasharray="3 2" />
+        <circle cx="8" cy="18" r="2" fill={fill} stroke={stroke} strokeWidth="1" />
+        <circle cx="11.5" cy="20.5" r="1" fill={fill} stroke={stroke} strokeWidth="1" />
+      </svg>
+    );
+  }
+  if (type === 'shout') {
+    return (
+      <svg width="28" height="22" viewBox="0 0 28 22" aria-hidden>
+        <path
+          d="M14 1 L17 5 L22 3 L20 8 L26 9 L22 13 L26 17 L20 16 L22 21 L17 19 L14 23 L11 19 L6 21 L8 16 L2 17 L6 13 L2 9 L8 8 L6 3 L11 5 Z"
+          fill="#FFF9C4"
+          stroke={stroke}
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (type === 'whisper') {
+    return (
+      <svg width="28" height="22" viewBox="0 0 28 22" aria-hidden>
+        <ellipse cx="14" cy="11" rx="10" ry="7" fill={fill} stroke="#888" strokeWidth="1" strokeDasharray="3 2" />
+        <text x="14" y="14" textAnchor="middle" fontSize="8" fill="#666" fontStyle="italic">~</text>
+      </svg>
+    );
+  }
+  if (type === 'narration') {
+    return (
+      <svg width="28" height="22" viewBox="0 0 28 22" aria-hidden>
+        <rect x="2" y="4" width="24" height="14" rx="1" fill="#F5F5F5" stroke="#333" strokeWidth="1.5" />
+        <line x1="6" y1="9" x2="22" y2="9" stroke="#888" strokeWidth="1" />
+        <line x1="6" y1="13" x2="18" y2="13" stroke="#888" strokeWidth="1" />
+      </svg>
+    );
+  }
+  // inner-voice
+  return (
+    <svg width="28" height="22" viewBox="0 0 28 22" aria-hidden>
+      <ellipse cx="14" cy="10" rx="10" ry="7" fill="#E8EAF6" stroke="#5C6BC0" strokeWidth="1.5" />
+      <text x="14" y="13" textAnchor="middle" fontSize="8" fill="#5C6BC0" fontStyle="italic">i</text>
+    </svg>
+  );
+}
+
 export function ComposerTab() {
   const { t } = useTranslation();
   const language = useProjectStore(s => s.settings.language);
@@ -328,25 +393,28 @@ export function ComposerTab() {
         <div className="composer-toolbar">
           <div className="composer-toolbar-group">
             <button
-              className={`composer-tool-btn ${activeTool === 'select' ? 'active' : ''}`}
+              className={`composer-tool-btn composer-tool-labeled ${activeTool === 'select' ? 'active' : ''}`}
               title={t.composer.select}
               onClick={() => setActiveTool('select')}
             >
               <FiMousePointer size={15} />
+              <span className="composer-tool-label">{t.composer.select}</span>
             </button>
             <button
-              className={`composer-tool-btn ${activeTool === 'text' ? 'active' : ''}`}
+              className={`composer-tool-btn composer-tool-labeled ${activeTool === 'text' ? 'active' : ''}`}
               title={t.composer.text}
               onClick={() => setActiveTool('text')}
             >
               <FiType size={15} />
+              <span className="composer-tool-label">{t.composer.text}</span>
             </button>
             <button
-              className={`composer-tool-btn ${activeTool === 'bubble' ? 'active' : ''}`}
+              className={`composer-tool-btn composer-tool-labeled ${activeTool === 'bubble' ? 'active' : ''}`}
               title={t.composer.bubble}
               onClick={() => setActiveTool('bubble')}
             >
               <FiMessageCircle size={15} />
+              <span className="composer-tool-label">{t.composer.bubble}</span>
             </button>
           </div>
 
@@ -357,8 +425,12 @@ export function ComposerTab() {
                   key={bt}
                   className={`composer-bubble-pill ${activeBubbleType === bt ? 'active' : ''}`}
                   onClick={() => setActiveBubbleType(bt)}
+                  title={bt === 'inner-voice' ? t.composer.innerVoice : bt}
                 >
-                  {bt === 'inner-voice' ? t.composer.innerVoice : bt}
+                  <BubbleIcon type={bt} />
+                  <span className="composer-bubble-pill-label">
+                    {bt === 'inner-voice' ? t.composer.innerVoice : bt}
+                  </span>
                 </button>
               ))}
             </div>
@@ -527,6 +599,24 @@ export function ComposerTab() {
             </div>
           </div>
         </div>
+
+        {(activeTool === 'text' || activeTool === 'bubble') && (
+          <div className="composer-canvas-hint" role="status">
+            <span className="composer-canvas-hint-dot" />
+            <span>
+              {activeTool === 'text'
+                ? 'Click anywhere on the canvas to place a text box. Then double-click it to edit.'
+                : 'Click anywhere on the canvas to place a bubble. Then double-click it to type.'}
+            </span>
+            <button
+              className="composer-canvas-hint-cancel"
+              onClick={() => setActiveTool('select')}
+              title="Cancel (Switch to Select tool)"
+            >
+              <FiX size={12} />
+            </button>
+          </div>
+        )}
 
         <Canvas />
       </div>
