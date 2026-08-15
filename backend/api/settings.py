@@ -15,6 +15,7 @@ class APIConfigUpdate(BaseModel):
     thinking: Optional[bool] = None
     storyboard_system_prompt: Optional[str] = None
     prompt_system_prompt: Optional[str] = None
+    tags_system_prompt: Optional[str] = None
     storyboardPresets: Optional[list] = None
     promptPresets: Optional[list] = None
 
@@ -81,6 +82,8 @@ async def update_settings(update: FullSettingsUpdate):
                 config.settings.api.storyboard_system_prompt = update.api.storyboard_system_prompt
             if update.api.prompt_system_prompt is not None:
                 config.settings.api.prompt_system_prompt = update.api.prompt_system_prompt
+            if update.api.tags_system_prompt is not None:
+                config.settings.api.tags_system_prompt = update.api.tags_system_prompt
             if update.api.storyboardPresets is not None:
                 config.settings.api.storyboardPresets = update.api.storyboardPresets
             if update.api.promptPresets is not None:

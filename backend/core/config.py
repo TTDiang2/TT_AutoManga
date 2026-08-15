@@ -28,6 +28,7 @@ class APIConfig(BaseModel):
     thinking: bool = True
     storyboard_system_prompt: str = "You are a professional manga storyboard artist. Analyze the novel text and create detailed storyboard panels with scene descriptions, character dialogues, and panel compositions. Output JSON array with format: [{\"id\": \"panel_1\", \"scene\": \"description\", \"characters\": [\"char1\"], \"dialogue\": \"text\"}]"
     prompt_system_prompt: str = "You are an AI art prompt expert. Enhance scene descriptions into detailed, vivid prompts for AI image generation. Include lighting, atmosphere, composition, and style details."
+    tags_system_prompt: str = "You are an AI prompt tag specialist. Convert scene descriptions into comma-separated Danbooru-style tags suitable for SDXL image generation. Use quality and style tags, and add (1.0) weight to important elements. Output only the tags."
     storyboardPresets: list = []
     promptPresets: list = []
 

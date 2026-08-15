@@ -121,5 +121,23 @@ async def serve_frontend_paths(path: str):
 
 if __name__ == "__main__":
     import sys
+    import logging
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5180
-    uvicorn.run(app, host="127.0.0.1", port=port)
+
+    # Enable our app loggers. Uvicorn's default log_config disables
+    # pre-existing loggers (`disable_existing_loggers=True`), which silently
+    # silences anything outside uvicorn.* namespaces. Attach an explicit
+    # StreamHandler to the root logger and re-enable ours.
+    app_handler = logging.StreamHandler()
+    app_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-7s %(name)s | %(message)s")
+    )
+    logging.getLogger().addHandler(app_handler)
+    logging.getLogger().setLevel(logging.INFO)
+    for name in ("backend.api.prompt", "backend.api.storyboard", "backend.api.assets",
+                 "backend.api.export", "backend.api.characters", "backend.core.openai_client",
+                 "backend.core.swarmui_client"):
+        logging.getLogger(name).setLevel(logging.INFO)
+        logging.getLogger(name).propagate = True
+
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")

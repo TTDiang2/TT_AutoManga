@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FiRefreshCw, FiCopy, FiCheck, FiZap, FiTag, FiShuffle, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -13,7 +13,10 @@ export function PromptLabTab() {
   const [seed, setSeed] = useState('');
   const [removeBG, setRemoveBG] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingSeconds, setGeneratingSeconds] = useState(0);
+  const [errorMessage, setErrorMessage] = useState('');
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importJson, setImportJson] = useState('');
   const [importCopied, setImportCopied] = useState(false);
@@ -83,10 +86,27 @@ export function PromptLabTab() {
     alert(t.prompt.importSuccess?.replace('{n}', String(imported)) || `Imported ${imported} panel(s).`);
   };
 
+  const stopTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startTimer = () => {
+    setGeneratingSeconds(0);
+    stopTimer();
+    timerRef.current = window.setInterval(() => {
+      setGeneratingSeconds((s) => s + 1);
+    }, 1000);
+  };
+
   const handleGenerate = async () => {
     if (!inputText.trim()) return;
-    
+
+    setErrorMessage('');
     setIsGenerating(true);
+    startTimer();
     try {
       const response = await fetch('/api/prompt/enhance', {
         method: 'POST',
@@ -99,29 +119,52 @@ export function PromptLabTab() {
           model: settings.api.model,
         }),
       });
-      
-      const data = await response.json();
-      if (data.enhanced_prompt) {
+
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) {
+        const detail = data?.detail || `HTTP ${response.status}`;
+        setErrorMessage(`后端错误 (${response.status}): ${detail}`);
+        return;
+      }
+
+      if (data?.error) {
+        setErrorMessage(`LLM 调用失败: ${data.error}`);
+        return;
+      }
+
+      if (data?.enhanced_prompt) {
         setOutputText(data.enhanced_prompt);
-        
+
         if (promptMode === 'turbo') {
           updatePanelPrompt(selectedPanelId, { turbo: data.enhanced_prompt });
         } else {
           const tags = data.enhanced_prompt.split(',').map((t: string) => t.trim());
           updatePanelPrompt(selectedPanelId, { tags });
         }
+      } else {
+        setErrorMessage('后端返回了空结果,请检查后端日志。');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Enhancement failed:', error);
+      setErrorMessage(`网络/客户端错误: ${error?.message || String(error)}`);
     } finally {
+      stopTimer();
       setIsGenerating(false);
     }
   };
 
   const handleBatchRefresh = async () => {
     if (panels.length === 0) return;
-    
+
+    setErrorMessage('');
     setIsGenerating(true);
+    startTimer();
     try {
       const scenes = panels.map(p => p.scene);
       const response = await fetch('/api/prompt/batch-enhance', {
@@ -135,11 +178,26 @@ export function PromptLabTab() {
           model: settings.api.model,
         }),
       });
-      
-      const data = await response.json();
-      if (data.results) {
+
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok) {
+        const detail = data?.detail || `HTTP ${response.status}`;
+        setErrorMessage(`后端错误 (${response.status}): ${detail}`);
+        return;
+      }
+
+      if (data?.results) {
+        let success = 0;
+        let failed = 0;
         data.results.forEach((result: any, idx: number) => {
           if (result.enhanced_prompt) {
+            success++;
             const panelId = panels[idx].id;
             if (promptMode === 'turbo') {
               updatePanelPrompt(panelId, { turbo: result.enhanced_prompt });
@@ -147,12 +205,23 @@ export function PromptLabTab() {
               const tags = result.enhanced_prompt.split(',').map((t: string) => t.trim());
               updatePanelPrompt(panelId, { tags });
             }
+          } else if (result.error) {
+            failed++;
           }
         });
+        if (failed > 0 && success === 0) {
+          setErrorMessage(`全部 ${failed} 个分镜生成失败,请查看后端日志。`);
+        } else if (failed > 0) {
+          setErrorMessage(`部分失败: ${success} 个成功, ${failed} 个失败。`);
+        }
+      } else {
+        setErrorMessage('后端返回了空结果,请检查后端日志。');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Batch enhancement failed:', error);
+      setErrorMessage(`网络/客户端错误: ${error?.message || String(error)}`);
     } finally {
+      stopTimer();
       setIsGenerating(false);
     }
   };
@@ -162,6 +231,13 @@ export function PromptLabTab() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  useEffect(() => {
+    return () => {
+      stopTimer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="prompt-lab-tab">
@@ -187,6 +263,11 @@ export function PromptLabTab() {
             disabled={isGenerating || panels.length === 0}
           >
             <FiRefreshCw size={16} /> {t.prompt.generateAll}
+            {isGenerating && (
+              <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
+                生成中… {generatingSeconds}s
+              </span>
+            )}
           </button>
         </div>
 
@@ -215,6 +296,34 @@ export function PromptLabTab() {
       </div>
 
       <div className="prompt-workspace">
+        {errorMessage && (
+          <div
+            role="alert"
+            data-testid="prompt-error"
+            style={{
+              gridColumn: '1 / -1',
+              padding: '12px 16px',
+              borderRadius: 8,
+              background: 'rgba(244, 67, 54, 0.1)',
+              border: '1px solid rgba(244, 67, 54, 0.4)',
+              color: 'var(--accent-danger, #f44336)',
+              fontSize: 13,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+            }}
+          >
+            <span style={{ flex: 1, wordBreak: 'break-word' }}>{errorMessage}</span>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setErrorMessage('')}
+              style={{ fontSize: 12, padding: '2px 8px' }}
+            >
+              关闭
+            </button>
+          </div>
+        )}
         <div className="prompt-input-section">
           <h3>{t.prompt.input}</h3>
           <textarea
@@ -232,6 +341,11 @@ export function PromptLabTab() {
             disabled={isGenerating || !inputText.trim() || !selectedPanelId}
           >
             {isGenerating ? <span className="loading-spinner" /> : t.prompt.generate}
+            {isGenerating && (
+              <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
+                生成中… {generatingSeconds}s
+              </span>
+            )}
           </button>
         </div>
 

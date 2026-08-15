@@ -15,6 +15,7 @@ data/composer_templates.json
 
 # ---------- OpenCode / Internal tooling ----------
 .omo/
+.debug-journal.md
 
 # ---------- Internal design / planning docs ----------
 # These contain personal design rationale and prompt engineering notes
