@@ -1,0 +1,1137 @@
+/* === Composer Tab Shell === */
+.composer-tab {
+  display: flex;
+  height: 100%;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* === Left: Page List === */
+.composer-page-list {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.composer-page-list-header {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  letter-spacing: 0.5px;
+}
+
+.composer-page-items {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.composer-page-thumb {
+  position: relative;
+  background: white;
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  aspect-ratio: 2/3;
+  overflow: hidden;
+  transition: border-color var(--transition-default), box-shadow var(--transition-default);
+}
+
+.composer-page-thumb:hover {
+  border-color: var(--accent-primary);
+}
+
+.composer-page-thumb.active {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+.composer-page-thumb-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0,0,0,0.6);
+  color: white;
+  font-size: 9px;
+  padding: 2px 4px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-page-thumb-actions {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: none;
+  gap: 2px;
+}
+
+.composer-page-thumb:hover .composer-page-thumb-actions {
+  display: flex;
+}
+
+.composer-page-thumb-actions button {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: rgba(0,0,0,0.7);
+  color: white;
+  border-radius: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+}
+
+.composer-page-thumb-inner {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: white;
+}
+
+.composer-page-thumb-slot {
+  position: absolute;
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--border-hover);
+  box-sizing: border-box;
+}
+
+.composer-add-page-btn {
+  margin: var(--space-xs) var(--space-sm) var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1.5px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 11px;
+  transition: all var(--transition-default);
+  text-align: center;
+}
+
+.composer-add-page-btn:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: var(--bg-tertiary);
+}
+
+/* === Center: Canvas Workspace === */
+.composer-canvas-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+  height: 44px;
+}
+
+.composer-toolbar-group {
+  display: flex;
+  gap: 2px;
+  padding: 0 var(--space-xs);
+}
+
+.composer-toolbar-group + .composer-toolbar-group {
+  border-left: 1px solid var(--border-default);
+  padding-left: var(--space-sm);
+}
+
+.composer-tool-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all var(--transition-default);
+  font-size: 11px;
+}
+
+.composer-tool-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.composer-tool-btn.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+.composer-toolbar-spacer {
+  flex: 1;
+}
+
+.composer-template-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  background: var(--bg-primary);
+  cursor: pointer;
+  color: var(--text-primary);
+  height: 28px;
+}
+
+.composer-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.composer-zoom-controls button {
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.composer-zoom-controls button:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.composer-canvas-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: var(--space-lg);
+}
+
+.composer-canvas {
+  background: white;
+  box-shadow: var(--shadow-elevated);
+  position: relative;
+  transform-origin: top center;
+}
+
+/* === Canvas Elements === */
+.composer-element {
+  position: absolute;
+  cursor: grab;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.composer-element.locked {
+  cursor: default;
+}
+
+.composer-element.selected {
+  outline: 2px solid #3B82F6;
+  outline-offset: 1px;
+}
+
+/* Frames (image / image-slot) rely on the SVG polygon stroke for their selection
+   highlight — the bbox outline would look like a stubborn rectangle covering
+   the deformed shape, so suppress it. */
+.composer-element.selected.composer-image,
+.composer-element.selected.composer-image-slot,
+.composer-element.selected.composer-page-image {
+  outline: none;
+}
+
+.composer-element.hidden {
+  display: none;
+}
+
+/* Image Slot — frame body; shape now drawn by SVG polygon overlay + clip-path.
+   Body click only selects; central + button opens image picker. */
+.composer-image-slot {
+  /* polygon overlay handles the dashed border; this element is just a positioning context */
+}
+
+/* Image Element */
+.composer-image {
+  /* clip-path on .composer-frame-content handles overflow; no border-radius here */
+}
+
+/* Page Image (breakout) — same rendering as .composer-image but can sit freely on the page */
+.composer-page-image {
+  /* inherits all frame rendering from .composer-frame-content / .composer-frame-outline */
+}
+
+.composer-page-image-empty {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  gap: 6px;
+  flex-direction: column;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Clipped content layer — holds the <img> or slot placeholder. Inline clip-path shapes it. */
+.composer-frame-content {
+  position: absolute;
+  inset: 0;
+  /* clip-path handles the visible boundary — no overflow:hidden so scaled
+     images can extend beyond the frame bounding box. The quadrilateral
+     clip-path still clips the visible area to the frame shape. */
+}
+
+.composer-frame-content img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  display: block;
+}
+
+/* Empty slot placeholder fill (visible through the clipped polygon) */
+.composer-slot-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composer-slot-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  text-align: center;
+  user-select: none;
+}
+
+/* SVG polygon outline overlay — non-interactive so it never blocks drag/click */
+.composer-frame-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+  /* Don't clip polygon vertices outside the viewBox; otherwise dragging corners
+     beyond the frame boundary causes the border to vanish. */
+  overflow: visible;
+}
+
+/* Central + button — only on empty image-slots; positioned at polygon centroid */
+.composer-slot-add-btn {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid #3B82F6;
+  background: white;
+  color: #3B82F6;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  padding: 0;
+  box-shadow: 0 1px 4px rgba(59, 130, 246, 0.25);
+  transition: transform var(--transition-default), box-shadow var(--transition-default), background var(--transition-default);
+}
+
+.composer-slot-add-btn:hover {
+  background: #3B82F6;
+  color: white;
+  transform: translate(-50%, -50%) scale(1.08);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* 4 corner deformation handles — positioned at left%/top% (the corner coords),
+   translated by -50%,-50% so they center on the corner point */
+.composer-corner-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #3B82F6;
+  border: 2px solid white;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+.composer-corner-handle:hover {
+  background: #2563EB;
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.composer-corner-handle.tl { cursor: nwse-resize; }
+.composer-corner-handle.tr { cursor: nesw-resize; }
+.composer-corner-handle.br { cursor: nwse-resize; }
+.composer-corner-handle.bl { cursor: nesw-resize; }
+
+/* Text Element */
+.composer-text {
+  padding: 4px 6px;
+  min-height: 1.5em;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.composer-text.editing {
+  background: rgba(255,255,255,0.95);
+}
+
+.composer-text.vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* Bubble Element */
+.composer-bubble {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.composer-bubble-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  position: relative;
+  font-size: inherit;
+}
+
+/* Bubble shape variants */
+.composer-bubble.speech .composer-bubble-inner {
+  background: white;
+  border: 2px solid #000;
+  border-radius: 50%;
+}
+
+.composer-bubble.thought .composer-bubble-inner {
+  background: white;
+  border: 2px dashed #555;
+  border-radius: 50%;
+}
+
+.composer-bubble.shout .composer-bubble-inner {
+  background: #FFF9C4;
+  border: 3px solid #000;
+  border-radius: 4px;
+  font-weight: bold;
+  clip-path: polygon(50% 0%, 61% 15%, 78% 2%, 72% 22%, 98% 22%, 83% 38%, 100% 50%, 83% 62%, 98% 78%, 72% 78%, 78% 98%, 61% 85%, 50% 100%, 39% 85%, 22% 98%, 28% 78%, 2% 78%, 17% 62%, 0% 50%, 17% 38%, 2% 22%, 28% 22%, 22% 2%, 39% 15%);
+  padding: 8px;
+}
+
+.composer-bubble.whisper .composer-bubble-inner {
+  background: rgba(255,255,255,0.75);
+  border: 1px dashed #888;
+  border-radius: 50%;
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.composer-bubble.narration .composer-bubble-inner {
+  background: #F5F5F5;
+  border: 2px solid #333;
+  border-radius: 2px;
+  font-style: italic;
+  padding: 6px 10px;
+}
+
+.composer-bubble.inner-voice .composer-bubble-inner {
+  background: #E8EAF6;
+  border: 2px solid #5C6BC0;
+  border-radius: 50%;
+  font-style: italic;
+}
+
+/* Bubble tail */
+.composer-bubble-tail {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.composer-bubble-tail.top {
+  bottom: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 10px solid #000;
+}
+
+.composer-bubble-tail.bottom {
+  top: -1px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 10px solid #000;
+}
+
+.composer-bubble.tail-left .composer-bubble-tail {
+  display: none;
+}
+
+.composer-bubble.vertical .composer-bubble-inner {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.composer-bubble-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  text-align: center;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  outline: none;
+  resize: none;
+  display: block;
+}
+
+/* Resize Handles */
+.composer-resize-handle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #3B82F6;
+  border: 1.5px solid white;
+  border-radius: 50%;
+  z-index: 50;
+}
+
+.composer-resize-handle.nw { top: -4px; left: -4px; cursor: nw-resize; }
+.composer-resize-handle.ne { top: -4px; right: -4px; cursor: ne-resize; }
+.composer-resize-handle.sw { bottom: -4px; left: -4px; cursor: sw-resize; }
+.composer-resize-handle.se { bottom: -4px; right: -4px; cursor: se-resize; }
+.composer-resize-handle.n { top: -4px; left: 50%; transform: translateX(-50%); cursor: n-resize; }
+.composer-resize-handle.s { bottom: -4px; left: 50%; transform: translateX(-50%); cursor: s-resize; }
+.composer-resize-handle.e { right: -4px; top: 50%; transform: translateY(-50%); cursor: e-resize; }
+.composer-resize-handle.w { left: -4px; top: 50%; transform: translateY(-50%); cursor: w-resize; }
+
+/* === Right: Properties Panel === */
+.composer-properties {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--bg-primary);
+  border-left: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.composer-properties-header {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  letter-spacing: 0.5px;
+}
+
+.composer-properties-body {
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.composer-prop-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.composer-prop-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.composer-prop-row {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
+.composer-prop-input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.composer-prop-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.composer-prop-color {
+  width: 32px;
+  height: 28px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 1px;
+  background: var(--bg-primary);
+}
+
+.composer-prop-slider {
+  width: 100%;
+  accent-color: var(--accent-primary);
+}
+
+.composer-prop-btn-group {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.composer-prop-btn {
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  cursor: pointer;
+  font-size: 11px;
+  text-align: center;
+  transition: all var(--transition-default);
+  color: var(--text-secondary);
+}
+
+.composer-prop-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.composer-prop-btn.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+.composer-prop-delete {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px solid #FCA5A5;
+  border-radius: var(--radius-sm);
+  background: #FEF2F2;
+  color: #EF4444;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: center;
+  transition: all var(--transition-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.composer-prop-delete:hover {
+  background: #FEE2E2;
+}
+
+.composer-no-selection {
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* === Image Picker Modal === */
+.composer-image-picker-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.composer-image-picker {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+  width: 560px;
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  animation: modalIn 200ms ease-out;
+}
+
+.composer-image-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.composer-image-picker-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.composer-image-picker-source-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 var(--space-md);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.composer-source-tab {
+  padding: 6px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: all var(--transition-default);
+  margin-bottom: -1px;
+}
+
+.composer-source-tab:hover {
+  color: var(--text-primary);
+}
+
+.composer-source-tab.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+.composer-image-picker-folder-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.composer-folder-select {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.composer-folder-select:focus {
+  border-color: var(--accent-primary);
+}
+
+.composer-image-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.composer-image-picker-item {
+  aspect-ratio: 1;
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color var(--transition-default);
+}
+
+.composer-image-picker-item:hover {
+  border-color: var(--accent-primary);
+}
+
+.composer-image-picker-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.composer-image-picker-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: var(--space-xxl);
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.composer-image-picker-empty p {
+  font-size: 13px;
+}
+
+.composer-image-picker-empty span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.composer-image-picker-footer {
+  padding: var(--space-md);
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.composer-upload-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  transition: all var(--transition-default);
+}
+
+.composer-upload-label:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.composer-upload-label input {
+  display: none;
+}
+
+/* === Bubble type pill buttons in toolbar === */
+.composer-bubble-pills {
+  display: flex;
+  gap: 2px;
+  padding: 0 var(--space-xs);
+}
+
+.composer-bubble-pill {
+  padding: 3px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  cursor: pointer;
+  font-size: 10px;
+  color: var(--text-secondary);
+  transition: all var(--transition-default);
+  white-space: nowrap;
+}
+
+.composer-bubble-pill:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.composer-bubble-pill.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+.composer-export-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  z-index: 100;
+  min-width: 160px;
+  overflow: hidden;
+}
+
+.composer-export-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-primary);
+  transition: background var(--transition-default);
+}
+
+.composer-export-menu button:hover {
+  background: var(--bg-tertiary);
+}
+
+/* ============================================================ */
+/* Phase 1 additions — quadrilateral frames, add-frame toolbar, */
+/* page-level controls (auto gap), corner editor in properties  */
+/* ============================================================ */
+
+/* Toolbar: primary action buttons (extends .composer-tool-btn with inline label) */
+.composer-add-frame-btn,
+.composer-add-image-btn,
+.composer-save-template-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  width: auto;
+  height: 30px;
+  background: var(--accent-primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition-default);
+}
+
+.composer-add-frame-btn:hover,
+.composer-add-image-btn:hover,
+.composer-save-template-btn:hover {
+  background: var(--accent-hover);
+}
+
+.composer-add-frame-label,
+.composer-add-image-label,
+.composer-save-template-label {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Properties panel — page-level controls wrapper (shown when nothing selected) */
+.composer-page-controls {
+  border-top: 1px solid var(--border-default);
+  padding-top: var(--space-md);
+}
+
+/* Apply button — primary-styled, used for Auto Gap etc. */
+.composer-prop-apply-btn {
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-default);
+}
+
+.composer-prop-apply-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* Label row — label on left, optional mini action button on right */
+.composer-prop-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+/* Mini ghost button — for "Reset" etc. in property groups */
+.composer-prop-mini-btn {
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-default);
+}
+
+.composer-prop-mini-btn:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+/* 4-corner editor grid in properties panel */
+.composer-corner-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.composer-corner-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 1fr;
+  gap: 4px;
+  align-items: center;
+}
+
+.composer-corner-key {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================================ */
+/* Phase 2 additions — user-saved templates (Save / Manage)     */
+/* ============================================================ */
+
+/* (label styles consolidated above) */
+
+/* Toolbar: ⋯ manage templates button */
+.composer-manage-templates-btn {
+  width: 32px;
+  padding: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+.composer-manage-templates-btn:hover {
+  color: var(--text-primary);
+}
+
+.composer-manage-templates-icon {
+  display: block;
+  transform: translateY(-2px);
+}
+
+/* Popover listing user templates (similar pattern to .composer-export-menu) */
+.composer-template-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 200px;
+  max-width: 280px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-elevated);
+  z-index: 200;
+  padding: 4px;
+}
+
+.composer-template-menu-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 8px 4px;
+}
+
+.composer-template-menu-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.composer-template-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-default);
+}
+
+.composer-template-menu-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.composer-template-menu-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-template-menu-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-default);
+  flex-shrink: 0;
+}
+
+.composer-template-menu-delete:hover {
+  background: rgba(244, 67, 54, 0.1);
+  color: var(--error);
+}

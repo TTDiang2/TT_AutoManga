@@ -1,0 +1,108 @@
+# ============================================
+# AutoManga - Root .gitignore
+# ============================================
+
+# ---------- Runtime / User Data ----------
+# All runtime data is private. The application creates and reads
+# these directories at runtime; they MUST NOT be committed.
+data/projects/
+data/assets/
+data/exports/
+data/archive/
+data/settings.json
+data/characters.json
+data/composer_templates.json
+
+# ---------- OpenCode / Internal tooling ----------
+.omo/
+
+# ---------- Internal design / planning docs ----------
+# These contain personal design rationale and prompt engineering notes
+# that should not be public. Keep them local.
+docs/plans/
+docs/prompts/
+
+# ---------- Environment / Secrets ----------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+
+# ---------- Node / Frontend ----------
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+frontend/*.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+
+# ---------- Editors / IDEs ----------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+*.swo
+*~
+.cursor/
+*.iml
+
+# ---------- OS ----------
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- Build artifacts ----------
+*.log
+logs/
+*.bak
+*.tmp
+*.swp
+.cache/
+.tmp/
+
+# Specific backup file in repo root
+run.bak
+
+# ---------- Pake / WebView build outputs ----------
+AutoManga.exe
+AutoManga.app
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# ---------- Misc ----------
+*.tsbuildinfo
+*.local
+.history/
