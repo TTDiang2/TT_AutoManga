@@ -17,14 +17,6 @@ class GenerateRequest(BaseModel):
     thinking: Optional[bool] = None
 
 
-class PanelUpdate(BaseModel):
-    id: str
-    scene: Optional[str] = None
-    characters: Optional[List[str]] = None
-    dialogue: Optional[str] = None
-    order: Optional[int] = None
-
-
 @router.post("/generate")
 async def generate_storyboard(req: GenerateRequest):
     if not req.text.strip():
@@ -48,8 +40,3 @@ async def generate_storyboard(req: GenerateRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/update-panel")
-async def update_panel(update: PanelUpdate):
-    return {"success": True, "panel": update}

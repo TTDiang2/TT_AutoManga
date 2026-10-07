@@ -6,7 +6,7 @@ from pathlib import Path
 import uvicorn
 import json
 
-from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render
+from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 
@@ -92,6 +92,7 @@ app.include_router(character_templates.router)
 app.include_router(characters.router)
 app.include_router(composer_templates.router)
 app.include_router(render.router)
+app.include_router(agent.router)
 
 
 @app.get("/api/health")
