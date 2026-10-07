@@ -140,6 +140,43 @@ def test_scale_multiplies_output(resolver):
     assert img.size == (1200, 1800)
 
 
+def test_bubble_tail_scales_linearly(resolver):
+    """Tail depth must stay ~12% of the bubble at any scale (no k² growth)."""
+    page = base_page()  # speech bubble: x5 y60 w40 h15, tailPosition bottom
+    img2 = render_page(page, 2.0, resolver)
+    # box: X=60, EW=480 → center x=300; top y=1080. Correct tip ≈ 1041;
+    # buggy (k²) would reach ≈ 985.
+    found = []
+    for y in range(980, 1078):
+        for x in range(280, 320):
+            if sum(img2.getpixel((x, y))[:3]) < 250:
+                found.append(y)
+                break
+    assert found, "tail triangle missing above bubble at scale 2"
+    assert min(found) > 1015, f"tail too deep at scale 2 (topmost dark y={min(found)})"
+
+
+def test_render_export_endpoint_smoke():
+    """HTTP-level smoke: pdf/zip happy path + empty-pages 400."""
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    client = TestClient(app)
+    page = base_page()
+    r = client.post("/api/render/export",
+                    json={"pages": [page], "format": "pdf", "scale": 1})
+    assert r.status_code == 200
+    assert r.content[:4] == b"%PDF"
+    r = client.post("/api/render/export",
+                    json={"pages": [page], "format": "zip", "scale": 1})
+    assert r.status_code == 200
+    assert r.content[:2] == b"PK"
+    r = client.post("/api/render/export", json={"pages": [], "format": "pdf"})
+    assert r.status_code == 400
+    r = client.post("/api/render/export",
+                    json={"pages": [page], "format": "svg"})
+    assert r.status_code == 400
+
+
 def test_missing_src_renders_nothing(resolver):
     page = base_page()
     page["elements"].append(

@@ -137,7 +137,8 @@ def _draw_text(el, ew, eh, scale):
     out = Image.new("RGBA", (ew, eh), (0, 0, 0, 0))
     d = ImageDraw.Draw(out)
     fs = (el.get("fontSize") or 14) * scale
-    font = get_font(fs, el.get("fontFamily"))
+    font = get_font(fs, el.get("fontFamily"),
+                    bold=(el.get("fontWeight") or "").lower() == "bold")
     color = _hex(el.get("color") or "#000000")
     content = el.get("content") or ""
     line_h = fs * 1.4

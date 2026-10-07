@@ -20,34 +20,59 @@ _FALLBACKS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/System/Library/Fonts/PingFang.ttc",
 ]
+
+_BOLD_FALLBACKS = [
+    "C:/Windows/Fonts/msyhbd.ttc", "C:/Windows/Fonts/simhei.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+]
 _cache: dict = {}
 
 
-def _find_font(family: Optional[str]) -> Optional[str]:
+def _match_user_font(family: Optional[str], bold: bool) -> Optional[str]:
+    if not _USER_FONT_DIR.exists():
+        return None
+    candidates = sorted(_USER_FONT_DIR.glob("*"))
     if family:
-        # 1) user-provided fonts dir, match by fuzzy file name
-        if _USER_FONT_DIR.exists():
-            for f in sorted(_USER_FONT_DIR.glob("*")):
-                if f.suffix.lower() in (".ttf", ".otf", ".ttc") \
-                        and family.lower() in f.stem.lower():
+        for f in candidates:
+            if f.suffix.lower() in (".ttf", ".otf", ".ttc") \
+                    and family.lower() in f.stem.lower():
+                if not bold or "bold" in f.stem.lower():
                     return str(f)
-        # 2) fallbacks matching family name
+    if bold:
+        for f in candidates:
+            if f.suffix.lower() in (".ttf", ".otf", ".ttc") \
+                    and "bold" in f.stem.lower():
+                return str(f)
+    if family:
+        for f in candidates:
+            if f.suffix.lower() in (".ttf", ".otf", ".ttc") \
+                    and family.lower() in f.stem.lower():
+                return str(f)
+    return None
+
+
+def _find_font(family: Optional[str], bold: bool = False) -> Optional[str]:
+    user = _match_user_font(family, bold)
+    if user:
+        return user
+    if family:
         for p in _FALLBACKS:
             if family.lower() in os.path.basename(p).lower() and os.path.exists(p):
-                return p
-    if _USER_FONT_DIR.exists():
-        for f in sorted(_USER_FONT_DIR.glob("*")):
-            if f.suffix.lower() in (".ttf", ".otf", ".ttc"):
-                return str(f)
-    for p in _FALLBACKS:
+                if not bold or "bold" in os.path.basename(p).lower() or "hei" in p:
+                    return p
+    fallbacks = _BOLD_FALLBACKS + _FALLBACKS if bold else _FALLBACKS
+    for p in fallbacks:
         if os.path.exists(p):
             return p
     return None
 
 
-def get_font(size: float, family: Optional[str] = None) -> ImageFont.FreeTypeFont:
+def get_font(size: float, family: Optional[str] = None,
+             bold: bool = False) -> ImageFont.FreeTypeFont:
     """Font for page-pixel rendering; size is in 1x-scaled page pixels."""
-    path = _find_font(family)
+    path = _find_font(family, bold)
     key = (path, round(size))
     if key not in _cache:
         _cache[key] = ImageFont.truetype(path, int(round(max(1, size)))) if path \

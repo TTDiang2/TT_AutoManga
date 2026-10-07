@@ -80,12 +80,15 @@ def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Tuple[Image.Image, 
     if bg is None:
         bg = defaults.get(bt, (255, 255, 255, 255))
 
-    tail_size = min(ew, eh) * 0.12 * k
+    # ew/eh are already scale-multiplied page pixels, so the tail ratio
+    # (12% of the bubble) must NOT be multiplied by scale again.
+    tail_size = min(ew, eh) * 0.12
     pad = int(math.ceil(tail_size * 1.2)) + 2 if bt != "narration" else 2
 
     img = Image.new("RGBA", (ew + 2 * pad, eh + 2 * pad), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    box = (pad + 2, pad + 2, pad + ew - 2, pad + eh - 2)
+    inset = max(1, round(2 * k))
+    box = (pad + inset, pad + inset, pad + ew - inset, pad + eh - inset)
     cx = pad + ew / 2
     top = pad
     bottom = pad + eh
@@ -106,7 +109,7 @@ def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Tuple[Image.Image, 
         _stroke_polyline(d, pts + [pts[0]], border, max(1, round(3 * k)))
     elif bt == "narration":
         d.rounded_rectangle(
-            (pad + 2, pad + 2, pad + ew - 2, pad + eh - 2),
+            (pad + inset, pad + inset, pad + ew - inset, pad + eh - inset),
             radius=max(1, round(4 * k)), fill=bg, outline=border,
             width=max(1, round(2 * k)))
     else:
@@ -146,7 +149,8 @@ def _stroke_polyline(d: ImageDraw.ImageDraw, pts, fill, width):
 def _draw_bubble_text(d: ImageDraw.ImageDraw, el: dict, ew: int, eh: int,
                       pad: int, k: float):
     fs = (el.get("fontSize") or 12) * k
-    font = get_font(fs, None)
+    # pageRenderer.ts: only shout renders bold.
+    font = get_font(fs, None, bold=(el.get("bubbleType", "speech") == "shout"))
     text = el.get("text") or ""
     bt = el.get("bubbleType", "speech")
     color = (0, 0, 0, 178) if bt == "whisper" else (0, 0, 0, 255)

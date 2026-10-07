@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from typing import List
 from ..render import render_page
+from ..render.export_service import export_pages_to_bytes
 from ..render.resolve import make_resolver
 from ..storage.asset_store import asset_store
 
@@ -37,7 +38,6 @@ class RenderExportRequest(BaseModel):
 
 @router.post("/export")
 async def render_export(req: RenderExportRequest):
-    from .export_service import export_pages_to_bytes
     if not req.pages:
         raise HTTPException(status_code=400, detail="No pages provided")
     scale = min(4.0, max(0.5, req.scale))
