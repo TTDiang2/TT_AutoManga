@@ -64,3 +64,30 @@ def test_gen_rows_counts():
 
 def test_blank_template_empty():
     assert get_template("blank")["elements"] == []
+
+
+def test_split_dialogue_ellipsis_runs():
+    """…… must not split mid-ellipsis into a junk '…' bubble."""
+    from backend.assembly import split_dialogue
+    parts = split_dialogue("时辰点数，由我说了算……")
+    assert parts == ["时辰点数，由我说了算……"], parts
+    parts = split_dialogue("别过来！你走吧……就这样。")
+    assert parts == ["别过来！", "你走吧……", "就这样。"], parts
+
+
+def test_vertical_bubble_size_fits_text():
+    """Vertical bubble width must scale with column count (no overflow)."""
+    from backend.assembly import _make_bubble
+    page = {"width": 600, "height": 900}
+    slot = {"x": 51, "y": 2, "width": 47, "height": 31}
+    long_b = _make_bubble("明日午时若不下雨我便砸了你这卦摊", slot, page, 0, {})
+    short_b = _make_bubble("哼！", slot, page, 0, {})
+    # long text -> wider (more columns); short text -> narrow single column
+    assert long_b["width"] > short_b["width"] * 1.5, (long_b["width"], short_b["width"])
+    assert long_b["width"] <= slot["width"] * 0.95
+    assert short_b["width"] < 12  # single column + padding
+    # text must fit inside the estimated columns at 1x pixels
+    fs = 14
+    col_cap = int((long_b["height"] / 100 * 900 - 20) // (fs * 1.3))
+    assert -(-len(long_b["text"]) // col_cap) * fs * 1.3 + 20 <= \
+        long_b["width"] / 100 * 600 + 1

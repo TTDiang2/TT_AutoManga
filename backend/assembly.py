@@ -11,13 +11,15 @@ ROW_BUCKET = 5.0    # % of page height; slots whose y falls in the same
 
 def split_dialogue(text: str, max_bubbles: int = 3) -> List[str]:
     """Split a panel's dialogue into bubble lines by newline and sentence
-    punctuation, capped at max_bubbles (overflow merges into the last)."""
+    punctuation, capped at max_bubbles (overflow merges into the last).
+    Ellipsis runs (……/...) only break at the END of the run."""
     if not text or not text.strip():
         return []
     raw = [s.strip() for s in re.split(r"[\n]+", text) if s.strip()]
     out: List[str] = []
     for seg in raw:
-        parts = [p for p in re.split(r"(?<=[。！？!?…])\s*", seg) if p.strip()]
+        parts = [p for p in re.split(r"(?<=[。！？!?])(?!…)|(?<=…)(?!…)", seg)
+                 if p.strip()]
         out.extend(parts)
     if len(out) > max_bubbles:
         out = out[: max_bubbles - 1] + ["".join(out[max_bubbles - 1:])]
@@ -90,14 +92,26 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
     fs = opts.get("fontSize", 14)
     pad = 10
     fw, fh = slot["width"], slot["height"]
-    bw = min(30.0, fw * 0.8)
-    # CJK full-width approximation for line estimation (1x page pixels)
-    bw_px = bw / 100 * page["width"]
-    cpl = max(4, int((bw_px - 2 * pad) / max(1.0, fs)))
-    n_lines = -(-len(text) // cpl)                 # ceil
-    bh_px = n_lines * fs * 1.4 + 2 * pad
-    bh = min(40.0, bh_px / page["height"] * 100)   # % of page height, capped
-    x = slot["x"] + fw * 0.05 + (seq % 2) * bw * 1.05
+    vertical = bool(opts.get("vertical", True))
+    if vertical:
+        # Vertical layout: columns of chars run top-to-bottom, right-to-left.
+        # Size so the text fits ~3 columns of balanced length.
+        n_cols_target = 3
+        chars_per_col = max(2, -(-len(text) // n_cols_target))
+        bh_px = min(chars_per_col * fs * 1.3 + 2 * pad,
+                    fh * page["height"] * 0.9)
+        col_cap = max(1, int((bh_px - 2 * pad) // (fs * 1.3)))
+        n_cols = max(1, -(-len(text) // col_cap))
+        bw_px = n_cols * fs * 1.3 + 2 * pad
+    else:
+        # Horizontal: rows of chars sized by bubble width.
+        bw_px = min(fw * page["width"] * 0.8, 0.30 * page["width"])
+        cpl = max(4, int((bw_px - 2 * pad) / max(1.0, fs)))
+        n_lines = -(-len(text) // cpl)                 # ceil
+        bh_px = n_lines * fs * 1.4 + 2 * pad
+    bw = min(bw_px / page["width"] * 100, fw * 0.95)
+    bh = min(bh_px / page["height"] * 100, 40.0)
+    x = slot["x"] + fw * 0.05 + (seq % 2) * (bw + 1.0)
     y = slot["y"] + fh * 0.04 + seq * (bh + 2.0)
     x = max(1.0, min(x, 99.0 - bw))
     y = max(1.0, min(y, 99.0 - bh))
@@ -105,7 +119,7 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
     # bubble's bottom edge pointing down — toward the character in the panel.
     return {"id": uuid.uuid4().hex, "type": "bubble",
             "bubbleType": classify_bubble(text), "text": text,
-            "direction": "vertical" if opts.get("vertical", True) else "horizontal",
+            "direction": "vertical" if vertical else "horizontal",
             "fontSize": fs, "backgroundColor": "#ffffff", "borderColor": "#000000",
             "tailPosition": "top",
             "x": round(x, 2), "y": round(y, 2),
