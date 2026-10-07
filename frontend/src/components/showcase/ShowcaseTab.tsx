@@ -110,6 +110,25 @@ export function ShowcaseTab() {
   const handleExportProject = async (projectId: string) => {
     setExportingId(projectId);
     try {
+      // Server-side rendering first: same pipeline the agent export uses,
+      // and it keeps deformed frames / breakout overlays in the output.
+      const resp = await fetch('/api/agent/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, format: 'pdf', scale: 2 }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.pdf?.url) {
+          const a = document.createElement('a');
+          a.href = data.pdf.url;
+          a.download = '';
+          a.click();
+          return;
+        }
+      }
+      console.warn('Server export unavailable, falling back to canvas:', resp.status);
+
       const res = await fetch(`/api/projects/load/${projectId}`);
       const data = await res.json();
       if (!data.project?.composerPages?.length) return;
@@ -120,16 +139,16 @@ export function ShowcaseTab() {
         dataUrl: results[i],
       })).filter((p: any) => p.dataUrl);
 
-      const resp = await fetch('/api/export/composer-images', {
+      const legacyResp = await fetch('/api/export/composer-images', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pages: canvasPages }),
       });
-      const exportData = await resp.json();
+      const exportData = await legacyResp.json();
       if (exportData.downloadUrl) {
         const a = document.createElement('a');
         a.href = exportData.downloadUrl;
-        a.download = `${data.project.name || 'comic'}.pdf`;
+        a.download = '';
         a.click();
       }
     } catch (err) {

@@ -14,6 +14,20 @@ import { renderPageToImage } from './pageRenderer';
 import './composer.css';
 import type { BubbleType } from '../../types';
 
+/** Module-scope download helpers: impure (Date.now) but never render-phase. */
+function timestampedName(base: string, ext: string) {
+  return `${base}_${Date.now()}.${ext}`;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 /**
  * Tiny SVG preview of each bubble type, used in the toolbar picker so users
  * can compare the six styles at a glance instead of reading English names.
@@ -283,13 +297,30 @@ export function ComposerTab() {
   const downloadPageImage = (pageId: string) => {
     const page = pages.find(p => p.id === pageId);
     if (!page) return;
-    renderPageToImage(page).then(dataUrl => {
-      if (!dataUrl) return;
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `${(page.name || 'page').replace(/\s+/g, '_')}_${Date.now()}.png`;
-      a.click();
-    });
+    // Server-side rendering first (parity: corners, overlays, borders);
+    // fall back to the legacy local canvas renderer on any failure.
+    fetch('/api/render/page', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page, scale: 2 }),
+    })
+      .then(async resp => {
+        if (resp.ok) {
+          const blob = await resp.blob();
+          downloadBlob(blob, timestampedName((page.name || 'page').replace(/\s+/g, '_'), 'png'));
+          return;
+        }
+        throw new Error(`render failed: ${resp.status}`);
+      })
+      .catch(() => {
+        renderPageToImage(page).then(dataUrl => {
+          if (!dataUrl) return;
+          const a = document.createElement('a');
+          a.href = dataUrl;
+          a.download = timestampedName((page.name || 'page').replace(/\s+/g, '_'), 'png');
+          a.click();
+        });
+      });
   };
 
   const handleExport = (type: 'png' | 'pdf' | 'zip') => {
@@ -303,6 +334,23 @@ export function ComposerTab() {
   };
 
   const exportAllPages = async (type: 'pdf' | 'zip') => {
+    // Server-side rendering keeps the export identical to what the agent
+    // pipeline produces; the legacy canvas path stays as a fallback.
+    try {
+      const resp = await fetch('/api/render/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pages, format: type, scale: 2 }),
+      });
+      if (resp.ok) {
+        const blob = await resp.blob();
+        downloadBlob(blob, timestampedName('manga', type));
+        return;
+      }
+      console.warn('Server export unavailable, falling back to canvas:', resp.status);
+    } catch (err) {
+      console.warn('Server export failed, falling back to canvas:', err);
+    }
     const results = await Promise.all(pages.map(p => renderPageToImage(p)));
     const canvasPages = pages.map((p, i) => ({ name: p.name || 'page', dataUrl: results[i] }));
     sendToBackend(canvasPages, type);
