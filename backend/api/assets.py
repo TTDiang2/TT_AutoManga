@@ -1,10 +1,11 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
-from fastapi.responses import JSONResponse
 from ..core.swarmui_client import swarm_client
 from ..core.config import settings, LoraConfig
 from ..storage.manager import storage
+from ..storage.asset_store import asset_store
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
 
@@ -39,6 +40,14 @@ def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> None:
     project = storage.load_project(project_id)
     if not project:
         return
+    if image_data.startswith("data:"):
+        # Persist embedded payloads as asset files; keep project.json lean.
+        entry = asset_store.save_dataurl(
+            image_data,
+            project_id=project_id or None,
+            kind="panel",
+        )
+        image_data = asset_store.url_for(entry["asset_id"])
     for panel in project.get("panels", []):
         if panel.get("id") == panel_id:
             panel["image"] = image_data
@@ -46,17 +55,31 @@ def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> None:
     storage.save_project(project)
 
 
+@router.get("/file/{asset_id}")
+async def get_asset_file(asset_id: str):
+    path = asset_store.path_for(asset_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    media = "image/png" if path.suffix == ".png" else f"image/{path.suffix.lstrip('.')}"
+    return FileResponse(
+        str(path),
+        media_type=media,
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
 @router.post("/upload/{project_id}/{panel_id}")
 async def upload_image(project_id: str, panel_id: str, file: UploadFile = File(...)):
     try:
         contents = await file.read()
-        import base64
-        img_data = base64.b64encode(contents).decode()
-        data_url = f"data:image/{file.content_type.split('/')[-1]};base64,{img_data}"
-        _save_panel_image(project_id, panel_id, data_url)
+        ext = (file.content_type or "image/png").split("/")[-1]
+        entry = asset_store.save_bytes(contents, ext=ext, project_id=project_id, kind="upload")
+        url = asset_store.url_for(entry["asset_id"])
+        _save_panel_image(project_id, panel_id, url)
         return JSONResponse({
             "success": True,
-            "image": data_url,
+            "image": url,
+            "asset_id": entry["asset_id"],
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

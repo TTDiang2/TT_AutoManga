@@ -40,19 +40,43 @@ class StorageManager:
         return sorted(projects, key=lambda x: x.get("updatedAt", ""), reverse=True)
 
     @staticmethod
+    def _normalize_image_refs(project: Dict[str, Any]) -> None:
+        """Rewrite embedded data-URL images as asset files, referenced by URL."""
+        from .asset_store import asset_store
+        pid = project.get("id")
+
+        def norm(v, kind):
+            if isinstance(v, str) and v.startswith("data:"):
+                entry = asset_store.save_dataurl(v, project_id=pid, kind=kind)
+                return asset_store.url_for(entry["asset_id"])
+            return v
+
+        for panel in project.get("panels", []):
+            if panel.get("image"):
+                panel["image"] = norm(panel["image"], "panel")
+        for page in project.get("composerPages", []):
+            for el in page.get("elements", []):
+                if el.get("src"):
+                    el["src"] = norm(el["src"], "composer")
+                if el.get("originalSrc"):
+                    el["originalSrc"] = norm(el["originalSrc"], "composer")
+
+    @staticmethod
     def save_project(project_data: Dict[str, Any]) -> Dict[str, Any]:
         project_id = project_data.get("id") or str(uuid.uuid4())
         project_data["id"] = project_id
-        
+
         proj_dir = PROJECTS_DIR / project_id
         proj_dir.mkdir(exist_ok=True)
-        
+
         from datetime import datetime, timezone
         project_data["updatedAt"] = datetime.now(timezone.utc).isoformat()
-        
+
+        StorageManager._normalize_image_refs(project_data)
+
         with open(proj_dir / "project.json", "w", encoding="utf-8") as f:
             json.dump(project_data, f, indent=2)
-        
+
         return project_data
 
     @staticmethod

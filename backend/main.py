@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 import uvicorn
-import shutil
 import json
 
 from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates
@@ -12,11 +11,12 @@ from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 
 def _cleanup_orphan_assets() -> None:
-    """Remove orphan asset files not referenced by any project."""
+    """Remove asset files not referenced by any project (asset index aware)."""
     if not ASSETS_DIR.exists():
         return
 
-    referenced_paths: set[str] = set()
+    referenced: set[str] = set()        # asset ids referenced via /api/assets/file/
+    referenced_paths: set[str] = set()  # legacy absolute file paths
 
     for proj_dir in PROJECTS_DIR.iterdir():
         if not proj_dir.is_dir():
@@ -29,41 +29,43 @@ def _cleanup_orphan_assets() -> None:
                 proj = json.load(f)
             for panel in proj.get("panels", []):
                 img = panel.get("image")
-                if img and not img.startswith("data:") and Path(img).exists():
-                    referenced_paths.add(str(Path(img).resolve()))
+                if img and not img.startswith("data:"):
+                    if img.startswith("/api/assets/file/"):
+                        referenced.add(img.rsplit("/", 1)[-1])
+                    elif not img.startswith("/api/") and Path(img).exists():
+                        referenced_paths.add(str(Path(img).resolve()))
+            for page in proj.get("composerPages", []):
+                for el in page.get("elements", []):
+                    for key in ("src", "originalSrc"):
+                        v = el.get(key)
+                        if not v or v.startswith("data:"):
+                            continue
+                        if v.startswith("/api/assets/file/"):
+                            referenced.add(v.rsplit("/", 1)[-1])
+                        elif not v.startswith("/api/") and Path(v).exists():
+                            referenced_paths.add(str(Path(v).resolve()))
         except Exception:
             pass
 
-    total_deleted = 0
-    total_size = 0
+    from .storage.asset_store import asset_store
+    removed = 0
+    for asset_id in list(asset_store.ids()):
+        if asset_id not in referenced:
+            if asset_store.remove(asset_id):
+                removed += 1
 
+    # Legacy per-project dirs (pre-refactor uploads): same rule as before.
     for item in ASSETS_DIR.iterdir():
         if not item.is_dir():
             continue
-        if item.name == "default":
-            for pf in item.rglob("*"):
-                if pf.is_file():
-                    total_size += pf.stat().st_size
-                    pf.unlink()
-                    total_deleted += 1
-            for pf in list(item.rglob("*")):
-                pass
-            shutil.rmtree(item)
-        else:
-            for pf in item.rglob("*"):
-                if pf.is_file() and str(pf.resolve()) not in referenced_paths:
-                    total_size += pf.stat().st_size
-                    pf.unlink()
-                    total_deleted += 1
-            for d in sorted(item.rglob("*"), key=lambda x: str(x)):
-                if not any(True for _ in d.iterdir()) and d != item and d != ASSETS_DIR:
-                    try:
-                        d.rmdir()
-                    except Exception:
-                        pass
+        for pf in item.rglob("*"):
+            if pf.is_file() and str(pf.resolve()) not in referenced_paths \
+                    and pf.name != "index.json":
+                pf.unlink()
+                removed += 1
 
-    if total_deleted > 0:
-        print(f"[Cleanup] Removed {total_deleted} orphan files ({total_size / 1024 / 1024:.1f} MB)")
+    if removed > 0:
+        print(f"[Cleanup] Removed {removed} orphan asset file(s)")
 
 
 _cleanup_orphan_assets()

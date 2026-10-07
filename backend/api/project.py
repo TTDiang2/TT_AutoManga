@@ -62,6 +62,15 @@ async def list_project_covers():
         return {"covers": covers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/migrate-assets")
+async def migrate_project_assets(project_id: str):
+    project = storage.load_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    saved = storage.save_project(project)   # save_project normalizes embedded images
+    return {"success": True, "project": saved}
 async def delete_project(project_id: str):
     try:
         success = storage.delete_project(project_id)
