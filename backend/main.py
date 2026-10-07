@@ -139,8 +139,8 @@ if __name__ == "__main__":
     logging.getLogger().addHandler(app_handler)
     logging.getLogger().setLevel(logging.INFO)
     for name in ("backend.api.prompt", "backend.api.storyboard", "backend.api.assets",
-                 "backend.api.export", "backend.api.characters", "backend.core.openai_client",
-                 "backend.core.swarmui_client"):
+                 "backend.api.export", "backend.api.characters", "backend.api.agent",
+                 "backend.core.openai_client", "backend.core.swarmui_client"):
         logging.getLogger(name).setLevel(logging.INFO)
         logging.getLogger(name).propagate = True
 

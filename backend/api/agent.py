@@ -257,16 +257,18 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not result.get("success"):
             raise RuntimeError(f"SwarmUI: {result.get('error', 'unknown error')}")
         img_bytes = base64.b64decode(result["image"].split(",", 1)[1])
+        img = Image.open(io.BytesIO(img_bytes))
+        has_alpha = (img.mode == "RGBA"
+                     and img.getchannel("A").getextrema()[0] < 255)
         entry = asset_store.save_dataurl(
             result["image"],
             project_id=payload.get("project_id") or None,
             kind=payload.get("kind") or "panel",
             meta={"prompt": prompt, "seed": (seed + v) if seed is not None else None,
-                  "remove_background": bool(payload.get("remove_background"))},
+                  "remove_background": bool(payload.get("remove_background")),
+                  "width": img.size[0], "height": img.size[1],
+                  "has_alpha": has_alpha},
         )
-        img = Image.open(io.BytesIO(img_bytes))
-        has_alpha = (img.mode == "RGBA"
-                     and img.getchannel("A").getextrema()[0] < 255)
         assets_out.append({
             "asset_id": entry["asset_id"],
             "url": asset_store.url_for(entry["asset_id"]),
@@ -277,6 +279,13 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
     applied = False
     if payload.get("apply_to_panel", True) and payload.get("panel_id") \
             and payload.get("project_id"):
+        proj = storage.load_project(payload["project_id"])
+        panel = next((p for p in (proj or {}).get("panels", [])
+                      if p.get("id") == payload["panel_id"]), None) \
+            if proj else None
+        if panel is None:
+            raise ValueError(f"panel {payload['panel_id']} not found in "
+                             f"project {payload['project_id']}")
         from .assets import _save_panel_image
         _save_panel_image(payload["project_id"], payload["panel_id"],
                           assets_out[0]["url"])
@@ -303,6 +312,10 @@ class GenerateBatchRequest(BaseModel):
     jobs: List[GenerateRequest]
 
 
+# Strong references to running batch jobs (asyncio GC protection)
+_background_tasks = set()
+
+
 @router.post("/generate-batch")
 async def agent_generate_batch(req: GenerateBatchRequest):
     if not req.jobs:
@@ -314,7 +327,9 @@ async def agent_generate_batch(req: GenerateBatchRequest):
             p["project_id"] = req.project_id
         payloads.append(p)
     job = create_job(payloads, req.concurrency)
-    asyncio.create_task(run_job(job.id, _do_generate))
+    task = asyncio.create_task(run_job(job.id, _do_generate))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     from fastapi.responses import JSONResponse
     return JSONResponse(status_code=202,
                         content={"job_id": job.id, "total": job.total})
@@ -431,9 +446,10 @@ async def patch_element(project_id: str, page_id: str, element_id: str,
     updates = dict(updates)
     if "id" in updates and updates["id"] != element_id:
         raise HTTPException(status_code=400, detail="cannot change element id")
-    # type is immutable (changing it in place would leave inconsistent fields)
+    if "type" in updates:
+        raise HTTPException(status_code=400,
+                            detail="cannot change element type; delete and re-add")
     updates.pop("id", None)
-    updates.pop("type", None)
     _validate_element_payload(updates, partial=True)
     for el in page["elements"]:
         if el.get("id") == element_id:
@@ -483,7 +499,9 @@ async def agent_export(req: AgentExportRequest):
     if not pages:
         raise HTTPException(status_code=400,
                             detail="project has no composer pages; build pages first")
-    fmt = req.format if req.format in ("pdf", "zip", "both") else "both"
+    if req.format not in ("pdf", "zip", "both"):
+        raise HTTPException(status_code=400, detail="format must be pdf|zip|both")
+    fmt = req.format
     base_name = f"manga_{req.project_id[:8]}_{time.strftime('%Y%m%d_%H%M%S')}"
     result = export_pages(pages, fmt, min(4.0, max(0.5, req.scale)),
                           _resolver, _exports_dir(), base_name)
