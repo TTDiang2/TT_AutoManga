@@ -38,8 +38,14 @@ def client(tmp_path, monkeypatch):
     store = astore_mod.AssetStore(tmp_path / "assets", tmp_path / "assets" / "index.json")
     monkeypatch.setattr(astore_mod, "asset_store", store)
 
-    # modules holding their own reference to the singleton
+    # exports must not leak into the real data/exports either
     import backend.api.agent as agent_mod
+    import backend.api.export as export_mod
+    tmp_exports = tmp_path / "exports"
+    monkeypatch.setattr(export_mod, "EXPORTS_DIR", tmp_exports)
+    # agent.py caches the dir on first use — pre-seed the cache with the tmp one
+    monkeypatch.setattr(agent_mod, "EXPORTS_DIR", tmp_exports)
+    # modules holding their own reference to the singleton
     import backend.api.assets as assets_mod
     import backend.api.render as render_mod
     from backend.render.resolve import make_resolver

@@ -96,14 +96,16 @@ curl -s -X PUT $BASE/api/agent/projects/$PID/panels -H 'Content-Type: applicatio
     {"scene":"She stops, breathing hard","characters":["Yuki"],"dialogue":"I cannot go back..."}]}'
 
 # 3a. Batch-generate panel art (SwarmUI must be running; model/LoRA come from
-#     global settings — configure them in the UI Settings tab or data/settings.json)
+#     global settings — configure them in the UI Settings tab or data/settings.json).
+#     Returns HTTP 202 {"job_id": "...", "total": N}.
 curl -s -X POST $BASE/api/agent/generate-batch -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PID\",\"concurrency\":1,\"jobs\":[
      {\"panel_id\":\"panel_1\",\"prompt\":\"1girl, rain, street, running, cinematic lighting\"},
      {\"panel_id\":\"panel_2\",\"prompt\":\"1girl, close-up, determined eyes\"}]}"
 
 # 3b. Poll the job until status=="done" (items carry per-image results/errors)
-curl -s $BASE/api/agent/jobs/<JOB_ID>
+JOB_ID=<take "job_id" from the 202 response above>
+curl -s $BASE/api/agent/jobs/$JOB_ID
 
 # 3c. Or generate a transparent-background overlay (breakout character):
 curl -s -X POST $BASE/api/agent/generate -H 'Content-Type: application/json' \
@@ -135,7 +137,9 @@ curl -s "$BASE/api/agent/projects/$PID/pages/<PAGE_ID>/preview.png?scale=2" -o p
 # 7. Export the whole project
 curl -s -X POST $BASE/api/agent/export -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PID\",\"format\":\"both\",\"scale\":2}"
-# → {"pdf":{"path":...,"url":"/api/export/download/..."},"zip":{...}}
+# → {"pages_dir": "...", "pdf": {"path": "...", "url": "/api/export/download/..."},
+#    "zip": {"path": "...", "url": "/api/export/download/..."}}
+# (format "pdf" or "zip" returns only that key; download URLs are same-origin GETs)
 ```
 
 **Preview-adjust loop**: render `preview.png` at every meaningful step and
