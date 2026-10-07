@@ -8,7 +8,7 @@ if str(BACKEND_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT.parent))
 
 from backend.composer_builtins import (  # noqa: E402
-    TEMPLATES, get_template, gen_rows, list_template_ids,
+    DYNAMIC_TEMPLATES, TEMPLATES, get_template, gen_rows, list_template_ids,
 )
 
 FRONTEND_STORE = (BACKEND_ROOT.parent / "frontend" / "src" / "store"
@@ -24,7 +24,10 @@ FRONTEND_IDS = [
 
 
 def test_id_set_matches_frontend():
-    assert sorted(list_template_ids()) == sorted(FRONTEND_IDS)
+    # frontend parity applies to the mirrored set only; DYNAMIC_TEMPLATES are
+    # backend-only presets for the agent pipeline
+    assert sorted(t["id"] for t in TEMPLATES) == sorted(FRONTEND_IDS)
+    assert "dyn-2-slant" in list_template_ids()
 
 
 def test_frontend_source_still_has_these_ids():

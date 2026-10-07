@@ -13,20 +13,25 @@ class SwarmUIClient:
         self.address = address if address.startswith("http") else f"http://{address}"
 
     async def get_session(self) -> bool:
-        try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                response = await client.post(
-                    f"{self.address}/API/GetNewSession",
-                    json={}
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    self.session_id = data.get("session_id", "")
-                    self.session_expired = False
-                    return True
-                return False
-        except Exception:
-            return False
+        """Acquire a session with brief retries (SwarmUI restarts are transient)."""
+        import asyncio
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    response = await client.post(
+                        f"{self.address}/API/GetNewSession",
+                        json={}
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        self.session_id = data.get("session_id", "")
+                        self.session_expired = False
+                        return True
+            except Exception:
+                pass
+            if attempt < 2:
+                await asyncio.sleep(1.5)
+        return False
 
     async def ensure_session(self) -> bool:
         if not self.session_id or self.session_expired:
@@ -83,9 +88,34 @@ class SwarmUIClient:
         except Exception:
             return []
 
+    async def list_models(self, subtype: str = "Stable-Diffusion") -> List[Dict[str, Any]]:
+        """List installed models with architecture metadata (SwarmUI ListModels)."""
+        if not await self.ensure_session():
+            return []
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.post(
+                    f"{self.address}/API/ListModels",
+                    json={"session_id": self.session_id, "path": "", "depth": 3,
+                          "subtype": subtype},
+                )
+                if response.status_code != 200:
+                    return []
+                files = response.json().get("files", [])
+                return [{
+                    "name": f.get("name", ""),
+                    "title": f.get("title", ""),
+                    "architecture": f.get("architecture", ""),
+                    "class": f.get("class", ""),
+                    "standard_width": f.get("standard_width", 0),
+                    "standard_height": f.get("standard_height", 0),
+                } for f in files]
+        except Exception:
+            return []
+
     async def generate_image(
-        self, 
-        prompt: str, 
+        self,
+        prompt: str,
         negative_prompt: str = "",
         model: str = None,
         steps: int = None,
@@ -96,6 +126,8 @@ class SwarmUIClient:
         loras: List[LoraConfig] = None,
         seed: int = None,
         remove_background: bool = False,
+        init_image: str = None,          # data URL for img2img
+        init_creativity: float = None,   # denoise strength 0-1
     ) -> Dict[str, Any]:
         swarmsettings = settings.swarmui
         
@@ -118,6 +150,10 @@ class SwarmUIClient:
             "donotsave": True,
             "removebackground": remove_background,
         }
+        if init_image:
+            payload["initimage"] = init_image
+            if init_creativity is not None:
+                payload["initimagecreativity"] = float(init_creativity)
 
         import logging
         logger = logging.getLogger(__name__)

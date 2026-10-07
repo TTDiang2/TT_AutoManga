@@ -95,33 +95,52 @@ curl -s -X PUT $BASE/api/agent/projects/$PID/panels -H 'Content-Type: applicatio
     {"scene":"Rain-soaked street, girl running","characters":["Yuki"],"dialogue":"Get away!"},
     {"scene":"She stops, breathing hard","characters":["Yuki"],"dialogue":"I cannot go back..."}]}'
 
-# 3a. Batch-generate panel art (SwarmUI must be running; model/LoRA come from
+# 3a. Batch-generate panel art (SwarmUI must be running; steps/sampler come from
 #     global settings — configure them in the UI Settings tab or data/settings.json).
 #     Returns HTTP 202 {"job_id": "...", "total": N}.
+#     Per job you may override: model, loras, prompt_format ("danbooru"|"prose"),
+#     init_image (+init_creativity) for img2img, seed, width/height, and
+#     inject_characters (auto style/character prompt injection, default on).
 curl -s -X POST $BASE/api/agent/generate-batch -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PID\",\"concurrency\":1,\"jobs\":[
      {\"panel_id\":\"panel_1\",\"prompt\":\"1girl, rain, street, running, cinematic lighting\"},
-     {\"panel_id\":\"panel_2\",\"prompt\":\"1girl, close-up, determined eyes\"}]}"
+     {\"panel_id\":\"panel_2\",\"prompt\":\"1girl, close-up, determined eyes\",\"model\":\"qwen_image_2.1_int8_convrot\",\"prompt_format\":\"prose\"}]}"
 
 # 3b. Poll the job until status=="done" (items carry per-image results/errors)
 JOB_ID=<take "job_id" from the 202 response above>
 curl -s $BASE/api/agent/jobs/$JOB_ID
 
 # 3c. Or generate a transparent-background overlay (breakout character):
+#     If SwarmUI's RemoveBackground is broken, the backend falls back to local
+#     rembg / white-threshold matting and reports alpha_method per asset.
 curl -s -X POST $BASE/api/agent/generate -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PID\",\"panel_id\":\"panel_1\",\"kind\":\"overlay\",
        \"apply_to_panel\":false,\"remove_background\":true,
        \"prompt\":\"1girl, upper body, surprised expression, simple pose\"}"
 
-# 4. Assemble pages: template + slot filling + auto dialogue bubbles
+# 3d. Discover installed models (name + architecture metadata):
+curl -s $BASE/api/agent/models
+
+# 4. (Optional, recommended) Set a project style profile + character prompt
+#    blocks. `style` is appended to EVERY panel prompt; a character block is
+#    injected whenever a panel lists that character (project entries override
+#    the global Characters library). Inspect with GET .../characters.
+curl -s -X PUT $BASE/api/agent/projects/$PID/settings -H 'Content-Type: application/json' \
+  -d '{"style":"chinese ink painting style, muted colors",
+       "characters":[{"name":"Yuki","prompt_block":"1girl, white hair, blue eyes, blue kimono"}]}'
+
+# 5. Assemble pages: template + slot filling + auto dialogue bubbles
 #    (builtin ids: blank, manga-2v/2h/3/4/6/8, grid-12/21/23/32/232/323/223,
 #     hero-br-4, hero-br-wide, hero-splash, photo-full, photo-grid-4, photo-grid-9;
+#     dynamic presets: dyn-2-slant, dyn-3-diag, dyn-hero-3, dyn-5-mix;
 #     or {"kind":"rows","rows":[2,3]}, {"kind":"user","id":...}, {"kind":"custom",...})
+#    "dynamic": true slants every non-hero frame (quadrilateral corners) for a
+#    more cinematic page.
 curl -s -X POST $BASE/api/agent/projects/$PID/pages -H 'Content-Type: application/json' \
   -d '{"template":{"kind":"builtin","id":"manga-2v"},"panel_ids":["panel_1","panel_2"],
-       "reading":"rtl","name":"ch1-p1"}'
+       "reading":"rtl","name":"ch1-p1","dynamic":true}'
 
-# 5. Fine-tune anything: add a floating overlay (transparent PNG above frames)
+# 6. Fine-tune anything: add a floating overlay (transparent PNG above frames)
 curl -s -X POST $BASE/api/agent/projects/$PID/pages/<PAGE_ID>/elements \
   -H 'Content-Type: application/json' \
   -d '{"type":"page-image","src":"<overlay asset url>","x":30,"y":10,"width":40,
@@ -131,10 +150,14 @@ curl -s -X POST $BASE/api/agent/projects/$PID/pages/<PAGE_ID>/elements \
 curl -s -X PATCH $BASE/api/agent/projects/$PID/pages/<PAGE_ID>/elements/<EL_ID> \
   -H 'Content-Type: application/json' -d '{"x":35,"rotation":5}'
 
-# 6. LOOK at your page, then iterate (preview-render → adjust → re-render)
+# 7. LOOK at your page, then iterate (preview-render → adjust → re-render)
 curl -s "$BASE/api/agent/projects/$PID/pages/<PAGE_ID>/preview.png?scale=2" -o page1.png
 
-# 7. Export the whole project
+# 8. Register locally-processed images as assets (e.g. your own matting/crop
+#    output) without binding them to a panel:
+curl -s -X POST $BASE/api/assets/file -F file=@dragon_alpha.png -F kind=overlay
+
+# 9. Export the whole project
 curl -s -X POST $BASE/api/agent/export -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PID\",\"format\":\"both\",\"scale\":2}"
 # → {"pages_dir": "...", "pdf": {"path": "...", "url": "/api/export/download/..."},
@@ -146,22 +169,61 @@ curl -s -X POST $BASE/api/agent/export -H 'Content-Type: application/json' \
 actually inspect it (you can read images). Overlapping bubbles, clipped
 faces, bad crops — fix them with element PATCH calls, then re-render.
 
-## 5. Image generation notes
+## 5. Model & prompt format guide (read before generating)
+
+Pick the prompt format per model — mismatched formats are the #1 quality killer
+(western furniture in Chinese stories, literal-minded tag errors, etc.):
+
+- **Danbooru-tag models** (SDXL family: `*Illustrious*`, `NoobAI`, …):
+  comma-separated tags, quality tags at the end
+  (`masterpiece, best quality`). Chinese content needs explicit anchor tags:
+  `chinese dragon` (NOT plain `dragon` — you will get bat wings),
+  `dragon throne`, `chinese architecture`, `tang dynasty`, `chinese clothes`,
+  `paper lantern`, `ink (medium)`. Tags are literal: `deer antlers` may summon
+  an entire deer — phrase carefully. Keep a **fixed descriptor block per
+  character** repeated in every prompt for consistency.
+- **Natural-language models** (`qwen_image*`): write full Chinese/English
+  prose. They understand culture natively (棋盘→围棋, 蟠龙宝座, 汉字可读) and
+  render Chinese text. Rules: describe a **single illustration** — never write
+  分镜/分格/comic page, or the model draws mini-panels inside one image;
+  keep character descriptions as a consistent prose block per character.
+
+`GET /api/agent/models` lists installed models with `architecture` metadata.
+Per-request overrides (`model`, `loras`, `prompt_format`, `init_image`,
+`init_creativity`) beat global settings; batch jobs can mix models.
+`prompt_format` also controls how auto-injection joins text (`, ` for tags,
+`。` for prose) and is recorded in the asset metadata.
+
+**Automatic injection** (on by default, `inject_characters: false` to disable):
+project `settings.style` is appended to every panel prompt; for each character
+named on the panel, its `prompt_block` (project → global Characters library)
+is appended. Set them via `PUT /api/agent/projects/{id}/settings`.
+
+**Consistency & continuity tools**: fixed seeds make style-reproducible runs;
+`init_image` (+`init_creativity` 0-1) runs img2img against an asset or data
+URL — feed the previous panel (low creativity ~0.4-0.6) or a character sheet
+in for continuity.
+
+## 6. Image generation notes
 
 - SwarmUI must be reachable at the configured address (`GET
-  /api/assets/swarmui/test` to probe). Model/LoRA/steps/sampler come from
-  global settings (`data/settings.json` → `swarmui`); per-request you may
-  override `width/height/steps/cfg_scale/seed` only.
-- `remove_background: true` asks SwarmUI to cut the background. The response
-  reports `has_alpha` per image — check it; if the SwarmUI RemoveBackground
-  component is missing the PNG comes back opaque.
+  /api/assets/swarmui/test` to probe). Steps/sampler/LoRA come from global
+  settings (`data/settings.json` → `swarmui`); model/loras may be overridden
+  per request.
+- `remove_background: true` asks SwarmUI to cut the background. If SwarmUI's
+  remover is missing or broken, the backend falls back to local `rembg`
+  (if installed) or white-threshold matting; each asset reports
+  `alpha_method` (`swarmui|rembg|threshold`) and `has_alpha` — check them.
+  For the threshold path, prompt for a plain white background.
 - `variants: 1-4` generates N seeds (`seed, seed+1, ...`) per call; `seed: -1`
   or omitted = random.
 - Generation is **idempotent and safe to re-run**; failed single calls return
   HTTP 502 with the SwarmUI error; batch items record their own error strings.
 - The in-memory job table is lost on server restart — just re-submit.
+- `POST /api/assets/file` registers arbitrary image bytes (e.g. your own
+  post-processing output) as a reusable asset.
 
-## 6. Errors & limits
+## 7. Errors & limits
 
 - FastAPI standard errors: `{"detail": "..."}`. 404 unknown project/page/
   element/job/asset; 400 validation (bad template, coordinates outside 0-100,
@@ -175,14 +237,14 @@ faces, bad crops — fix them with element PATCH calls, then re-render.
 - The project JSON is plain and human-editable; the UI reads the same file.
   If you break geometry, worst case: fix by hand or rebuild the page.
 
-## 7. CLI (same endpoints, less typing)
+## 8. CLI (same endpoints, less typing)
 
 `python -m backend.agent_cli --help` — subcommands:
 `health, projects, new, panels, set-panels, gen, batch, job, pages, element,
 preview, export`. Each maps 1:1 to the API path documented above
 (`preview` writes a PNG file; `gen`/`batch` talk to SwarmUI).
 
-## 8. Optional: storyboard via backend LLM
+## 9. Optional: storyboard via backend LLM
 
 If you don't want to write panels yourself, `POST /api/agent/storyboard`
 `{project_id, text, detail_level 1-5, replace}` runs the configured

@@ -72,6 +72,28 @@ async def get_asset_file(asset_id: str):
     )
 
 
+@router.post("/file")
+async def register_asset(
+    file: UploadFile = File(...),
+    kind: str = "upload",
+    project_id: Optional[str] = None,
+):
+    """Register arbitrary image bytes as a reusable asset (e.g. agent-side
+    post-processing output) without binding it to a panel."""
+    try:
+        contents = await file.read()
+        ext = (file.content_type or "image/png").split("/")[-1]
+        entry = asset_store.save_bytes(contents, ext=ext,
+                                       project_id=project_id or None, kind=kind)
+        return JSONResponse({
+            "success": True,
+            "asset_id": entry["asset_id"],
+            "url": asset_store.url_for(entry["asset_id"]),
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload/{project_id}/{panel_id}")
 async def upload_image(project_id: str, panel_id: str, file: UploadFile = File(...)):
     try:

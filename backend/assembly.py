@@ -35,8 +35,8 @@ def classify_bubble(text: str) -> str:
 
 
 def build_page(spec: dict, project: dict) -> Tuple[dict, List[str]]:
-    """spec: {template, name, panel_ids, reading, bubbles}. Returns (page,
-    warnings); does not persist."""
+    """spec: {template, name, panel_ids, reading, bubbles, dynamic}.
+    Returns (page, warnings); does not persist."""
     warnings: List[str] = []
     elements, width, height = _resolve_template(spec.get("template") or {}, warnings)
     page = {"id": uuid.uuid4().hex, "name": spec.get("name") or "page",
@@ -56,6 +56,11 @@ def build_page(spec: dict, project: dict) -> Tuple[dict, List[str]]:
     slots = [e for e in page["elements"] if e.get("type") == "image-slot"]
     slots.sort(key=lambda e: (round(e["y"] / ROW_BUCKET),
                               e["x"] if reading == "ltr" else -e["x"]))
+
+    if spec.get("dynamic"):
+        _apply_dynamic_corners([e for e in page["elements"]
+                                if e.get("type") == "image-slot"])
+
     if len(panel_ids) > len(slots):
         warnings.append(f"{len(panel_ids) - len(slots)} panel(s) not placed: "
                         f"template has only {len(slots)} slots")
@@ -85,6 +90,29 @@ def build_page(spec: dict, project: dict) -> Tuple[dict, List[str]]:
                     z += 1
                     page["elements"].append(el)
     return page, warnings
+
+
+def _apply_dynamic_corners(slots: List[dict]) -> None:
+    """Give the page a cinematic feel: slanted quadrilateral frames on all
+    but the largest slot, cycling deterministic corner patterns (no RNG so
+    rebuilds are reproducible). The hero (largest area, ties broken by page
+    element order) stays rectangular."""
+    if not slots:
+        return
+    patterns = [
+        {"tl": (0, 4), "tr": (100, 0), "br": (100, 96), "bl": (0, 100)},
+        {"tl": (0, 0), "tr": (97, 5), "br": (100, 100), "bl": (3, 95)},
+        {"tl": (5, 0), "tr": (100, 6), "br": (95, 100), "bl": (0, 94)},
+        {"tl": (0, 6), "tr": (100, 2), "br": (98, 100), "bl": (0, 100)},
+    ]
+    hero = max(slots, key=lambda e: e["width"] * e["height"])
+    n = 0
+    for slot in slots:
+        if slot is hero or slot.get("corners"):
+            continue
+        p = patterns[n % len(patterns)]
+        n += 1
+        slot["corners"] = {k: {"x": v[0], "y": v[1]} for k, v in p.items()}
 
 
 def _make_bubble(text: str, slot: dict, page: dict, seq: int,

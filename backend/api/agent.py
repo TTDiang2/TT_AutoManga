@@ -11,6 +11,7 @@ import io
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Response
@@ -223,6 +224,35 @@ class GenerateRequest(BaseModel):
     variants: int = 1                  # 1-4
     apply_to_panel: bool = True
     kind: str = "panel"                # panel | overlay | character
+    # --- per-request overrides (fall back to global settings) ---
+    model: Optional[str] = None
+    loras: Optional[List[Dict[str, Any]]] = None
+    prompt_format: Optional[str] = None   # danbooru | prose | None (meta only)
+    # --- img2img ---
+    init_image: Optional[str] = None      # asset URL / data URL / local path
+    init_creativity: Optional[float] = None
+    # --- automatic prompt injection (project style + character blocks) ---
+    inject_characters: bool = True
+
+
+def _ref_to_dataurl(ref: str) -> Optional[str]:
+    """Load an image ref (asset URL / path / data URL) as a data URL."""
+    try:
+        if ref.startswith("data:"):
+            return ref
+        if ref.startswith("/api/assets/file/"):
+            path = asset_store.path_for(ref.rsplit("/", 1)[-1])
+            if not path:
+                return None
+            ref = str(path)
+        p = Path(ref)
+        if not p.is_file():
+            return None
+        import base64 as b64mod
+        mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
+        return f"data:{mime};base64," + b64mod.b64encode(p.read_bytes()).decode()
+    except Exception:
+        return None
 
 
 async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -233,18 +263,53 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
     variants = max(1, min(4, int(payload.get("variants") or 1)))
     seed = payload.get("seed")
     swarm_settings = settings.swarmui
-    loras = None
-    if swarm_settings.currentLoras:
+
+    # per-request overrides fall back to global settings
+    model = payload.get("model") or swarm_settings.currentModel or None
+    lora_payload = payload.get("loras")
+    if lora_payload:
+        from ..core.config import LoraConfig
+        loras = [LoraConfig(name=l.get("name", ""), weight=l.get("weight", 1.0))
+                 for l in lora_payload if l.get("name")]
+    elif swarm_settings.currentLoras:
         from ..core.config import LoraConfig
         loras = [LoraConfig(name=l.get("name", ""), weight=l.get("weight", 1.0))
                  for l in swarm_settings.currentLoras if l.get("name")]
+    else:
+        loras = None
+
+    init_dataurl = None
+    if payload.get("init_image"):
+        init_dataurl = _ref_to_dataurl(payload["init_image"])
+        if init_dataurl is None:
+            raise ValueError(f"init_image not found: {payload['init_image']}")
+
+    # automatic injection: project style suffix + character blocks
+    injected = []
+    project = None
+    if payload.get("project_id"):
+        project = storage.load_project(payload["project_id"])
+    if payload.get("inject_characters", True) and project:
+        from ..prompting import blocks_for_panel, style_suffix
+        style = style_suffix(project)
+        if style:
+            prompt = f"{prompt}, {style}" if prompt_format_is_tags(payload) else f"{prompt}。{style}"
+            injected.append({"kind": "style", "text": style})
+        panel = None
+        if payload.get("panel_id"):
+            panel = next((p for p in (project.get("panels") or [])
+                          if p.get("id") == payload["panel_id"]), None)
+        if panel:
+            for block in blocks_for_panel(project, panel):
+                prompt = f"{prompt}, {block}" if prompt_format_is_tags(payload) else f"{prompt}。{block}"
+                injected.append({"kind": "character", "text": block})
 
     assets_out = []
     for v in range(variants):
         result = await swarm_client.generate_image(
             prompt=prompt,
             negative_prompt=payload.get("negative_prompt") or "",
-            model=swarm_settings.currentModel or None,
+            model=model,
             steps=payload.get("steps") or swarm_settings.currentSteps,
             cfg_scale=payload.get("cfg_scale") or swarm_settings.currentCfgScale,
             width=payload.get("width") or swarm_settings.currentWidth,
@@ -253,36 +318,49 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             loras=loras,
             seed=(seed + v) if seed is not None else None,
             remove_background=bool(payload.get("remove_background")),
+            init_image=init_dataurl,
+            init_creativity=payload.get("init_creativity"),
         )
         if not result.get("success"):
             raise RuntimeError(f"SwarmUI: {result.get('error', 'unknown error')}")
         img_bytes = base64.b64decode(result["image"].split(",", 1)[1])
+
+        # transparent-background fallback when SwarmUI's remover is broken
+        alpha_method = "swarmui"
+        if payload.get("remove_background"):
+            from ..render.alpha_fallback import ensure_alpha
+            img_bytes, alpha_method = ensure_alpha(img_bytes)
+
         img = Image.open(io.BytesIO(img_bytes))
         has_alpha = (img.mode == "RGBA"
                      and img.getchannel("A").getextrema()[0] < 255)
+        dataurl = "data:image/png;base64," + base64.b64encode(img_bytes).decode()
         entry = asset_store.save_dataurl(
-            result["image"],
+            dataurl,
             project_id=payload.get("project_id") or None,
             kind=payload.get("kind") or "panel",
             meta={"prompt": prompt, "seed": (seed + v) if seed is not None else None,
                   "remove_background": bool(payload.get("remove_background")),
+                  "alpha_method": alpha_method if payload.get("remove_background") else None,
                   "width": img.size[0], "height": img.size[1],
-                  "has_alpha": has_alpha},
+                  "has_alpha": has_alpha, "model": model,
+                  "prompt_format": payload.get("prompt_format"),
+                  "injected": injected},
         )
         assets_out.append({
             "asset_id": entry["asset_id"],
             "url": asset_store.url_for(entry["asset_id"]),
             "width": img.size[0], "height": img.size[1],
             "has_alpha": has_alpha,
+            "alpha_method": alpha_method if payload.get("remove_background") else None,
         })
 
     applied = False
     if payload.get("apply_to_panel", True) and payload.get("panel_id") \
             and payload.get("project_id"):
-        proj = storage.load_project(payload["project_id"])
-        panel = next((p for p in (proj or {}).get("panels", [])
+        panel = next((p for p in (project or {}).get("panels", [])
                       if p.get("id") == payload["panel_id"]), None) \
-            if proj else None
+            if project else None
         if panel is None:
             raise ValueError(f"panel {payload['panel_id']} not found in "
                              f"project {payload['project_id']}")
@@ -290,7 +368,14 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         _save_panel_image(payload["project_id"], payload["panel_id"],
                           assets_out[0]["url"])
         applied = True
-    return {"assets": assets_out, "applied": applied}
+    return {"assets": assets_out, "applied": applied,
+            "model": model, "injected": injected}
+
+
+def prompt_format_is_tags(payload: Dict[str, Any]) -> bool:
+    """Injection separator: danbooru-style prompts join with ', ', prose joins
+    with '。'. Unspecified formats default to the tag style."""
+    return (payload.get("prompt_format") or "danbooru") != "prose"
 
 
 @router.post("/generate")
@@ -343,6 +428,48 @@ async def get_job(job_id: str):
     return snap
 
 
+@router.get("/models")
+async def list_models():
+    """Installed SwarmUI models with architecture metadata, for per-request
+    model selection. See the prompt-format guide in AGENTS.md."""
+    models = await swarm_client.list_models()
+    if not models:
+        return {"models": [], "error": "SwarmUI unreachable or no models found"}
+    return {"models": models}
+
+
+class ProjectSettingsUpdate(BaseModel):
+    style: Optional[str] = None
+    characters: Optional[List[Dict[str, Any]]] = None   # [{name, prompt_block}]
+
+
+@router.put("/projects/{project_id}/settings")
+async def put_project_settings(project_id: str, req: ProjectSettingsUpdate):
+    """Project-level style profile (appended to every panel prompt) and
+    character prompt blocks (injected for panels listing that character)."""
+    project = _load_or_404(project_id)
+    cfg = project.setdefault("settings", {})
+    if req.style is not None:
+        cfg["style"] = req.style.strip()
+    if req.characters is not None:
+        for c in req.characters:
+            if not (c.get("name") or "").strip() or not (c.get("prompt_block") or "").strip():
+                raise HTTPException(status_code=400,
+                                    detail="each character needs name and prompt_block")
+        cfg["characters"] = req.characters
+    saved = storage.save_project(project)
+    return {"success": True, "settings": saved.get("settings", {})}
+
+
+@router.get("/projects/{project_id}/characters")
+async def get_project_characters(project_id: str):
+    """Effective character prompt blocks (project entries override the global
+    character library) — what /generate would inject for each name."""
+    project = _load_or_404(project_id)
+    from ..prompting import resolve_blocks
+    return {"blocks": resolve_blocks(project)}
+
+
 # ---------------------------------------------------------------------------
 # Page assembly
 # ---------------------------------------------------------------------------
@@ -353,6 +480,7 @@ class BuildPageRequest(BaseModel):
     panel_ids: List[str] = []
     reading: str = "rtl"            # rtl | ltr
     bubbles: dict = {}              # {mode: auto|none, fontSize, vertical}
+    dynamic: bool = False           # slant/deform frames for a cinematic feel
     dry_run: bool = False
 
 

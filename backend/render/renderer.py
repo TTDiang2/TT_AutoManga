@@ -136,13 +136,33 @@ def _draw_image(el, ew, eh, scale, resolve):
 def _draw_text(el, ew, eh, scale):
     out = Image.new("RGBA", (ew, eh), (0, 0, 0, 0))
     d = ImageDraw.Draw(out)
-    fs = (el.get("fontSize") or 14) * scale
-    font = get_font(fs, el.get("fontFamily"),
-                    bold=(el.get("fontWeight") or "").lower() == "bold")
     color = _hex(el.get("color") or "#000000")
     content = el.get("content") or ""
+    vertical = el.get("direction") == "vertical"
+
+    # auto-shrink: never let a text element overflow its box
+    fs_req = (el.get("fontSize") or 14) * scale
+    fs = fs_req
+    while fs > fs_req * 0.55 and fs > 6:
+        font = get_font(fs, el.get("fontFamily"),
+                        bold=(el.get("fontWeight") or "").lower() == "bold")
+        if vertical:
+            char_h = fs * 1.3
+            needed_h = len(content.replace("\n", "")) * char_h
+            needed_w = char_h
+        else:
+            font_probe = font
+            lines = content.split("\n")
+            needed_w = max((font_probe.getlength(l) for l in lines), default=0)
+            needed_h = len(lines) * fs * 1.4
+        if needed_w <= ew and needed_h <= eh:
+            break
+        fs = max(6.0, fs * 0.9)
+    font = get_font(fs, el.get("fontFamily"),
+                    bold=(el.get("fontWeight") or "").lower() == "bold")
+
     line_h = fs * 1.4
-    if el.get("direction") == "vertical":
+    if vertical:
         char_h = fs * 1.3
         chars = list(content.replace("\n", ""))
         total = len(chars) * char_h
