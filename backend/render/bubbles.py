@@ -153,31 +153,86 @@ def _stroke_polyline(d: ImageDraw.ImageDraw, pts, fill, width):
         d.ellipse((px - r, py - r, px + r, py + r), fill=fill)
 
 
+def _text_layout(text: str, ew: int, eh: int, pad_px: float,
+                 font, fs: float, vertical: bool):
+    """Single source of truth for text layout, used by BOTH the fit check and
+    the actual drawing (they must never diverge).
+
+    Returns (positions, extents): anchors for draw.text plus per-line/column
+    bounding boxes (x0, x1, y0, y1) for the shape-fit check."""
+    if vertical:
+        char_h = fs * 1.3
+        capacity = max(1, int((eh - 2 * pad_px) // char_h))
+        chars = list(text)
+        if not chars:
+            return [], []
+        col_w = fs * 1.3
+        total_cols = math.ceil(len(chars) / capacity)
+        # block centered horizontally (columns still read right-to-left);
+        # right-aligned columns would hug the ellipse edge and always clip
+        first_cx = ew / 2 + (total_cols * col_w) / 2 - col_w / 2
+        positions, extents = [], []
+        for c in range(total_cols):
+            col_chars = chars[c * capacity:(c + 1) * capacity]
+            x = first_cx - c * col_w
+            col_h = len(col_chars) * char_h
+            y0 = (eh - col_h) / 2
+            for i, ch in enumerate(col_chars):
+                positions.append((ch, x, y0 + i * char_h + char_h / 2))
+            extents.append((x - col_w / 2, x + col_w / 2, y0, y0 + col_h))
+        return positions, extents
+
+    max_w = ew - 2 * pad_px
+    lines = _wrap_text(font, text, max_w)
+    line_h = fs * 1.4
+    total_h = len(lines) * line_h
+    y0 = (eh - total_h) / 2
+    positions, extents = [], []
+    for i, line in enumerate(lines):
+        yc = y0 + i * line_h + line_h / 2
+        w = font.getlength(line)
+        positions.append((line, ew / 2, yc))
+        extents.append((ew / 2 - w / 2, ew / 2 + w / 2, yc - line_h / 2, yc + line_h / 2))
+    return positions, extents
+
+
+def _extents_fit_shape(extents, bt: str, ew: int, eh: int, inset: float) -> bool:
+    """True when every text extent lies inside the bubble's real shape.
+
+    Ellipse: farthest corner of each extent must satisfy the ellipse
+    inequality. Shout: same against the inner (0.78) star ellipse —
+    conservative. Narration: plain inset rectangle."""
+    rx, ry = (ew - 2 * inset) / 2, (eh - 2 * inset) / 2
+    if rx <= 0 or ry <= 0:
+        return False
+    cx, cy = ew / 2, eh / 2
+    k = 0.78 if bt == "shout" else 1.0
+    for x0, x1, y0, y1 in extents:
+        if bt == "narration":
+            if x0 < inset or x1 > ew - inset or y0 < inset or y1 > eh - inset:
+                return False
+            continue
+        dx = max(abs(x0 - cx), abs(x1 - cx)) / (rx * k)
+        dy = max(abs(y0 - cy), abs(y1 - cy)) / (ry * k)
+        if dx * dx + dy * dy > 1.0:
+            return False
+    return True
+
+
 def _fit_font_size(el: dict, ew: int, eh: int, pad_px: float,
                    bold: bool, k: float) -> ImageFont.FreeTypeFont:
-    """Shrink the font until the text fits inside the bubble's usable area,
-    with a floor at 55% of the requested size. Ellipse/star bubbles have a
-    tighter usable area (inscribed rectangle) than rounded rects."""
+    """Shrink the font until the REAL drawn layout fits the REAL bubble shape
+    (same layout function as drawing), floor at 55% of the requested size."""
     bt = el.get("bubbleType", "speech")
-    fit = {"narration": 0.92, "shout": 0.6}.get(bt, 0.7)
     fs_req = (el.get("fontSize") or 12) * k
     text = el.get("text") or ""
     vertical = el.get("direction") == "vertical"
+    inset = max(1, round(2 * k))
     fs = fs_req
     while True:
         font = get_font(fs, None, bold=bold)
-        if vertical:
-            char_h = fs * 1.3
-            col_cap = max(1, int((eh * fit - 2 * pad_px) // char_h))
-            n_cols = max(1, math.ceil(len(text) / col_cap))
-            needed_w = n_cols * fs * 1.3
-            needed_h = min(len(text), col_cap) * char_h
-        else:
-            lines = _wrap_text(font, text, ew * fit - 2 * pad_px)
-            line_h = fs * 1.4
-            needed_w = max((font.getlength(l) for l in lines), default=0)
-            needed_h = len(lines) * line_h
-        if (needed_w <= ew * fit - 2 * pad_px and needed_h <= eh * fit) \
+        _, extents = _text_layout(text, ew, eh, pad_px, font, fs, vertical)
+        if _extents_fit_shape(extents, bt, ew, eh, inset) \
                 or fs <= fs_req * 0.55 or fs <= 6:
             return font
         fs = max(6.0, fs * 0.9)
@@ -189,44 +244,21 @@ def _draw_bubble_text(d: ImageDraw.ImageDraw, el: dict, ew: int, eh: int,
     bt = el.get("bubbleType", "speech")
     # pageRenderer.ts: only shout renders bold.
     bold = bt == "shout"
-    fs_req = (el.get("fontSize") or 12) * k
     font = _fit_font_size(el, ew, eh, 10 * k, bold, k)
     text = el.get("text") or ""
     color = (0, 0, 0, 178) if bt == "whisper" else (0, 0, 0, 255)
     pad_px = 10 * k
     fs = float(font.size)
 
-    # draw text on its own layer, clipped to the bubble shape
+    # draw text on its own layer, clipped to the bubble shape; the layout is
+    # the same function the fit check used, so nothing gets clipped that the
+    # fit check didn't already account for
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     td = ImageDraw.Draw(layer)
-
-    if el.get("direction") == "vertical":
-        # Columns right-to-left, chars top-to-bottom (live editor: vertical-rl).
-        char_h = fs * 1.3
-        capacity = max(1, int((eh - 2 * pad_px) // char_h))
-        chars = list(text)
-        if not chars:
-            return
-        col_w = fs * 1.3
-        total_cols = math.ceil(len(chars) / capacity)
-        start_x = pad + ew - pad_px - fs / 2
-        for c in range(total_cols):
-            col_chars = chars[c * capacity:(c + 1) * capacity]
-            x = start_x - c * col_w
-            col_h = len(col_chars) * char_h
-            y0 = pad + (eh - col_h) / 2
-            for i, ch in enumerate(col_chars):
-                td.text((x, y0 + i * char_h + char_h / 2), ch, font=font,
-                        fill=color, anchor="mm")
-    else:
-        max_w = ew - 2 * pad_px
-        lines = _wrap_text(font, text, max_w)
-        line_h = fs * 1.4
-        total_h = len(lines) * line_h
-        start_y = pad + eh / 2 - total_h / 2 + line_h / 2
-        for i, line in enumerate(lines):
-            td.text((pad + ew / 2, start_y + i * line_h), line, font=font,
-                    fill=color, anchor="mm")
+    positions, _ = _text_layout(text, ew, eh, pad_px, font, fs,
+                                el.get("direction") == "vertical")
+    for content, x, y in positions:
+        td.text((pad + x, pad + y), content, font=font, fill=color, anchor="mm")
 
     clipped = Image.composite(layer, Image.new("RGBA", img.size, (0, 0, 0, 0)),
                               shape_mask)

@@ -11,8 +11,11 @@ result comes back opaque, we retry locally:
    otherwise. The method used is always reported so callers can re-roll.
 """
 import io
+import logging
 from typing import Tuple
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_alpha(img_bytes: bytes) -> Tuple[bytes, str]:
@@ -32,8 +35,8 @@ def ensure_alpha(img_bytes: bytes) -> Tuple[bytes, str]:
         return buf.getvalue(), "rembg"
     except ImportError:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("rembg fallback failed (%s); using white-threshold", e)
 
     # 2) luminance threshold (white-background illustrations)
     rgb = img.convert("RGB")

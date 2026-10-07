@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -75,8 +75,8 @@ async def get_asset_file(asset_id: str):
 @router.post("/file")
 async def register_asset(
     file: UploadFile = File(...),
-    kind: str = "upload",
-    project_id: Optional[str] = None,
+    kind: str = Form("upload"),
+    project_id: Optional[str] = Form(None),
 ):
     """Register arbitrary image bytes as a reusable asset (e.g. agent-side
     post-processing output) without binding it to a panel."""

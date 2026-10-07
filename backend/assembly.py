@@ -121,6 +121,7 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
     pad = 10
     fw, fh = slot["width"], slot["height"]
     vertical = bool(opts.get("vertical", True))
+    bt = classify_bubble(text)
     if vertical:
         # Vertical layout: columns of chars run top-to-bottom, right-to-left.
         # Size so the text fits ~3 columns of balanced length.
@@ -137,6 +138,12 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
         cpl = max(4, int((bw_px - 2 * pad) / max(1.0, fs)))
         n_lines = -(-len(text) // cpl)                 # ceil
         bh_px = n_lines * fs * 1.4 + 2 * pad
+    # Assembled bubbles are sized tight to the text block; ellipse/star shapes
+    # need headroom or the renderer's shape-fit check would shrink the font.
+    headroom = {"shout": 1.45, "narration": 1.05}.get(bt, 1.3)
+    bh_px *= headroom
+    if vertical:
+        bw_px *= headroom
     bw = min(bw_px / page["width"] * 100, fw * 0.95)
     bh = min(bh_px / page["height"] * 100, 40.0)
     x = slot["x"] + fw * 0.05 + (seq % 2) * (bw + 1.0)
@@ -146,7 +153,7 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
     # tailPosition quirk (frontend parity): 'top' renders a triangle BELOW the
     # bubble's bottom edge pointing down — toward the character in the panel.
     return {"id": uuid.uuid4().hex, "type": "bubble",
-            "bubbleType": classify_bubble(text), "text": text,
+            "bubbleType": bt, "text": text,
             "direction": "vertical" if vertical else "horizontal",
             "fontSize": fs, "backgroundColor": "#ffffff", "borderColor": "#000000",
             "tailPosition": "top",

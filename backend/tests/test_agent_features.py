@@ -177,17 +177,14 @@ def test_models_endpoint(client):
 
 def test_register_asset_endpoint(client):
     c, _ = client
-    png = base64.b64decode(base64.b64encode(
-        __import__("io").BytesIO().getvalue() or b"")) if False else None
     from backend.tests._fixtures import solid_png as sp
     import base64 as b
     raw = b.b64decode(sp((1, 2, 3)).split(",", 1)[1])
     r = c.post("/api/assets/file", files={"file": ("x.png", raw, "image/png")},
                data={"kind": "overlay"})
     assert r.status_code == 200, r.text
-    url = r.json()["url"]
-    assert url.startswith("/api/assets/file/")
-    fetch = c.get(url)
+    assert r.json()["url"].startswith("/api/assets/file/")
+    fetch = c.get(r.json()["url"])
     assert fetch.status_code == 200
     assert Image.open(io.BytesIO(fetch.content)).size == (400, 400)
 

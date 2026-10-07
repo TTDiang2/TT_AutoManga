@@ -14,6 +14,11 @@ from typing import Callable, List, Optional
 from PIL import Image
 from . import render_page
 
+# Maximum viewer compatibility: embed images FlateDecode-only (no ASCII85
+# layer). Some PDF viewers render A85+Flate filter arrays as blank pages.
+from reportlab import rl_config as _rl_config
+_rl_config.useA85 = 0
+
 
 def _render_pngs(pages: List[dict], scale: float, resolve) -> List[Image.Image]:
     return [render_page(p, scale, resolve) for p in pages]
