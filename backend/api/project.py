@@ -71,6 +71,9 @@ async def migrate_project_assets(project_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
     saved = storage.save_project(project)   # save_project normalizes embedded images
     return {"success": True, "project": saved}
+
+
+@router.delete("/delete/{project_id}")
 async def delete_project(project_id: str):
     try:
         success = storage.delete_project(project_id)

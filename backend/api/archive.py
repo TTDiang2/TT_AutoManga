@@ -142,6 +142,13 @@ async def add_image(req: dict):
         img_bytes = base64.b64decode(b64_data)
         with open(target_path, "wb") as f:
             f.write(img_bytes)
+    elif source_data.startswith("/api/assets/file/"):
+        # Asset referenced by URL (post-refactor panel images).
+        from ..storage.asset_store import asset_store
+        source = asset_store.path_for(source_data.rsplit("/", 1)[-1])
+        if source is None:
+            raise HTTPException(status_code=400, detail="Source asset not found")
+        shutil.copy2(source, target_path)
     else:
         source_path = Path(source_data)
         if not source_path.exists():

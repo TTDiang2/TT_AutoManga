@@ -14,6 +14,21 @@ EXPORTS_DIR = Path(__file__).parent.parent.parent / "data" / "exports"
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _panel_image_bytes(image: str) -> Optional[bytes]:
+    """Resolve a panel image ref (data URL / asset URL / local path) to bytes."""
+    try:
+        if image.startswith("data:"):
+            return base64.b64decode(image.split(",", 1)[1])
+        if image.startswith("/api/assets/file/"):
+            from ..storage.asset_store import asset_store
+            path = asset_store.path_for(image.rsplit("/", 1)[-1])
+            return path.read_bytes() if path else None
+        path = Path(image)
+        return path.read_bytes() if path.is_file() else None
+    except Exception:
+        return None
+
+
 class ExportPDFRequest(BaseModel):
     project_id: str
     panels: List[Dict[str, Any]]
@@ -61,12 +76,10 @@ async def export_pdf(req: ExportPDFRequest):
         
         for i, panel in enumerate(req.panels):
             if panel.get("image"):
-                img_data = panel["image"]
-                if img_data.startswith("data:"):
-                    img_data = img_data.split(",")[1]
-                    img_bytes = base64.b64decode(img_data)
+                img_bytes = _panel_image_bytes(panel["image"])
+                if img_bytes:
                     img_stream = io.BytesIO(img_bytes)
-                    
+
                     try:
                         from reportlab.lib.utils import ImageReader
                         img_reader = ImageReader(img_stream)
@@ -115,11 +128,8 @@ async def export_images(req: ExportImagesRequest):
         
         for i, panel in enumerate(req.panels):
             if panel.get("image"):
-                img_data = panel["image"]
-                if img_data.startswith("data:"):
-                    img_data = img_data.split(",")[1]
-                    img_bytes = base64.b64decode(img_data)
-                    
+                img_bytes = _panel_image_bytes(panel["image"])
+                if img_bytes:
                     filename = output_dir / f"panel_{i+1:03d}.{req.format}"
                     with open(filename, "wb") as f:
                         f.write(img_bytes)

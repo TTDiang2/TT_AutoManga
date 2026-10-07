@@ -36,10 +36,11 @@ class UploadRequest(BaseModel):
     panel_id: str
 
 
-def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> None:
+def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> str:
+    """Store panel image reference; returns the final ref (asset URL or original)."""
     project = storage.load_project(project_id)
     if not project:
-        return
+        return image_data
     if image_data.startswith("data:"):
         # Persist embedded payloads as asset files; keep project.json lean.
         entry = asset_store.save_dataurl(
@@ -53,6 +54,7 @@ def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> None:
             panel["image"] = image_data
             break
     storage.save_project(project)
+    return image_data
 
 
 @router.get("/file/{asset_id}")
@@ -60,7 +62,9 @@ async def get_asset_file(asset_id: str):
     path = asset_store.path_for(asset_id)
     if path is None:
         raise HTTPException(status_code=404, detail="Asset not found")
-    media = "image/png" if path.suffix == ".png" else f"image/{path.suffix.lstrip('.')}"
+    suffix = path.suffix.lstrip(".").lower()
+    media = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+             "webp": "image/webp"}.get(suffix, "application/octet-stream")
     return FileResponse(
         str(path),
         media_type=media,
@@ -116,11 +120,14 @@ async def generate_with_swarmui(req: GenerateImageRequest):
         )
         
         if result.get("success"):
-            import base64
-            img_data = result["image"].split(",")[1]
-            result["path"] = img_data
-            _save_panel_image(req.project_id, req.panel_id, result["image"])
-        
+            # Persist as asset file and hand the URL back so the frontend
+            # store does not re-embed a dataURL (which would duplicate assets
+            # on the next autosave normalization).
+            ref = _save_panel_image(req.project_id, req.panel_id, result["image"])
+            result["image"] = ref
+            result["asset_id"] = ref.rsplit("/", 1)[-1] if ref.startswith("/api/assets/file/") else None
+            result["path"] = ref
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
