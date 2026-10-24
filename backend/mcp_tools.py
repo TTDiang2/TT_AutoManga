@@ -86,15 +86,20 @@ async def patch_panel(project_id: str, panel_id: str,
 async def set_project_settings(
         project_id: str, style: Optional[str] = None,
         characters: Optional[List[Dict[str, str]]] = None,
+        locations: Optional[List[Dict[str, str]]] = None,
         bible: Optional[str] = None) -> Dict[str, Any]:
     """Style profile (appended to every prompt), character prompt blocks
-    ([{name, prompt_block}], injected when a panel lists that character),
-    and a free-text story bible for cross-chapter continuity."""
+    ([{name, prompt_block}], injected when a panel lists that character), a
+    location library (injected when a panel names that location via its
+    `location` field), and a free-text story bible for cross-chapter
+    continuity."""
     body: Dict[str, Any] = {}
     if style is not None:
         body["style"] = style
     if characters is not None:
         body["characters"] = characters
+    if locations is not None:
+        body["locations"] = locations
     if bible is not None:
         body["bible"] = bible
     return await _call("PUT", f"/api/agent/projects/{project_id}/settings",
@@ -137,7 +142,8 @@ async def generate_image(
         kind: str = "panel", model: Optional[str] = None,
         prompt_format: Optional[str] = None,
         init_image: Optional[str] = None,
-        init_creativity: Optional[float] = None) -> Dict[str, Any]:
+        init_creativity: Optional[float] = None,
+        mask_image: Optional[str] = None) -> Dict[str, Any]:
     """Generate one image via SwarmUI. init_image (asset URL / data URL,
     creativity 0-1) runs img2img for continuity. variants 1-4 = N seeds;
     apply_variant picks which one binds to the panel. Returns asset URLs
@@ -152,7 +158,8 @@ async def generate_image(
                  ("loras", loras), ("model", model),
                  ("prompt_format", prompt_format),
                  ("init_image", init_image),
-                 ("init_creativity", init_creativity)):
+                 ("init_creativity", init_creativity),
+                 ("mask_image", mask_image)):
         if v is not None:
             body[k] = v
     if not inject_characters:
@@ -319,3 +326,21 @@ async def export_project(project_id: str, format: str = "both",
     return await _call("POST", "/api/agent/export",
                        json={"project_id": project_id, "format": format,
                              "scale": scale, "page_numbers": page_numbers})
+
+
+# ------------------------------------------------------------------ local inference
+
+async def list_inference_models() -> Dict[str, Any]:
+    """Local ONNX upscale models and whether onnxruntime is installed
+    (optional dependency: backend/requirements-inference.txt)."""
+    return await _call("GET", "/api/agent/inference-models")
+
+
+async def upscale_image(asset_url: str, model: str = "realesrgan-anime-6b",
+                        tile: int = 512) -> Dict[str, Any]:
+    """Upscale an asset x4 with a local ONNX model (downloaded on first use,
+    no SwarmUI involved); registers the result as a new asset. Use for
+    print-resolution exports of key panels/covers."""
+    return await _call("POST", "/api/agent/upscale",
+                       json={"asset_url": asset_url, "model": model,
+                             "tile": tile})

@@ -35,9 +35,11 @@ panels auto-number `panel_1..n`.
    descriptor), art style, chapter scope. Keep a **consistent per-character
    descriptor** — it is the #1 consistency lever.
 2. `create_project(name)` → then `set_project_settings(style=…,
-   characters=[{name, prompt_block}…], bible=…)` — style is appended to
-   EVERY prompt; character blocks are injected whenever a panel lists that
-   character; bible carries worldview/recap across chapters.
+   characters=[{name, prompt_block}…], locations=[{name, prompt_block}…],
+   bible=…)` — style is appended to EVERY prompt; character blocks are
+   injected whenever a panel lists that character; location blocks whenever
+   a panel names that place (`location` field) — reuse them for recurring
+   scenes; bible carries worldview/recap across chapters.
 
 ## 2. Storyboard (you write it — don't delegate to the backend LLM)
 
@@ -67,13 +69,18 @@ per page with a beat change or hook per page.
    items carry error strings — re-submit just those.
 4. Consistency tools: fixed `seed` for reproducible runs; `init_image`
    (previous panel asset URL) + `init_creativity` 0.4-0.6 for continuity;
-   the same character prompt_block everywhere.
+   `mask_image` (with `init_image`) to inpaint just a broken region (hands,
+   faces) instead of regenerating the whole panel; the same character
+   prompt_block and location block everywhere.
 5. Variants: `variants: 4` then review the 4 asset URLs (fetch them and
    LOOK), `apply_variant` or `patch_panel(image=…)` to bind the winner.
 6. Overlays: `kind:"overlay"` + `remove_background:true` for transparent
    breakout characters (fallback matting is automatic; check
    `alpha_method`/`has_alpha` in the result).
 7. Cover art: one `generate_image(kind:"cover", …)` splash.
+8. Every generated PNG embeds its recipe (`parameters` text block +
+   `automanga` JSON tEXt chunks) — any export is reproducible with any
+   SD-ecosystem tool that reads PNG metadata.
 
 ## 4. Page assembly
 
@@ -98,6 +105,11 @@ empty slots (missing art)? text overflow? Then `patch_element`
 
 `export_project(format="both", scale=2, page_numbers=true)` — first page
 (cover) stays unnumbered. Hand the user the `pdf.url` / local `path`.
+Scale clamps at 8 (600×900 @8 = 4800×7200). For print-grade key art,
+`upscale_image(asset_url, model)` runs a local ONNX x4 upscaler (downloads
+its model on first use; needs `pip install -r backend/requirements-inference.txt`,
+answers 503 otherwise) — check `list_inference_models()` first. Webtoon
+(long-strip) projects: use the `webtoon-*` templates (800px column pages).
 
 ## Troubleshooting
 

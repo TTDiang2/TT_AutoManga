@@ -55,3 +55,24 @@ def blocks_for_panel(project: Dict[str, Any], panel: Dict[str, Any]) -> List[str
 
 def style_suffix(project: Dict[str, Any]) -> str:
     return ((project.get("settings") or {}).get("style") or "").strip()
+
+
+def resolve_locations(project: Dict[str, Any]) -> Dict[str, str]:
+    """Project-scoped location library: ``settings.locations =
+    [{name, prompt_block}]`` → {lowercase name -> prompt block}."""
+    out = {}
+    for loc in (project.get("settings") or {}).get("locations") or []:
+        name = (loc.get("name") or "").strip()
+        block = (loc.get("prompt_block") or "").strip()
+        if name and block:
+            out[name.lower()] = block
+    return out
+
+
+def location_block_for_panel(project: Dict[str, Any],
+                             panel: Dict[str, Any]) -> str:
+    """Prompt block for the panel's named location ("" when none matches)."""
+    loc = (panel.get("location") or "").strip()
+    if not loc:
+        return ""
+    return resolve_locations(project).get(loc.lower(), "")

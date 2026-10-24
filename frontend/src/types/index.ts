@@ -6,7 +6,7 @@ export interface Panel {
   dialogue: string;
   prompt: PromptData;
   image?: string;
-  layers: Layer[];
+  shot?: string;   // wide|medium|close-up|extreme-close-up|splash
 }
 
 export interface PromptData {
@@ -16,17 +16,6 @@ export interface PromptData {
   negativePrompt?: string;
   seed?: number;
   removeBG?: boolean;
-}
-
-export interface Layer {
-  id: string;
-  type: 'background' | 'character' | 'bubble' | 'effect';
-  content: string;
-  position: { x: number; y: number };
-  size: { width: number; height: number };
-  opacity: number;
-  locked: boolean;
-  visible: boolean;
 }
 
 export interface Project {

@@ -165,7 +165,6 @@ export function StoryboardTab() {
           characters: p.characters || [],
           dialogue: p.dialogue || '',
           prompt: {},
-          layers: [],
         }));
         setPanels(newPanels);
       } else {
@@ -196,7 +195,6 @@ export function StoryboardTab() {
       characters: [],
       dialogue: '',
       prompt: {},
-      layers: [],
     };
     setPanels([...panels, newPanel]);
   };

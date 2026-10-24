@@ -23,7 +23,7 @@ class RenderPageRequest(BaseModel):
 
 @router.post("/page")
 async def render_page_png(req: RenderPageRequest):
-    scale = min(4.0, max(0.5, req.scale))
+    scale = min(8.0, max(0.5, req.scale))
     img = render_page(req.page, scale, _resolver)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -41,7 +41,7 @@ class RenderExportRequest(BaseModel):
 async def render_export(req: RenderExportRequest):
     if not req.pages:
         raise HTTPException(status_code=400, detail="No pages provided")
-    scale = min(4.0, max(0.5, req.scale))
+    scale = min(8.0, max(0.5, req.scale))
     try:
         payload = export_pages_to_bytes(req.pages, req.format, scale,
                                        _resolver, req.page_numbers)

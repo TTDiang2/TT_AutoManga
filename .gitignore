@@ -5,11 +5,7 @@
 # ---------- Runtime / User Data ----------
 # All runtime data is private. The application creates and reads
 # these directories at runtime; they MUST NOT be committed.
-data/projects/
-data/assets/
-data/exports/
-data/archive/
-data/settings.json
+data/
 data/characters.json
 data/composer_templates.json
 

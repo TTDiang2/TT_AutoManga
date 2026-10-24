@@ -8,6 +8,7 @@ and the plan docs.
 import asyncio
 import base64
 import io
+import json
 import logging
 import time
 import uuid
@@ -246,6 +247,8 @@ class GenerateRequest(BaseModel):
     # --- img2img ---
     init_image: Optional[str] = None      # asset URL / data URL
     init_creativity: Optional[float] = None
+    mask_image: Optional[str] = None      # inpaint mask (with init_image);
+                                          # semantics follow SwarmUI
     # --- automatic prompt injection (project style + character blocks) ---
     inject_characters: bool = True
 
@@ -267,6 +270,33 @@ def _ref_to_dataurl(ref: str) -> Optional[str]:
         return None
     except Exception:
         return None
+
+
+def _embed_png_parameters(img_bytes: bytes, meta: Dict[str, Any]) -> bytes:
+    """Embed the generation recipe as PNG tEXt chunks so exported images
+    stay self-describing outside the asset index: the SD-ecosystem
+    "parameters" text block (prompt / Negative prompt / key: value lines)
+    plus a machine-readable "automanga" JSON block."""
+    try:
+        img = Image.open(io.BytesIO(img_bytes))
+        if (img.format or "").upper() != "PNG":
+            return img_bytes
+        from PIL import PngImagePlugin
+        prompt = meta.get("prompt") or ""
+        negative = meta.pop("negative_prompt", "") or ""
+        pairs = ", ".join(f"{k}: {v}" for k, v in meta.items() if v is not None)
+        block = "\n".join(x for x in (prompt,
+                                      f"Negative prompt: {negative}" if negative else None,
+                                      pairs) if x)
+        info = PngImagePlugin.PngInfo()
+        info.add_text("parameters", block)
+        info.add_text("automanga", json.dumps(meta, ensure_ascii=False))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", pnginfo=info)
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning("png parameter embedding skipped: %s", e)
+        return img_bytes
 
 
 async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,6 +330,13 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         init_dataurl = _ref_to_dataurl(payload["init_image"])
         if init_dataurl is None:
             raise ValueError(f"init_image not found: {payload['init_image']}")
+    mask_dataurl = None
+    if payload.get("mask_image"):
+        if not init_dataurl:
+            raise ValueError("mask_image requires init_image")
+        mask_dataurl = _ref_to_dataurl(payload["mask_image"])
+        if mask_dataurl is None:
+            raise ValueError(f"mask_image not found: {payload['mask_image']}")
 
     # automatic injection: project style suffix + character blocks
     injected = []
@@ -307,7 +344,8 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
     if payload.get("project_id"):
         project = storage.load_project(payload["project_id"])
     if payload.get("inject_characters", True) and project:
-        from ..prompting import blocks_for_panel, style_suffix
+        from ..prompting import (blocks_for_panel, location_block_for_panel,
+                                 style_suffix)
         style = style_suffix(project)
         if style:
             prompt = f"{prompt}, {style}" if prompt_format_is_tags(payload) else f"{prompt}。{style}"
@@ -317,6 +355,10 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             panel = next((p for p in (project.get("panels") or [])
                           if p.get("id") == payload["panel_id"]), None)
         if panel:
+            location = location_block_for_panel(project, panel)
+            if location:
+                prompt = f"{prompt}, {location}" if prompt_format_is_tags(payload) else f"{prompt}。{location}"
+                injected.append({"kind": "location", "text": location})
             shot = panel.get("shot")
             if shot:
                 extra = _SHOT_TAGS[shot][0 if prompt_format_is_tags(payload) else 1]
@@ -342,6 +384,7 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             remove_background=bool(payload.get("remove_background")),
             init_image=init_dataurl,
             init_creativity=payload.get("init_creativity"),
+            mask_image=mask_dataurl,
         )
         if not result.get("success"):
             raise RuntimeError(f"SwarmUI: {result.get('error', 'unknown error')}")
@@ -353,6 +396,20 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             from ..render.alpha_fallback import ensure_alpha
             img_bytes, alpha_method = ensure_alpha(img_bytes)
 
+        img_bytes = _embed_png_parameters(img_bytes, {
+            "prompt": prompt,
+            "negative_prompt": payload.get("negative_prompt") or "",
+            "seed": (seed + v) if seed is not None else None,
+            "model": model,
+            "steps": payload.get("steps") or swarm_settings.currentSteps,
+            "cfg_scale": payload.get("cfg_scale") or swarm_settings.currentCfgScale,
+            "sampler": swarm_settings.currentSamplerName,
+            "width": payload.get("width") or swarm_settings.currentWidth,
+            "height": payload.get("height") or swarm_settings.currentHeight,
+            "prompt_format": payload.get("prompt_format"),
+            "kind": payload.get("kind") or "panel",
+            "alpha_method": alpha_method if payload.get("remove_background") else None,
+        })
         img = Image.open(io.BytesIO(img_bytes))
         has_alpha = (img.mode == "RGBA"
                      and img.getchannel("A").getextrema()[0] < 255)
@@ -475,7 +532,7 @@ async def list_models():
 async def list_templates():
     """All build-page templates (builtin + dynamic presets), so agents can
     discover slot counts instead of relying on the AGENTS.md list."""
-    from ..composer_builtins import TEMPLATES, DYNAMIC_TEMPLATES
+    from ..composer_builtins import TEMPLATES, DYNAMIC_TEMPLATES, WEBTOON_TEMPLATES
 
     def brief(t: dict, dynamic: bool) -> dict:
         return {"id": t["id"], "name": t["name"],
@@ -487,6 +544,7 @@ async def list_templates():
 
     return {
         "templates": [brief(t, False) for t in TEMPLATES]
+                      + [brief(t, False) for t in WEBTOON_TEMPLATES]
                       + [brief(t, True) for t in DYNAMIC_TEMPLATES],
         "other_kinds": {
             "rows": '{"kind":"rows","rows":[2,3]} — n columns per row',
@@ -589,6 +647,7 @@ async def put_agent_settings(req: AgentSettingsUpdate):
 class ProjectSettingsUpdate(BaseModel):
     style: Optional[str] = None
     characters: Optional[List[Dict[str, Any]]] = None   # [{name, prompt_block}]
+    locations: Optional[List[Dict[str, Any]]] = None    # [{name, prompt_block}]
     bible: Optional[str] = None   # free-text story bible: worldview, recap,
                                   # established locations/props — for the
                                   # agent's own continuity across chapters
@@ -596,8 +655,9 @@ class ProjectSettingsUpdate(BaseModel):
 
 @router.put("/projects/{project_id}/settings")
 async def put_project_settings(project_id: str, req: ProjectSettingsUpdate):
-    """Project-level style profile (appended to every panel prompt) and
-    character prompt blocks (injected for panels listing that character)."""
+    """Project-level style profile (appended to every panel prompt), character
+    prompt blocks (injected for panels listing that character), and a location
+    library (injected for panels naming that location)."""
     project = _load_or_404(project_id)
     cfg = project.setdefault("settings", {})
     if req.style is not None:
@@ -610,6 +670,12 @@ async def put_project_settings(project_id: str, req: ProjectSettingsUpdate):
                 raise HTTPException(status_code=400,
                                     detail="each character needs name and prompt_block")
         cfg["characters"] = req.characters
+    if req.locations is not None:
+        for loc in req.locations:
+            if not isinstance(loc.get("name"), str) or not loc["name"].strip()                     or not isinstance(loc.get("prompt_block"), str) or not loc["prompt_block"].strip():
+                raise HTTPException(status_code=400,
+                                    detail="each location needs name and prompt_block")
+        cfg["locations"] = req.locations
     saved = storage.save_project(project)
     return {"success": True, "settings": saved.get("settings", {})}
 
@@ -977,11 +1043,65 @@ async def delete_element(project_id: str, page_id: str, element_id: str):
 async def page_preview(project_id: str, page_id: str, scale: float = 2.0):
     project = _load_or_404(project_id)
     page = _find_page(project, page_id)
-    scale = min(4.0, max(0.5, scale))
+    scale = min(8.0, max(0.5, scale))
     img = render_page(page, scale, _resolver)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# Local upscale (optional onnxruntime; no SwarmUI needed)
+# ---------------------------------------------------------------------------
+
+class UpscaleRequest(BaseModel):
+    asset_url: str                     # /api/assets/file/... or data: URL
+    model: str = "realesrgan-anime-6b"
+    tile: int = 512                    # tile edge in px; memory/speed knob
+
+
+@router.get("/inference-models")
+async def list_inference_models():
+    """Local ONNX upscale models + whether onnxruntime is installed."""
+    from ..inference import INFERENCE_MODELS, available
+    return {"available": available(),
+            "models": [{"id": mid, "scale": m["scale"],
+                        "description": m["description"]}
+                       for mid, m in INFERENCE_MODELS.items()]}
+
+
+@router.post("/upscale")
+async def upscale_asset(req: UpscaleRequest):
+    """Upscale an existing asset with a local ONNX model (x4) and register
+    the result as a new asset (kind="upscale")."""
+    from ..inference import InferenceUnavailable, ModelError, upscale_bytes
+    src = _ref_to_dataurl(req.asset_url)
+    if not src:
+        raise HTTPException(status_code=400,
+                            detail="asset_url must be an asset URL or data: URL")
+    try:
+        raw = base64.b64decode(src.split(",", 1)[1])
+        out = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: upscale_bytes(raw, req.model, req.tile))
+    except InferenceUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ModelError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"invalid image: {e}")
+
+    img = Image.open(io.BytesIO(out))
+    dataurl = "data:image/png;base64," + base64.b64encode(out).decode()
+    entry = asset_store.save_dataurl(
+        dataurl, kind="upscale",
+        meta={"source_asset": req.asset_url, "model": req.model,
+              "scale": 4, "width": img.size[0], "height": img.size[1]})
+    logger.info("agent/upscale model=%s %dx%d -> %dx%d", req.model,
+                img.size[0] // 4, img.size[1] // 4, img.size[0], img.size[1])
+    return {"asset_id": entry["asset_id"],
+            "url": asset_store.url_for(entry["asset_id"]),
+            "width": img.size[0], "height": img.size[1],
+            "model": req.model}
 
 
 class AgentExportRequest(BaseModel):
@@ -1002,7 +1122,7 @@ async def agent_export(req: AgentExportRequest):
         raise HTTPException(status_code=400, detail="format must be pdf|zip|both")
     fmt = req.format
     base_name = f"manga_{req.project_id[:8]}_{time.strftime('%Y%m%d_%H%M%S')}"
-    result = export_pages(pages, fmt, min(4.0, max(0.5, req.scale)),
+    result = export_pages(pages, fmt, min(8.0, max(0.5, req.scale)),
                           _resolver, _exports_dir(), base_name,
                           page_numbers=req.page_numbers)
     logger.info("agent/export project=%s fmt=%s base=%s", req.project_id, fmt,

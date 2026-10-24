@@ -96,7 +96,6 @@ export function PromptLabTab() {
           negativePrompt: item.negative || '',
           seed: item.seed != null ? Number(item.seed) : undefined,
         },
-        layers: [],
       };
       addPanel(panel);
       imported++;

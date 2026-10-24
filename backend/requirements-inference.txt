@@ -1,0 +1,5 @@
+# Optional: local ONNX upscaling (no SwarmUI needed).
+# Used by POST /api/agent/upscale; without these the endpoint answers 503
+# with this install hint. Models themselves download on first use.
+onnxruntime>=1.18
+numpy>=1.26

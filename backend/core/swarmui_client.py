@@ -129,6 +129,7 @@ class SwarmUIClient:
         remove_background: bool = False,
         init_image: str = None,          # data URL for img2img
         init_creativity: float = None,   # denoise strength 0-1
+        mask_image: str = None,          # data URL inpaint mask (with init_image)
     ) -> Dict[str, Any]:
         swarmsettings = settings.swarmui
         
@@ -155,12 +156,15 @@ class SwarmUIClient:
             payload["initimage"] = init_image
             if init_creativity is not None:
                 payload["initimagecreativity"] = float(init_creativity)
+            if mask_image:
+                payload["maskimage"] = mask_image
 
         import logging
         logger = logging.getLogger(__name__)
-        # log everything except the init image: img2img payloads embed a
-        # multi-MB base64 data URL that would bloat the log
-        log_payload = {k: (f"<data URL, {len(v)} chars>" if k == "initimage" else v)
+        # log everything except embedded images: img2img payloads embed
+        # multi-MB base64 data URLs that would bloat the log
+        log_payload = {k: (f"<data URL, {len(v)} chars>"
+                           if k in ("initimage", "maskimage") else v)
                        for k, v in payload.items()}
         logger.info("[SwarmUI] FULL PAYLOAD: %s", log_payload)
 

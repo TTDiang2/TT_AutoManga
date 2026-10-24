@@ -70,6 +70,7 @@ panels: Panel[], composerPages: ComposerPage[], settings }`.
 
 - **Panel** (storyboard cell): `{ id, order?, scene, characters: string[],
   dialogue: string, shot?: "wide|medium|close-up|extreme-close-up|splash",
+  location?: "<name in project settings.locations>",
   prompt: { turbo?, tags?, negativePrompt?, seed?, removeBG? },
   image?: "<asset URL or data URL>" }`.
 - **ComposerPage**: `{ id, name, templateId, width, height, order,
@@ -149,17 +150,20 @@ curl -s -X PUT $BASE/api/agent/settings -H 'Content-Type: application/json' \
 #    blocks. `style` is appended to EVERY panel prompt; a character block is
 #    injected whenever a panel lists that character (project entries override
 #    the global Characters library). Inspect with GET .../characters.
-#    `bible` is a free-text story bible (worldview, recap, established
-#    locations/props) — persisted with the project for cross-chapter
-#    continuity; read it back via GET .../projects/$PID.
+#    `locations` is the same mechanism for recurring places (a panel opts in
+#    via its `location` field); `bible` is a free-text story bible (worldview,
+#    recap, established locations/props) — persisted with the project for
+#    cross-chapter continuity; read it back via GET .../projects/$PID.
 curl -s -X PUT $BASE/api/agent/projects/$PID/settings -H 'Content-Type: application/json' \
   -d '{"style":"chinese ink painting style, muted colors",
        "characters":[{"name":"Yuki","prompt_block":"1girl, white hair, blue eyes, blue kimono"}],
+       "locations":[{"name":"rain bridge","prompt_block":"old wooden bridge, heavy rain, lanterns"}],
        "bible":"ch1: Yuki loses the jade pendant on the rain bridge"}'
 
 # 5. Assemble pages: template + slot filling + auto dialogue bubbles
 #    (builtin ids: blank, manga-2v/2h/3/4/6/8, grid-12/21/23/32/232/323/223,
 #     hero-br-4, hero-br-wide, hero-splash, photo-full, photo-grid-4, photo-grid-9;
+#     webtoon long-strip: webtoon-3, webtoon-4-mix, webtoon-6 (800px column pages);
 #     dynamic presets: dyn-2-slant, dyn-3-diag, dyn-hero-3, dyn-5-mix;
 #     or {"kind":"rows","rows":[2,3]}, {"kind":"user","id":...}, {"kind":"custom",...})
 #    "dynamic": true slants every non-hero frame (quadrilateral corners) for a
@@ -248,7 +252,19 @@ is appended. Set them via `PUT /api/agent/projects/{id}/settings`.
 **Consistency & continuity tools**: fixed seeds make style-reproducible runs;
 `init_image` (+`init_creativity` 0-1) runs img2img against an asset or data
 URL — feed the previous panel (low creativity ~0.4-0.6) or a character sheet
-in for continuity.
+in for continuity; `mask_image` (requires `init_image`) inpaints only the
+masked region (mask semantics follow SwarmUI). `settings.locations` blocks
+are injected for panels naming a location (`panel.location`), same mechanism
+as character blocks.
+
+**Print resolution / local upscale**: `GET /api/agent/inference-models` and
+`POST /api/agent/upscale {asset_url, model, tile}` run a local ONNX x4
+upscaler (Real-ESRGAN; models download on first use into data/models/).
+Optional dependency: `pip install -r backend/requirements-inference.txt` —
+without it the endpoint answers 503. Preview/export scale clamps at 8
+(600x900 @8 = 4800x7200). Generated PNGs embed their full recipe as tEXt
+chunks (`parameters` text block + `automanga` JSON) so any export stays
+reproducible outside the asset index.
 
 ## 6. Image generation notes
 

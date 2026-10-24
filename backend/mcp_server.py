@@ -157,6 +157,14 @@ _tool(mcp_tools.export_project, name="export_project",
       desc="Export all pages to PDF and/or ZIP; returns file paths and "
            "download URLs.")
 
+# ---- local inference (optional onnxruntime) ----
+_tool(mcp_tools.list_inference_models, name="list_inference_models",
+      desc="Local ONNX upscale models; reports whether onnxruntime is "
+           "installed (requirements-inference.txt).")
+_tool(mcp_tools.upscale_image, name="upscale_image",
+      desc="Upscale an asset x4 with a local model (no SwarmUI needed) for "
+           "print-resolution output; returns a new asset URL.")
+
 
 @mcp.tool(name="render_page_preview",
           description="Render one page to an image and LOOK at it: QC for "

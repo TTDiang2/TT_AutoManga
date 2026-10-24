@@ -86,7 +86,21 @@ TEMPLATES: List[dict] = [
      "width": 600, "height": 900, "elements": gen_rows([3, 3, 3])},
 ]
 
-_BY_ID = {t["id"]: t for t in TEMPLATES}
+# Webtoon (long-strip) pages: narrow full-bleed column, one beat per row.
+# The page itself is tall; slots are percentage-based so gen_rows works as
+# usual. Export renders 1px = 1pt, so these produce true long-strip pages.
+WEBTOON_TEMPLATES: List[dict] = [
+    {"id": "webtoon-3", "name": "Webtoon 3", "nameZh": "条漫·3段",
+     "width": 800, "height": 2400, "elements": gen_rows([1, 1, 1], margin=1, gap=3)},
+    {"id": "webtoon-4-mix", "name": "Webtoon 4 Mix", "nameZh": "条漫·4格混排",
+     "width": 800, "height": 3200, "elements": gen_rows([2, 1, 1], margin=1, gap=3)},
+    {"id": "webtoon-6", "name": "Webtoon 6", "nameZh": "条漫·6段",
+     "width": 800, "height": 4800, "elements": gen_rows([1, 1, 1, 1, 1, 1],
+                                                        margin=1, gap=3)},
+]
+
+
+_BY_ID = {t["id"]: t for t in TEMPLATES + WEBTOON_TEMPLATES}
 
 
 def _slot_c(x, y, w, h, label, corners) -> dict:
@@ -142,4 +156,5 @@ def get_template(template_id: str) -> Optional[dict]:
 
 
 def list_template_ids() -> List[str]:
-    return [t["id"] for t in TEMPLATES] + [t["id"] for t in DYNAMIC_TEMPLATES]
+    return ([t["id"] for t in TEMPLATES] + [t["id"] for t in WEBTOON_TEMPLATES]
+            + [t["id"] for t in DYNAMIC_TEMPLATES])
