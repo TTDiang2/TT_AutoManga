@@ -157,7 +157,8 @@ export function StoryboardTab() {
       }
       
       if (data.panels && data.panels.length > 0) {
-        const newPanels = data.panels.map((p: any, idx: number) => ({
+        const llmPanels = (data.panels ?? []) as Array<{ scene?: string; characters?: string[]; dialogue?: string }>;
+        const newPanels = llmPanels.map((p, idx: number) => ({
           id: `panel_${Date.now()}_${idx}`,
           order: idx,
           scene: p.scene || '',

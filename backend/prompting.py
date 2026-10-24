@@ -19,7 +19,8 @@ def _global_blocks() -> Dict[str, str]:
     try:
         with open(_CHARACTERS_FILE, "r", encoding="utf-8") as f:
             chars = json.load(f)
-    except Exception:
+    except Exception as e:
+        logging.getLogger(__name__).debug("characters library unreadable: %s", e)
         return {}
     out = {}
     for c in chars if isinstance(chars, list) else []:

@@ -14,59 +14,32 @@ Automate the entire manga pipeline — decompose novel text into panels, generat
 
 ---
 
-## 📸 Screenshots
-
-<!--
-  SCREENSHOT PLACEHOLDERS — replace these with real screenshots.
-  Recommended paths (stable URLs):
-    docs/screenshots/01-storyboard.png
-    docs/screenshots/02-prompt-lab.png
-    docs/screenshots/03-composer.png
-    docs/screenshots/04-assets.png
-    docs/screenshots/05-showcase.png
-  Note: docs/screenshots/ is gitignored and will not be pushed.
-  Make sure screenshots contain no personal project content before committing.
--->
+## ✨ Feature Tour
 
 <p align="center">
   <em>① Storyboard — split a whole novel into editable manga panels</em>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/01-storyboard.png" alt="Storyboard" width="800" />
-</p>
 
 <p align="center">
   <em>② Prompt Lab — turn panels into SDXL / Danbooru tags in one click</em>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/02-prompt-lab.png" alt="Prompt Lab" width="800" />
-</p>
 
 <p align="center">
   <em>③ Visual Composer — drag-and-drop layout with 19+ manga/photo templates and dialogue bubbles</em>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/03-composer.png" alt="Visual Composer" width="800" />
-</p>
 
 <p align="center">
   <em>④ Assets — upload local images, or batch-generate via SwarmUI</em>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/04-assets.png" alt="Assets" width="800" />
-</p>
 
 <p align="center">
   <em>⑤ Showcase — project management + one-click PDF / image-ZIP export</em>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/05-showcase.png" alt="Showcase" width="800" />
-</p>
 
 ---
 
@@ -132,7 +105,7 @@ The Visual Composer is a page editor purpose-built for manga, not a generic imag
 
 **Prerequisites**
 
-- **Python 3.10+** (global environment, no venv)
+- **Python 3.10+** — use a virtual environment (`python -m venv .venv`) so the pinned requirements don't drift against other projects
 - **Node.js 20+** and npm
 - *(Optional)* [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) running on `127.0.0.1:7801`
 - *(Optional)* An OpenAI-compatible LLM endpoint (Ollama, vLLM, OpenAI, …)
@@ -155,9 +128,10 @@ On Windows, just run `run.bat`.
 
 ## ⚙️ Configuration
 
-On first launch TT_AutoManga creates `data/settings.json` (gitignored). Configure:
+Settings live in `data/settings.json` (gitignored; the file is created the
+first time you change anything in the Settings tab). Configure:
 
-- **API Endpoint** — your LLM URL (default `http://127.0.0.1:11434/v1` for Ollama)
+- **API Endpoint** — your LLM URL (default `https://api.openai.com/v1`; point it at `http://127.0.0.1:11434/v1` for Ollama)
 - **API Key** — leave empty for local models
 - **Model** — any chat-completions-compatible model
 - **SwarmUI** — server address, plus presets combining model, LoRAs, steps, CFG, sampler, and a global prompt suffix

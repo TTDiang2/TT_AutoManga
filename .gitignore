@@ -96,9 +96,6 @@ logs/
 .cache/
 .tmp/
 
-# Specific backup file in repo root
-run.bak
-
 # ---------- Pake / WebView build outputs ----------
 AutoManga.exe
 AutoManga.app

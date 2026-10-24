@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from PIL import Image
 
 from ..assembly import build_page
-from ..core.config import settings
+from ..core.config import settings, is_masked_api_key
 from ..core.openai_client import client as llm_client
 from ..core.swarmui_client import swarm_client
 from ..jobs import create_job, job_snapshot, run_job
@@ -27,7 +27,7 @@ from ..render import render_page
 from ..render.export_service import export_pages
 from ..render.resolve import make_resolver
 from ..storage.asset_store import asset_store
-from ..storage.manager import storage
+from ..storage.manager import storage, InvalidProjectIdError
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,10 @@ def _project_stats(project: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _load_or_404(project_id: str) -> Dict[str, Any]:
-    project = storage.load_project(project_id)
+    try:
+        project = storage.load_project(project_id)
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -183,7 +186,8 @@ async def agent_storyboard(req: StoryboardRequest):
     llm_client.reload_from_settings()
     if req.endpoint:
         llm_client.update_config(endpoint=req.endpoint)
-    if req.api_key is not None:
+    # skip the masked echo clients may send back from GET /api/settings/
+    if req.api_key is not None and not is_masked_api_key(req.api_key):
         llm_client.update_config(api_key=req.api_key)
     if req.model:
         llm_client.update_config(model=req.model)
@@ -229,14 +233,16 @@ class GenerateRequest(BaseModel):
     loras: Optional[List[Dict[str, Any]]] = None
     prompt_format: Optional[str] = None   # danbooru | prose | None (meta only)
     # --- img2img ---
-    init_image: Optional[str] = None      # asset URL / data URL / local path
+    init_image: Optional[str] = None      # asset URL / data URL
     init_creativity: Optional[float] = None
     # --- automatic prompt injection (project style + character blocks) ---
     inject_characters: bool = True
 
 
 def _ref_to_dataurl(ref: str) -> Optional[str]:
-    """Load an image ref (asset URL / path / data URL) as a data URL."""
+    """Load an image ref as a data URL. Only data: URLs and managed assets
+    are accepted — an arbitrary filesystem path here would be an
+    unauthenticated local-file read primitive."""
     try:
         if ref.startswith("data:"):
             return ref
@@ -244,13 +250,10 @@ def _ref_to_dataurl(ref: str) -> Optional[str]:
             path = asset_store.path_for(ref.rsplit("/", 1)[-1])
             if not path:
                 return None
-            ref = str(path)
-        p = Path(ref)
-        if not p.is_file():
-            return None
-        import base64 as b64mod
-        mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
-        return f"data:{mime};base64," + b64mod.b64encode(p.read_bytes()).decode()
+            import base64 as b64mod
+            mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+            return f"data:{mime};base64," + b64mod.b64encode(path.read_bytes()).decode()
+        return None
     except Exception:
         return None
 

@@ -27,8 +27,9 @@ class SwarmUIClient:
                         self.session_id = data.get("session_id", "")
                         self.session_expired = False
                         return True
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("SwarmUI session attempt %d failed: %s", attempt + 1, e)
             if attempt < 2:
                 await asyncio.sleep(1.5)
         return False
@@ -157,65 +158,72 @@ class SwarmUIClient:
 
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"[SwarmUI] FULL PAYLOAD: {payload}")
+        # log everything except the init image: img2img payloads embed a
+        # multi-MB base64 data URL that would bloat the log
+        log_payload = {k: (f"<data URL, {len(v)} chars>" if k == "initimage" else v)
+                       for k, v in payload.items()}
+        logger.info("[SwarmUI] FULL PAYLOAD: %s", log_payload)
 
         if sampler_name and sampler_name != swarmsettings.currentSamplerName:
             payload["sampler"] = sampler_name
 
         try:
             async with httpx.AsyncClient(timeout=300.0, follow_redirects=True) as client:
-                response = await client.post(
-                    f"{self.address}/API/GenerateText2Image",
-                    json=payload
-                )
-                
-                if response.status_code == 200:
+                # One replay on session expiry: the SAME payload (including
+                # initimage / removebackground) is re-sent with a fresh
+                # session id — never degraded to a plain text2image call.
+                result = None
+                for attempt in range(2):
+                    payload["session_id"] = self.session_id
+                    response = await client.post(
+                        f"{self.address}/API/GenerateText2Image",
+                        json=payload
+                    )
+                    if response.status_code != 200:
+                        return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
                     result = response.json()
-                    
-                    if result.get("error_id") == "invalid_session_id":
-                        self.session_expired = True
-                        return await self.generate_image(
-                            prompt, negative_prompt, model, steps, 
-                            cfg_scale, width, height, sampler_name, loras, seed
+                    if result.get("error_id") != "invalid_session_id":
+                        break
+                    self.session_expired = True
+                    if attempt == 0:
+                        if not await self.get_session():
+                            return {"success": False, "error": "Failed to renew SwarmUI session"}
+                        logger.info("[SwarmUI] session expired; replaying payload with new session")
+                        continue
+                    return {"success": False, "error": "SwarmUI session expired"}
+
+                if result.get("error"):
+                    return {"success": False, "error": result["error"]}
+
+                images = result.get("images", [])
+                if images:
+                    image_path = images[0]
+
+                    # If image_path is a data URL or extremely long, skip download and return path directly
+                    if image_path.startswith('data:') or len(image_path) > 1000:
+                        return {
+                            "success": True,
+                            "image": image_path if image_path.startswith('data:') else f"data:image/png;base64,{image_path}",
+                            "path": image_path[:100] + "..." if len(image_path) > 100 else image_path
+                        }
+
+                    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as img_client:
+                        img_response = await img_client.get(
+                            f"{self.address}/{image_path}"
                         )
-                    
-                    if result.get("error"):
-                        return {"success": False, "error": result["error"]}
-                    
-                    images = result.get("images", [])
-                    if images:
-                        image_path = images[0]
-                        
-                        # If image_path is a data URL or extremely long, skip download and return path directly
-                        if image_path.startswith('data:') or len(image_path) > 1000:
+                        if img_response.status_code == 200:
+                            import base64
+                            img_base64 = base64.b64encode(img_response.content).decode()
                             return {
                                 "success": True,
-                                "image": image_path if image_path.startswith('data:') else f"data:image/png;base64,{image_path}",
-                                "path": image_path[:100] + "..." if len(image_path) > 100 else image_path
+                                "image": f"data:image/png;base64,{img_base64}",
+                                "path": image_path
                             }
-                        
-                        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as img_client:
-                            img_response = await img_client.get(
-                                f"{self.address}/{image_path}"
-                            )
-                            if img_response.status_code == 200:
-                                import base64
-                                img_base64 = base64.b64encode(img_response.content).decode()
-                                return {
-                                    "success": True,
-                                    "image": f"data:image/png;base64,{img_base64}",
-                                    "path": image_path
-                                }
-                            return {"success": False, "error": f"Failed to download image: {img_response.status_code}"}
-                    return {"success": False, "error": "No images in response"}
-                else:
-                    return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
-                    
+                        return {"success": False, "error": f"Failed to download image: {img_response.status_code}"}
+                return {"success": False, "error": "No images in response"}
+
         except Exception as e:
             return {"success": False, "error": str(e)}
-
-    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        return {"progress": 0, "status": "not_implemented", "message": "Use WebSocket for real-time progress"}
 
 
 swarm_client = SwarmUIClient()

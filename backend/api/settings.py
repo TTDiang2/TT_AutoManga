@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from ..core import config
+from ..core.config import is_masked_api_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -54,8 +55,13 @@ class FullSettingsUpdate(BaseModel):
 
 @router.get("/")
 async def get_settings():
+    # The API key is a secret: the GET response only ever carries a masked
+    # form. Clients that save settings back unchanged echo the mask, which
+    # update_settings recognizes and ignores.
+    api = config.settings.api.model_dump()
+    api["api_key"] = config.mask_api_key(api["api_key"])
     return {
-        "api": config.settings.api.model_dump(),
+        "api": api,
         "swarmui": config.settings.swarmui.model_dump(),
         "defaults": config.settings.defaults.model_dump(),
         "language": config.settings.language
@@ -69,7 +75,10 @@ async def update_settings(update: FullSettingsUpdate):
             if update.api.endpoint is not None:
                 config.settings.api.endpoint = update.api.endpoint
             if update.api.api_key is not None:
-                config.settings.api.api_key = update.api.api_key
+                # skip the mask echoed back by clients that didn't retype
+                # the key; an empty string still clears it on purpose
+                if not is_masked_api_key(update.api.api_key):
+                    config.settings.api.api_key = update.api.api_key
             if update.api.model is not None:
                 config.settings.api.model = update.api.model
             if update.api.temperature is not None:

@@ -2,6 +2,26 @@ import { useState, useEffect, useRef } from 'react';
 import { FiRefreshCw, FiCopy, FiCheck, FiZap, FiTag, FiShuffle, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import type { Panel } from '../../types';
+
+// response shapes of /api/prompt/enhance and /api/prompt/batch-enhance
+interface EnhanceResponse {
+  detail?: string;
+  enhanced_prompt?: string;
+  error?: string;
+  results?: Array<{ enhanced_prompt?: string; error?: string }>;
+}
+
+// one entry of the JSON array accepted by the import modal
+interface ImportedPrompt {
+  positive?: string;
+  negative?: string;
+  seed?: number | string;
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function PromptLabTab() {
   const { panels, updatePanelPrompt, settings, promptMode, setPromptMode, addPanel } = useProjectStore();
@@ -51,9 +71,9 @@ export function PromptLabTab() {
 
   const handleImport = () => {
     setImportError('');
-    let data: any[];
+    let data: ImportedPrompt[];
     try {
-      data = JSON.parse(importJson);
+      data = JSON.parse(importJson) as ImportedPrompt[];
       if (!Array.isArray(data)) throw new Error('Expected an array');
     } catch {
       setImportError('Invalid JSON. Please check format.');
@@ -61,10 +81,10 @@ export function PromptLabTab() {
     }
     let imported = 0;
     const startOrder = panels.length;
-    data.forEach((item: any, idx: number) => {
+    data.forEach((item, idx) => {
       if (!item.positive) return;
       const id = `import-${Date.now()}-${idx}`;
-      const panel: any = {
+      const panel: Panel = {
         id,
         order: startOrder + idx,
         scene: (item.positive || '').substring(0, 80),
@@ -120,9 +140,9 @@ export function PromptLabTab() {
         }),
       });
 
-      let data: any = null;
+      let data: EnhanceResponse | null = null;
       try {
-        data = await response.json();
+        data = await response.json() as EnhanceResponse;
       } catch {
         data = null;
       }
@@ -150,9 +170,9 @@ export function PromptLabTab() {
       } else {
         setErrorMessage('后端返回了空结果,请检查后端日志。');
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Enhancement failed:', error);
-      setErrorMessage(`网络/客户端错误: ${error?.message || String(error)}`);
+      setErrorMessage(`网络/客户端错误: ${toErrorMessage(error)}`);
     } finally {
       stopTimer();
       setIsGenerating(false);
@@ -179,9 +199,9 @@ export function PromptLabTab() {
         }),
       });
 
-      let data: any = null;
+      let data: EnhanceResponse | null = null;
       try {
-        data = await response.json();
+        data = await response.json() as EnhanceResponse;
       } catch {
         data = null;
       }
@@ -195,7 +215,7 @@ export function PromptLabTab() {
       if (data?.results) {
         let success = 0;
         let failed = 0;
-        data.results.forEach((result: any, idx: number) => {
+        data.results.forEach((result, idx: number) => {
           if (result.enhanced_prompt) {
             success++;
             const panelId = panels[idx].id;
@@ -217,9 +237,9 @@ export function PromptLabTab() {
       } else {
         setErrorMessage('后端返回了空结果,请检查后端日志。');
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Batch enhancement failed:', error);
-      setErrorMessage(`网络/客户端错误: ${error?.message || String(error)}`);
+      setErrorMessage(`网络/客户端错误: ${toErrorMessage(error)}`);
     } finally {
       stopTimer();
       setIsGenerating(false);
@@ -236,7 +256,7 @@ export function PromptLabTab() {
     return () => {
       stopTimer();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   return (

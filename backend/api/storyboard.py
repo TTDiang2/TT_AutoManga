@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from ..core.openai_client import client
-from ..core.config import settings
+from ..core.config import settings, is_masked_api_key
 
 router = APIRouter(prefix="/api/storyboard", tags=["storyboard"])
 
@@ -26,7 +26,9 @@ async def generate_storyboard(req: GenerateRequest):
     
     if req.endpoint:
         client.update_config(endpoint=req.endpoint)
-    if req.api_key is not None:
+    # the frontend echoes the masked key from GET /api/settings/; only a
+    # freshly typed key overrides the stored one
+    if req.api_key is not None and not is_masked_api_key(req.api_key):
         client.update_config(api_key=req.api_key)
     if req.model:
         client.update_config(model=req.model)

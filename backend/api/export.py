@@ -6,12 +6,16 @@ import io
 import zipfile
 import uuid
 import base64
+import logging
 from pathlib import Path
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
+logger = logging.getLogger(__name__)
+
 EXPORTS_DIR = Path(__file__).parent.parent.parent / "data" / "exports"
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+EXPORTS_ROOT = EXPORTS_DIR.resolve()
 
 
 def _panel_image_bytes(image: str) -> Optional[bytes]:
@@ -97,8 +101,8 @@ async def export_pdf(req: ExportPDFRequest):
                         y = height - draw_height - 1*inch
                         
                         c.drawImage(img_reader, x, y, width=draw_width, height=draw_height)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("export pdf: skipping unreadable image: %s", e)
             
             c.showPage()
         
@@ -187,8 +191,8 @@ async def export_composer_pdf(req: ComposerExportRequest):
                     x = (width - draw_w) / 2
                     y = height - draw_h - 1 * inch
                     c.drawImage(img_reader, x, y, width=draw_w, height=draw_h)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("composer pdf: skipping unreadable page image: %s", e)
             c.showPage()
 
         c.save()
@@ -222,8 +226,8 @@ async def export_composer_images(req: ComposerExportRequest):
                         img_bytes = base64.b64decode(img_data)
                         fname = f"{page.name or 'page'}_{i+1:03d}.png"
                         zf.writestr(fname, img_bytes)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("composer zip: skipping undecodable page %d: %s", i + 1, e)
 
         return {
             "success": True,
@@ -236,7 +240,11 @@ async def export_composer_images(req: ComposerExportRequest):
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):
-    path = EXPORTS_DIR / filename
+    path = (EXPORTS_DIR / filename).resolve()
+    # filename is client-supplied and may carry ../ segments; only serve
+    # files that resolve inside data/exports
+    if not path.is_relative_to(EXPORTS_ROOT):
+        raise HTTPException(status_code=404, detail="File not found")
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path, media_type="application/octet-stream", filename=filename)

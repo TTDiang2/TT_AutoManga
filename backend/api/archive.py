@@ -4,17 +4,45 @@ from pydantic import BaseModel
 from typing import List, Optional
 from pathlib import Path
 import json
+import logging
+import re
 import shutil
 import uuid
 import base64
 import zipfile
 import io
 
+from ..core.config import _backup_corrupt
+
 router = APIRouter(prefix="/api/archive", tags=["archive"])
+
+logger = logging.getLogger(__name__)
 
 ARCHIVE_DIR = Path(__file__).parent.parent.parent / "data" / "archive"
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_FILE = ARCHIVE_DIR / "metadata.json"
+ARCHIVE_ROOT = ARCHIVE_DIR.resolve()
+
+# Folder ids become directory names under data/archive — same rule as
+# project ids, so ids can never traverse out of the archive.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def _validate_id(value: str, what: str = "id") -> str:
+    if not isinstance(value, str) or not _SAFE_ID_RE.fullmatch(value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid {what}: only letters, digits, '_' and '-' are allowed")
+    return value
+
+
+def _archive_file(path: str) -> Path:
+    """Resolve a metadata-recorded path, refusing anything outside data/archive."""
+    p = Path(path).resolve()
+    if not p.is_relative_to(ARCHIVE_ROOT):
+        raise HTTPException(status_code=400,
+                            detail="image path is outside the archive directory")
+    return p
 
 
 class ArchiveImage(BaseModel):
@@ -46,8 +74,10 @@ def load_metadata() -> ArchiveMetadata:
             with open(METADATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return ArchiveMetadata(**data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("archive metadata unreadable (%s); backed up and "
+                           "starting empty", e)
+            _backup_corrupt(METADATA_FILE)
     return ArchiveMetadata(images=[], folders=[])
 
 
@@ -79,6 +109,7 @@ async def list_folders(parent_id: Optional[str] = None, sort_by: Optional[str] =
 
 @router.post("/folders")
 async def create_folder(folder: ArchiveFolder):
+    _validate_id(folder.id, "folder id")
     metadata = load_metadata()
     if any(f.id == folder.id for f in metadata.folders):
         raise HTTPException(status_code=400, detail="Folder already exists")
@@ -107,6 +138,7 @@ async def update_folder(folder_id: str, req: dict):
 
 @router.delete("/folders/{folder_id}")
 async def delete_folder(folder_id: str):
+    _validate_id(folder_id, "folder id")
     metadata = load_metadata()
     folder = next((f for f in metadata.folders if f.id == folder_id), None)
     if not folder:
@@ -125,13 +157,15 @@ async def add_image(req: dict):
     source_data = req.get("source_data") or req.get("source_path")
     name = req.get("name", "Untitled")
     folder_id = req.get("folder_id")
-    
+
     if not source_data:
         raise HTTPException(status_code=400, detail="No source data provided")
-    
+    if folder_id:
+        _validate_id(folder_id, "folder id")
+
     metadata = load_metadata()
     image_id = str(uuid.uuid4())
-    
+
     target_dir = ARCHIVE_DIR / (folder_id if folder_id else "root")
     target_dir.mkdir(parents=True, exist_ok=True)
     
@@ -139,7 +173,11 @@ async def add_image(req: dict):
     
     if source_data.startswith("data:"):
         header, b64_data = source_data.split(",", 1)
-        img_bytes = base64.b64decode(b64_data)
+        try:
+            img_bytes = base64.b64decode(b64_data, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400,
+                                detail="source is not valid base64 image data")
         with open(target_path, "wb") as f:
             f.write(img_bytes)
     elif source_data.startswith("/api/assets/file/"):
@@ -150,11 +188,13 @@ async def add_image(req: dict):
             raise HTTPException(status_code=400, detail="Source asset not found")
         shutil.copy2(source, target_path)
     else:
-        source_path = Path(source_data)
-        if not source_path.exists():
-            raise HTTPException(status_code=400, detail="Source file not found")
-        shutil.copy2(source_path, target_path)
-    
+        # Only embedded data URLs and managed assets are accepted; an
+        # arbitrary filesystem path here would turn this endpoint into a
+        # copy-anything-then-serve-it read primitive.
+        raise HTTPException(
+            status_code=400,
+            detail="source must be a data: URL or an /api/assets/file/ reference")
+
     image = ArchiveImage(
         id=image_id,
         name=name,
@@ -191,10 +231,16 @@ async def delete_image(image_id: str):
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
     
-    image_path = Path(image.path)
-    if image_path.exists():
-        image_path.unlink()
-    
+    # Drop the entry even when the recorded file is missing or lives outside
+    # the archive (legacy metadata); otherwise it could never be removed.
+    try:
+        image_path = _archive_file(image.path)
+        if image_path.exists():
+            image_path.unlink()
+    except HTTPException:
+        logger.warning("archive image %s points outside the archive (%s); "
+                       "removing metadata entry only", image_id, image.path)
+
     metadata.images = [img for img in metadata.images if img.id != image_id]
     save_metadata(metadata)
     return {"success": True}
@@ -207,8 +253,7 @@ async def serve_image(image_id: str):
     if not image:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    from fastapi.responses import FileResponse
-    return FileResponse(image.path)
+    return FileResponse(_archive_file(image.path))
 
 
 @router.get("/folders/{folder_id}/download")
@@ -230,7 +275,11 @@ async def download_folder(folder_id: str):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for img in images:
-            img_path = Path(img.path)
+            try:
+                img_path = _archive_file(img.path)
+            except HTTPException:
+                logger.warning("skipping archive image outside root: %s", img.path)
+                continue
             if img_path.exists() and img_path.suffix.lower() == ".png":
                 zf.write(img_path, img_path.name)
     buffer.seek(0)

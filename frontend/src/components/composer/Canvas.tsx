@@ -170,7 +170,7 @@ export function Canvas() {
         updateElement(dragState.elementId, { x: newX, y: newY });
       } else if (dragState.mode === 'resize' && dragState.handle) {
         const minSize = 3;
-        let { origX, origY, origW, origH } = dragState;
+        const { origX, origY, origW, origH } = dragState;
         let newX = origX, newY = origY, newW = origW, newH = origH;
 
         if (dragState.handle.includes('e')) {

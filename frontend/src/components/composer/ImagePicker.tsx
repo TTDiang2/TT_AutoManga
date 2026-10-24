@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { FiX, FiImage, FiUpload, FiFolder } from 'react-icons/fi';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useComposerStore } from '../../store/composerStore';
@@ -39,8 +39,7 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
   const [source, setSource] = useState<ImageSource>('panels');
 
   // Panels source (Composer page images)
-  const [panelImages, setPanelImages] = useState<PanelImage[]>([]);
-  const [panelsLoading, setPanelsLoading] = useState(false);
+  const panelsLoading = false; // panel images are derived, never async
 
   // Archive source
   const [archiveFolders, setArchiveFolders] = useState<ArchiveFolder[]>([]);
@@ -48,8 +47,8 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
   const [archiveFolder, setArchiveFolder] = useState<string | null>(null);
   const [archiveLoading, setArchiveLoading] = useState(false);
 
-  // Load panel images from composer pages
-  useEffect(() => {
+  // Panel images are a pure derivation of the composer pages
+  const panelImages = useMemo<PanelImage[]>(() => {
     const imgs: PanelImage[] = [];
     composerPages.forEach(page => {
       page.elements.forEach(el => {
@@ -58,14 +57,20 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
         }
       });
     });
-    setPanelImages(imgs);
-    setPanelsLoading(false);
+    return imgs;
   }, [composerPages]);
+
+  // Loading starts the moment the archive tab opens; adjust during render
+  // (react.dev pattern) so the effect below only performs the fetches.
+  const [prevSource, setPrevSource] = useState(source);
+  if (prevSource !== source) {
+    setPrevSource(source);
+    setArchiveLoading(source === 'archive');
+  }
 
   // Load archive folders + images
   useEffect(() => {
     if (source !== 'archive') return;
-    setArchiveLoading(true);
     Promise.all([
       fetch('/api/archive/folders'),
       fetch(`/api/archive/images${archiveFolder ? `?folder_id=${archiveFolder}` : ''}`),

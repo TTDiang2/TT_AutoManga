@@ -227,13 +227,20 @@ in for continuity.
 
 - FastAPI standard errors: `{"detail": "..."}`. 404 unknown project/page/
   element/job/asset; 400 validation (bad template, coordinates outside 0-100,
-  duplicate panel ids, empty scene); 502 upstream LLM/SwarmUI failure.
+  duplicate panel ids, empty scene, unsafe id); 502 upstream LLM/SwarmUI
+  failure.
 - Panel ids are auto-filled as `panel_1..panel_n` when omitted; ids must be
   unique and `scene` non-empty.
+- Project/folder ids become directory names on disk, so they must match
+  `[A-Za-z0-9_-]{1,128}` — anything else is rejected with 400 (server-side
+  generated ids always comply).
 - Element `id`/`type` are immutable after creation (PATCH rejects them).
 - Known approximations: italic styles render as regular on the server;
   bubble text auto-layout estimates CJK glyph widths (fine for CJK, rough for
   long Latin lines); one SwarmUI backend at a time.
+- `GET /api/settings/` returns the LLM `api_key` masked (`****` + last 4);
+  saving it back unchanged keeps the stored key (only a freshly typed value
+  replaces it).
 - The project JSON is plain and human-editable; the UI reads the same file.
   If you break geometry, worst case: fix by hand or rebuild the page.
 

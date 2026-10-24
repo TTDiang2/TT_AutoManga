@@ -3,6 +3,16 @@ import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 're
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 
+// shape returned by GET /api/character-templates
+interface CharacterTemplateMeta {
+  id: string;
+  name: string;
+  description: string;
+  appearance?: string | null;
+  image?: string | null;
+  isBuiltIn?: boolean;
+}
+
 export function CharacterTab() {
   const { characters, setCharacters, addCharacter, updateCharacter, removeCharacter, extractCharactersFromPanels } = useProjectStore();
   const { t } = useTranslation();
@@ -11,7 +21,7 @@ export function CharacterTab() {
   const [editForm, setEditForm] = useState({ name: '', description: '', appearance: '' });
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<CharacterTemplateMeta[]>([]);
   const [backendLoaded, setBackendLoaded] = useState(false);
 
   const syncCharactersToBackend = async (chars: typeof characters) => {
@@ -21,7 +31,9 @@ export function CharacterTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(chars),
       });
-    } catch {}
+    } catch {
+      // best-effort sync; the backend library is optional
+    }
   };
 
   useEffect(() => {
@@ -125,13 +137,13 @@ export function CharacterTab() {
     }
   };
 
-  const handleUseTemplate = (template: any) => {
+  const handleUseTemplate = (template: CharacterTemplateMeta) => {
     const newChar = {
       id: `char_${Date.now()}`,
       name: template.name,
       description: template.description,
-      appearance: template.appearance,
-      image: template.image,
+      appearance: template.appearance ?? undefined,
+      image: template.image ?? undefined,
       sourcePanelIds: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from pathlib import Path
 import json
+import logging
 
 from ..core.swarmui_client import swarm_client
 from ..core.config import settings, LoraConfig
@@ -56,8 +57,8 @@ def load_templates() -> List[dict]:
         try:
             with open(TEMPLATES_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("character templates file unreadable (%s); using built-ins", e)
     return DEFAULT_TEMPLATES.copy()
 
 

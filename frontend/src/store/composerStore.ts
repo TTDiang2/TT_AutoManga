@@ -5,6 +5,7 @@ import type {
   ComposerTemplate,
   BubbleType,
   ImageSlotElement,
+  ImageElement,
   PageImageElement,
   QuadCorners,
   CornerPoint,
@@ -326,9 +327,8 @@ let idCounter = 0;
 const uid = () => `el_${Date.now()}_${++idCounter}`;
 const pageUid = () => `page_${Date.now()}_${++idCounter}`;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function templateToElements(template: ComposerTemplate): ComposerElement[] {
-  return template.elements.map((el: any, i: number) => ({
+  return template.elements.map((el: Partial<ComposerElement>, i: number) => ({
     ...el,
     id: uid(),
     zIndex: i,
@@ -814,7 +814,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
             return { ...el, frameBorderWidth: width };
           }
           return el;
-        }) as any,
+        }) as ComposerElement[],
       };
       return { pages };
     });
@@ -936,12 +936,15 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
     const sanitizedElements = page.elements
       .map(el => {
         // Keep geometry, label, type, corners. Drop src/image-specific bits.
+        // (the extra optional fields only exist on some union members, hence
+        // the widened pick)
+        type ElementBits = Partial<Pick<ImageElement, 'src' | 'originalSrc' | 'cropArea'>>;
         const { id: _id, zIndex: _z, locked: _l, visible: _v,
                 src: _s, originalSrc: _os, cropArea: _c,
-                ...rest } = el as any;
+                ...rest } = el as ComposerElement & ElementBits;
         // Downgrade image elements to empty slots (templates are geometry only).
         if (rest.type === 'image' || rest.type === 'page-image') {
-          rest.type = 'image-slot';
+          return { ...rest, type: 'image-slot' as const };
         }
         return rest;
       });

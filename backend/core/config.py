@@ -1,8 +1,10 @@
-import os
 import json
+import logging
+import shutil
 from pathlib import Path
-from typing import Optional
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 # Project directories - go up from backend/core to root
 BASE_DIR = Path(__file__).parent.parent.parent
@@ -78,6 +80,28 @@ class AppSettings(BaseModel):
     language: str = "en"
 
 
+def mask_api_key(key: str) -> str:
+    """Masked form returned to clients: never the full key, shows last 4."""
+    if not key:
+        return ""
+    return "****" + key[-4:] if len(key) > 4 else "****"
+
+
+def is_masked_api_key(value: str) -> bool:
+    """True for values produced by mask_api_key — clients echo them back
+    verbatim when they don't retype the key; such echoes must not overwrite
+    the stored key."""
+    return bool(value) and value.startswith("****")
+
+
+def _backup_corrupt(file: Path) -> None:
+    """Copy an unreadable JSON file aside so the next save can't destroy it."""
+    try:
+        shutil.copy2(file, file.with_name(file.name + ".corrupt"))
+    except OSError as e:
+        logger.warning("could not back up corrupt %s: %s", file, e)
+
+
 def load_settings() -> AppSettings:
     """Load settings from JSON file or return defaults."""
     if SETTINGS_FILE.exists():
@@ -89,8 +113,11 @@ def load_settings() -> AppSettings:
                     if suffix is not None and not data["swarmui"].get("promptSuffix"):
                         data["swarmui"]["promptSuffix"] = suffix
                 return AppSettings(**data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "settings.json unreadable (%s); backed up to settings.json.corrupt "
+                "and falling back to defaults", e)
+            _backup_corrupt(SETTINGS_FILE)
     return AppSettings()
 
 

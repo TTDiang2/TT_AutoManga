@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Any
 from pathlib import Path
 import json
+import logging
 import time
 
 router = APIRouter(prefix="/api/composer/templates", tags=["composer-templates"])
@@ -60,8 +61,8 @@ def _load() -> List[dict]:
                 data = json.load(f)
                 if isinstance(data, list):
                     return data
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("composer templates file unreadable (%s); starting empty", e)
     return []
 
 

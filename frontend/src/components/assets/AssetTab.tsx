@@ -2,8 +2,29 @@ import { useState, useEffect, useMemo } from 'react';
 import { FiUpload, FiRefreshCw, FiImage, FiCheck, FiX, FiAlertCircle, FiZap, FiTag, FiArchive, FiDownload, FiEdit2, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import type { TranslationKeys } from '../../i18n';
+import type { Panel } from '../../types';
 
 type ImageStatus = 'empty' | 'pending' | 'ready' | 'error';
+
+// shapes returned by GET /api/archive/images and /api/archive/folders
+interface ArchiveImageMeta {
+  id: string;
+  name: string;
+  path: string;
+  folder_id: string | null;
+  created_at: string;
+  thumbnail_path?: string | null;
+}
+
+interface ArchiveFolderMeta {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  created_at: string;
+  sort_order: number;
+  group?: string | null;
+}
 
 /**
  * Detects the natural aspect ratio of an image (data URL or remote URL) and
@@ -41,7 +62,7 @@ interface PanelSlotProps {
   onUpload: (panelId: string, file: File) => void;
   onGenerate: (panelId: string) => void;
   onArchive?: (panelId: string) => void;
-  t: any;
+  t: TranslationKeys;
 }
 
 function PanelSlot({ panelId, index, image, status, isGenerating, error, defaultAspectRatio, onUpload, onGenerate, onArchive, t }: PanelSlotProps) {
@@ -56,7 +77,8 @@ function PanelSlot({ panelId, index, image, status, isGenerating, error, default
       setIsUploading(true);
       try {
         onUpload(panelId, file);
-      } catch (err) {
+      } catch {
+        // onUpload reports its own errors via the panel status line
       } finally {
         setIsUploading(false);
       }
@@ -129,15 +151,15 @@ function PanelSlot({ panelId, index, image, status, isGenerating, error, default
 }
 
 interface ArchiveItemProps {
-  img: any;
+  img: ArchiveImageMeta;
   isSelected: boolean;
   isMoveMenuOpen: boolean;
-  folders: any[];
+  folders: ArchiveFolderMeta[];
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onToggleMoveMenu: (id: string) => void;
   onMove: (imageId: string, folderId: string | null) => void;
-  t: any;
+  t: TranslationKeys;
 }
 
 /**
@@ -208,8 +230,8 @@ export function AssetTab() {
   const [panelErrors, setPanelErrors] = useState<Record<string, string>>({});
   const [swarmUIConnected, setSwarmUIConnected] = useState<boolean | null>(null);
   const [viewMode, setViewMode] = useState<'generated' | 'archive'>('generated');
-  const [archiveImages, setArchiveImages] = useState<any[]>([]);
-  const [archiveFolders, setArchiveFolders] = useState<any[]>([]);
+  const [archiveImages, setArchiveImages] = useState<ArchiveImageMeta[]>([]);
+  const [archiveFolders, setArchiveFolders] = useState<ArchiveFolderMeta[]>([]);
   const [folderSortBy, setFolderSortBy] = useState<'order' | 'name' | 'created'>('order');
   const [currentFolder, setCurrentFolder] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -358,7 +380,7 @@ export function AssetTab() {
     }
   };
 
-  const getPromptForPanel = (panel: any): string => {
+  const getPromptForPanel = (panel: Panel): string => {
     if (promptMode === 'tags' && panel.prompt.tags && panel.prompt.tags.length > 0) {
       return panel.prompt.tags.join(', ');
     }
@@ -496,7 +518,7 @@ export function AssetTab() {
               <div style={{ display: 'flex', gap: '4px' }}>
                 <select
                   value={folderSortBy}
-                  onChange={(e) => { const v = e.target.value as any; setFolderSortBy(v); loadArchive(); }}
+                  onChange={(e) => { const v = e.target.value as 'order' | 'name' | 'created'; setFolderSortBy(v); loadArchive(); }}
                   style={{ fontSize: '10px', padding: '2px 4px', borderRadius: '4px', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
                 >
                   <option value="order">Default</option>

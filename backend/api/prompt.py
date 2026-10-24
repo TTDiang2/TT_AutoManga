@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import logging
 from ..core.openai_client import client
+from ..core.config import is_masked_api_key
 
 router = APIRouter(prefix="/api/prompt", tags=["prompt"])
 
@@ -34,7 +35,9 @@ async def enhance_prompt(req: EnhanceRequest):
     
     if req.endpoint:
         client.update_config(endpoint=req.endpoint)
-    if req.api_key is not None:
+    # the frontend echoes the masked key from GET /api/settings/; only a
+    # freshly typed key overrides the stored one
+    if req.api_key is not None and not is_masked_api_key(req.api_key):
         client.update_config(api_key=req.api_key)
     if req.model:
         client.update_config(model=req.model)
@@ -69,7 +72,9 @@ async def batch_enhance_prompts(req: BatchEnhanceRequest):
     
     if req.endpoint:
         client.update_config(endpoint=req.endpoint)
-    if req.api_key is not None:
+    # the frontend echoes the masked key from GET /api/settings/; only a
+    # freshly typed key overrides the stored one
+    if req.api_key is not None and not is_masked_api_key(req.api_key):
         client.update_config(api_key=req.api_key)
     if req.model:
         client.update_config(model=req.model)

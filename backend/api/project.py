@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from ..storage.manager import storage
+from ..storage.manager import storage, InvalidProjectIdError
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -30,6 +30,8 @@ async def save_project(project: Project):
     try:
         result = storage.save_project(project.model_dump())
         return {"success": True, "project": result}
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -41,6 +43,8 @@ async def load_project(project_id: str):
         if project:
             return {"project": project}
         raise HTTPException(status_code=404, detail="Project not found")
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
@@ -66,7 +70,10 @@ async def list_project_covers():
 
 @router.post("/{project_id}/migrate-assets")
 async def migrate_project_assets(project_id: str):
-    project = storage.load_project(project_id)
+    try:
+        project = storage.load_project(project_id)
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     saved = storage.save_project(project)   # save_project normalizes embedded images
@@ -80,6 +87,8 @@ async def delete_project(project_id: str):
         if success:
             return {"success": True}
         raise HTTPException(status_code=404, detail="Project not found")
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:

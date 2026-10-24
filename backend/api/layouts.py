@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from pathlib import Path
 import json
+import logging
 
 router = APIRouter(prefix="/api/layouts", tags=["layouts"])
 
@@ -66,8 +67,8 @@ def load_layouts() -> List[dict]:
         try:
             with open(LAYOUTS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning("layouts file unreadable (%s); using built-in layouts", e)
     return [l for l in DEFAULT_LAYOUTS]
 
 

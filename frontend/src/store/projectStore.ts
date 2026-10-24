@@ -83,8 +83,8 @@ export const useProjectStore = create<ProjectStore>()(
       composerProjectId: null,
 
       setCurrentProject: (project) => {
-        const storedPanels: any[] = get().panels || [];
-        const apiPanels: any[] = project?.panels || [];
+        const storedPanels: Panel[] = get().panels || [];
+        const apiPanels: Panel[] = project?.panels || [];
         const mergedPanels = apiPanels.map(apiPanel => {
           const storedPanel = storedPanels.find(p => p.id === apiPanel.id);
           if (!apiPanel.image && storedPanel?.image) {
@@ -100,8 +100,8 @@ export const useProjectStore = create<ProjectStore>()(
           const res = await fetch(`/api/projects/load/${projectId}`);
           const data = await res.json();
           if (data.project) {
-            const apiPanels: any[] = data.project.panels || [];
-            const storedPanels: any[] = get().panels || [];
+            const apiPanels: Panel[] = (data.project.panels || []) as Panel[];
+            const storedPanels: Panel[] = get().panels || [];
             const mergedPanels = apiPanels.map(apiPanel => {
               const storedPanel = storedPanels.find(p => p.id === apiPanel.id);
               if (!apiPanel.image && storedPanel?.image) {
@@ -121,6 +121,7 @@ export const useProjectStore = create<ProjectStore>()(
             }
           }
         } catch {
+          // offline load failed: keep whatever is already in the store
         }
       },
 
@@ -212,13 +213,13 @@ export const useProjectStore = create<ProjectStore>()(
       partialize: (state) => ({
         settings: state.settings,
         activeTab: state.activeTab,
-        characters: state.characters?.map((c: any) => {
-          const { image, ...charData } = c;
+        characters: state.characters?.map((c) => {
+          const { image: _image, ...charData } = c;
           return charData;
         }),
         promptMode: state.promptMode,
-        panels: state.panels?.map((p: any) => {
-          const { image, ...panelData } = p;
+        panels: state.panels?.map((p) => {
+          const { image: _image, ...panelData } = p;
           return panelData;
         }),
       }),

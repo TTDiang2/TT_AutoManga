@@ -8,6 +8,8 @@ normalizes legacy data URLs on save (see manager.py).
 """
 import base64
 import json
+import logging
+import shutil
 import threading
 import time
 import uuid
@@ -32,8 +34,14 @@ class AssetStore:
                     data = json.load(f)
                     if isinstance(data, dict):
                         return data
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning("asset index unreadable (%s); backed up and "
+                                "starting empty", e)
+                try:
+                    shutil.copy2(self.index_file,
+                                 self.index_file.with_name(self.index_file.name + ".corrupt"))
+                except OSError:
+                    pass
         return {}
 
     def _flush(self) -> None:

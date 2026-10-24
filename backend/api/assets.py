@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from ..core.swarmui_client import swarm_client
 from ..core.config import settings, LoraConfig
-from ..storage.manager import storage
+from ..storage.manager import storage, InvalidProjectIdError
 from ..storage.asset_store import asset_store
 
 router = APIRouter(prefix="/api/assets", tags=["assets"])
@@ -38,7 +38,10 @@ class UploadRequest(BaseModel):
 
 def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> str:
     """Store panel image reference; returns the final ref (asset URL or original)."""
-    project = storage.load_project(project_id)
+    try:
+        project = storage.load_project(project_id)
+    except InvalidProjectIdError:
+        return image_data
     if not project:
         return image_data
     if image_data.startswith("data:"):
@@ -119,7 +122,7 @@ async def generate_with_swarmui(req: GenerateImageRequest):
     
     loras = None
     if swarmsettings.currentLoras:
-        loras = [LoraConfig(name=l.get("name", ""), weight=l.get("weight", 1.0)) for l in swarmsettings.currentLoras if l.get("name")]
+        loras = [l for l in swarmsettings.currentLoras if l.name]
     
     try:
         import logging
@@ -162,15 +165,6 @@ async def get_swarmui_models():
         return {"models": models}
     except Exception as e:
         return {"models": [], "error": str(e)}
-
-
-@router.get("/swarmui/status/{task_id}")
-async def check_swarmui_status(task_id: str):
-    try:
-        status = await swarm_client.get_task_status(task_id)
-        return status
-    except Exception as e:
-        return {"progress": 0, "status": str(e)}
 
 
 @router.get("/swarmui/test")

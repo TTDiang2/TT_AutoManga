@@ -1,5 +1,7 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
@@ -9,9 +11,16 @@ import json
 from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
+logger = logging.getLogger(__name__)
+
 
 def _cleanup_orphan_assets() -> None:
-    """Remove asset files not referenced by any project (asset index aware)."""
+    """Remove asset files not referenced by any project (asset index aware).
+
+    Safety rule: if any project.json fails to parse, abort the whole cleanup —
+    deleting "orphans" we can't prove orphaned would destroy that project's
+    assets.
+    """
     if not ASSETS_DIR.exists():
         return
 
@@ -23,10 +32,21 @@ def _cleanup_orphan_assets() -> None:
             continue
         meta_file = proj_dir / "project.json"
         if not meta_file.exists():
-            continue
+            # could be a save interrupted between mkdir and the first write —
+            # its assets are unprovable orphans, so keep everything
+            logger.warning(
+                "orphan cleanup aborted: %s has no project.json; keeping all "
+                "assets", proj_dir)
+            return
         try:
             with open(meta_file, "r", encoding="utf-8") as f:
                 proj = json.load(f)
+        except Exception as e:
+            logger.warning(
+                "orphan cleanup aborted: %s is unreadable (%s); keeping all "
+                "assets so the project can be repaired", meta_file, e)
+            return
+        try:
             for panel in proj.get("panels", []):
                 img = panel.get("image")
                 if img and not img.startswith("data:"):
@@ -44,8 +64,11 @@ def _cleanup_orphan_assets() -> None:
                             referenced.add(v.rsplit("/", 1)[-1])
                         elif not v.startswith("/api/") and Path(v).exists():
                             referenced_paths.add(str(Path(v).resolve()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "orphan cleanup aborted: %s has unexpected content (%s); "
+                "keeping all assets", meta_file, e)
+            return
 
     from .storage.asset_store import asset_store
     removed = 0
@@ -65,20 +88,22 @@ def _cleanup_orphan_assets() -> None:
                 removed += 1
 
     if removed > 0:
-        print(f"[Cleanup] Removed {removed} orphan asset file(s)")
+        logger.info("[Cleanup] Removed %d orphan asset file(s)", removed)
 
 
-_cleanup_orphan_assets()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Disk-touching maintenance runs at server startup, not at import time,
+    # so importing the app (tests, CLI helpers) never deletes files.
+    _cleanup_orphan_assets()
+    yield
 
-app = FastAPI(title="AutoManga API", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="AutoManga API", version="1.0.0", lifespan=lifespan)
+
+# No CORS middleware: the backend serves the UI itself (same origin) and the
+# vite dev server proxies /api. Anything else — including a malicious page in
+# the user's browser — gets no cross-origin access to the API.
 
 app.include_router(storyboard.router)
 app.include_router(prompt.router)
@@ -101,6 +126,8 @@ async def health_check():
 
 
 frontend_dir = BASE_DIR / "frontend" / "dist"
+frontend_root = frontend_dir.resolve()  # containment anchor for the catch-all
+
 
 if frontend_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(frontend_dir / "assets")), name="assets")
@@ -116,8 +143,11 @@ async def serve_frontend():
 @app.get("/{path:path}")
 async def serve_frontend_paths(path: str):
     if frontend_dir.exists():
-        file_path = frontend_dir / path
-        if file_path.exists() and file_path.is_file():
+        # path may contain ../ or URL-encoded %2e%2e segments; serve only
+        # files that resolve inside frontend/dist.
+        file_path = (frontend_dir / path).resolve()
+        if file_path.is_relative_to(frontend_root) \
+                and file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(frontend_dir / "index.html"))
     return {"error": "Frontend not found"}
