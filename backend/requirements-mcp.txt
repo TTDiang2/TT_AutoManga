@@ -1,0 +1,4 @@
+# Optional: only needed to run the MCP server (python -m backend.mcp_server).
+# mcp 1.x and 2.x are both supported by backend/mcp_server.py; if you keep
+# the backend in its own venv, you may install these in a separate one.
+mcp>=1.30

@@ -17,9 +17,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          pip install -r backend/requirements.txt -r backend/requirements-dev.txt -r backend/requirements-mcp.txt
       - name: Run backend tests
         run: python -m pytest backend/tests -q
+      - name: MCP server wiring smoke
+        run: python -c "import backend.mcp_server as s; import asyncio; ts = asyncio.run(s.mcp.list_tools()); print(len(ts if isinstance(ts, list) else ts.tools), 'MCP tools registered')"
 
   frontend:
     runs-on: ubuntu-latest

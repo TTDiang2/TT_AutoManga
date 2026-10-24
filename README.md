@@ -126,6 +126,46 @@ python -m backend.main 5180
 
 On Windows, just run `run.bat`.
 
+## 🤖 Agent access (MCP / Skill / CLI)
+
+Beyond the web UI, the whole pipeline is drivable by AI agents — any harness,
+any model:
+
+- **MCP server** — `python -m backend.mcp_server` (stdio; optional deps in
+  `backend/requirements-mcp.txt`). Exposes 26 typed tools covering the full
+  comic workflow; `render_page_preview` returns image content so multimodal
+  agents can SEE and QC pages. Register with any MCP client, e.g. for Claude
+  Desktop / Codex / Cursor / ZCode:
+
+  ```json
+  {
+    "mcpServers": {
+      "automanga": {
+        "command": "python",
+        "args": ["-m", "backend.mcp_server"],
+        "cwd": "D:/path/to/TT_AutoManga",
+        "env": {
+          "AUTOMANGA_URL": "http://127.0.0.1:5180",
+          "PYTHONPATH": "D:/path/to/TT_AutoManga"
+        }
+      }
+    }
+  }
+  ```
+
+  (If your client has no `cwd` field, the `PYTHONPATH` env alone makes the
+  `backend` package importable from any working directory.)
+
+- **Agent Skill** — `skills/manga-maker/SKILL.md` follows the open
+  [agentskills.io](https://agentskills.io) format: copy/symlink the folder
+  into your agent's skills directory and it learns the full production SOP
+  (storyboard → generation → assembly → visual QC → export). Content-neutral:
+  the pipeline applies no filtering; content decisions stay with you and the
+  model you drive it with.
+- **HTTP / CLI** — the same API directly (`AGENTS.md` documents the contract;
+  `GET /openapi.json` is the machine schema) or via
+  `python -m backend.agent_cli --help`.
+
 ## ⚙️ Configuration
 
 Settings live in `data/settings.json` (gitignored; the file is created the
