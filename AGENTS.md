@@ -323,3 +323,24 @@ If you don't want to write panels yourself, `POST /api/agent/storyboard`
 OpenAI-compatible LLM and stores the resulting panels. You lose creative
 control over scene wording — most agents should write panels directly
 (step 2 of the golden path) and skip this.
+
+## 10. Making a comic a stranger can READ (craft rules)
+
+Everything above moves pixels; it does not guarantee a readable comic. A
+mechanically clean first production run still failed real readers on four
+fronts: story jumps (scene cuts with no captions), bubbles covering faces,
+bubble-style overload, and appearance drift (one hero, two beard colors; two
+of him in one panel). The full playbook — reader test, storyboard grammar
+(establishing shots, character intros, caption plan), the character
+consistency protocol (rigid prompt blocks, one-instance-per-panel, extras
+guarding, img2img chaining), lettering discipline (style budget, ≤14 char
+bubbles, never cover a face, vertical-text quirks) and a 7-point visual QC
+checklist with fix recipes — lives in `skills/manga-maker/SKILL.md` §0-§7.
+Read it before authoring panels; its rules are stated as comic-craft
+requirements, not API options. The two rules that pay off most:
+
+- **Caption every scene change** (`bubbleType:"narration"`) — 「长安·卦摊」,
+  「是夜·唐宫」. The reader does not know your script.
+- **Prompt for negative space** where bubbles will go (「画面上方留白」) and
+  keep bubble bodies off faces; a bubble may touch the speaker's head with
+  its tail, never cover the face.
