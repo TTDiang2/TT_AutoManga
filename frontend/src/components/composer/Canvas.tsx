@@ -31,6 +31,8 @@ export function Canvas() {
     _pushHistory,
     imagePickerRequest,
     closeImagePicker,
+    splitFrame,
+    createSplitPair,
   } = useComposerStore();
 
   const currentPage = pages.find(p => p.id === currentPageId);
@@ -51,11 +53,71 @@ export function Canvas() {
     origOffsetY?: number;
   } | null>(null);
 
+  // drag-a-cut-line state (split tool): the line you draw becomes the gutter
+  // between two frames — inside crossed frames it splits them, on an empty
+  // page it spawns a frame pair (interaction ported from the
+  // novelai_local_web study, adapted to our rect+corners element model)
+  const [cutState, setCutState] = useState<{ fromX: number; fromY: number; toX: number; toY: number } | null>(null);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
+  const pageCoords = useCallback((e: React.MouseEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * 100,
+      y: ((e.clientY - rect.top) / rect.height) * 100,
+    };
+  }, []);
+
+  const handleCutStart = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const p = pageCoords(e);
+    setCutState({ fromX: p.x, fromY: p.y, toX: p.x, toY: p.y });
+    e.preventDefault();
+  }, [pageCoords]);
+
+  const handleCutMove = useCallback((e: React.MouseEvent) => {
+    setCutState(prev => {
+      if (!prev) return prev;
+      const p = pageCoords(e);
+      return { ...prev, toX: p.x, toY: p.y };
+    });
+  }, [pageCoords]);
+
+  const handleCutEnd = useCallback(() => {
+    setCutState(prev => {
+      if (prev && currentPage) {
+        const dx = prev.toX - prev.fromX, dy = prev.toY - prev.fromY;
+        // dominant axis of the drawn line decides the cut orientation
+        const axis: 'x' | 'y' = Math.abs(dx) >= Math.abs(dy) ? 'y' : 'x';
+        const span = axis === 'x'
+          ? { lo: Math.min(prev.fromY, prev.toY), hi: Math.max(prev.fromY, prev.toY) }
+          : { lo: Math.min(prev.fromX, prev.toX), hi: Math.max(prev.fromX, prev.toX) };
+        const spanLen = span.hi - span.lo;
+        // the cut sits on the dominant axis; the span selects crossed frames
+        const cut = axis === 'x' ? (prev.fromX + prev.toX) / 2 : (prev.fromY + prev.toY) / 2;
+        if (spanLen >= 3) {
+          const crossed = currentPage.elements.filter(el => {
+            if (el.type !== 'image-slot' || el.corners || !el.visible) return false;
+            const otherLo = axis === 'x' ? el.y : el.x;
+            const otherHi = axis === 'x' ? el.y + el.height : el.x + el.width;
+            return otherLo < span.hi && otherHi > span.lo;
+          });
+          if (crossed.length > 0) {
+            crossed.forEach(el => splitFrame(el.id, axis, cut));
+          } else {
+            createSplitPair(axis, cut);
+          }
+        }
+      }
+      return null;
+    });
+    setActiveTool('select');
+  }, [currentPage, splitFrame, createSplitPair, setActiveTool]);
+
   const handleElementMouseDown = useCallback((e: React.MouseEvent, elementId: string) => {
-    if (activeTool === 'crop' || activeTool === 'text' || activeTool === 'bubble') return;
+    if (activeTool === 'crop' || activeTool === 'text' || activeTool === 'bubble' || activeTool === 'split') return;
     e.stopPropagation();
     const el = currentPage?.elements.find(p => p.id === elementId);
     if (!el || el.locked) return;
@@ -322,9 +384,16 @@ export function Canvas() {
             width: currentPage.width,
             height: currentPage.height,
             transform: `scale(${zoom})`,
-            cursor: activeTool === 'text' || activeTool === 'bubble' ? 'crosshair' : 'default',
+            cursor: activeTool === 'text' || activeTool === 'bubble' || activeTool === 'split'
+              ? 'crosshair' : 'default',
           }}
           onClick={handleCanvasClick}
+          {...(activeTool === 'split' ? {
+            onMouseDown: handleCutStart,
+            onMouseMove: handleCutMove,
+            onMouseUp: handleCutEnd,
+            onMouseLeave: handleCutEnd,
+          } : {})}
         >
           {sortedElements.map(el => {
             if (!el.visible) return null;
@@ -348,6 +417,34 @@ export function Canvas() {
               />
             );
           })}
+          {cutState && (
+            <div
+              style={{
+                position: 'absolute',
+                left: `${Math.min(cutState.fromX, cutState.toX)}%`,
+                top: `${Math.min(cutState.fromY, cutState.toY)}%`,
+                width: `${Math.abs(cutState.toX - cutState.fromX)}%`,
+                height: `${Math.abs(cutState.toY - cutState.fromY)}%`,
+                borderTop: cutState.toY === cutState.fromY ? '2px dashed var(--accent-primary)' : undefined,
+                borderLeft: cutState.toX === cutState.fromX ? '2px dashed var(--accent-primary)' : undefined,
+                pointerEvents: 'none',
+                zIndex: 9999,
+              }}
+            >
+              {/* diagonal preview for angled drags */}
+              {cutState.toY !== cutState.fromY && cutState.toX !== cutState.fromX && (
+                <svg width="100%" height="100%" style={{ overflow: 'visible', position: 'absolute', inset: 0 }}>
+                  <line
+                    x1={cutState.fromX < cutState.toX ? '0%' : '100%'}
+                    y1={cutState.fromY < cutState.toY ? '0%' : '100%'}
+                    x2={cutState.fromX < cutState.toX ? '100%' : '0%'}
+                    y2={cutState.fromY < cutState.toY ? '100%' : '0%'}
+                    stroke="var(--accent-primary)" strokeWidth="2" strokeDasharray="6 5"
+                  />
+                </svg>
+              )}
+            </div>
+          )}
         </div>
       </div>
       {imagePickerRequest && (

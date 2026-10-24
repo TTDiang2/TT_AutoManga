@@ -236,7 +236,7 @@ interface ComposerStore {
   pages: ComposerPage[];
   currentPageId: string | null;
   selectedElementId: string | null;
-  activeTool: 'select' | 'text' | 'bubble' | 'crop';
+  activeTool: 'select' | 'text' | 'bubble' | 'crop' | 'split';
   activeBubbleType: BubbleType;
   zoom: number;
 
@@ -263,6 +263,19 @@ interface ComposerStore {
 
   /** Add a new blank image-slot at canvas center, selecting it. */
   addFrame: () => void;
+  /**
+   * Cut one rectangular frame (image-slot) into two along a page-space
+   * axis line, leaving a gutter. Returns the two new element ids, or null
+   * when the element isn't splittable / the cut falls outside.
+   */
+  splitFrame: (elementId: string, axis: 'x' | 'y', cutPct: number,
+               gutterPct?: number) => [string, string] | null;
+  /**
+   * Empty-canvas variant: drag a line on an empty page and it becomes the
+   * gutter between two new frames spanning the page.
+   */
+  createSplitPair: (axis: 'x' | 'y', cutPct: number,
+                    gutterPct?: number, marginPct?: number) => [string, string] | null;
   /**
    * Add a new blank page-image (breakout image) at canvas center, selecting it.
    * Page-image is a free-floating image that is not part of any template — it
@@ -561,6 +574,89 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
       };
       return { pages, selectedElementId: newEl.id };
     });
+  },
+
+  splitFrame: (elementId, axis, cutPct, gutterPct = 2) => {
+    const page = get().pages.find(p => p.id === get().currentPageId);
+    const el = page?.elements.find(e => e.id === elementId);
+    // only plain rectangles split cleanly — corner-deformed frames keep their shape
+    if (!page || !el || el.type !== 'image-slot' || el.corners) return null;
+    const g = gutterPct / 2;
+    const minSize = 5;
+    const make = (rect: { x: number; y: number; width: number; height: number }, suffix: string): ImageSlotElement => ({
+      id: uid(),
+      type: 'image-slot',
+      x: Math.round(rect.x * 100) / 100,
+      y: Math.round(rect.y * 100) / 100,
+      width: Math.round(rect.width * 100) / 100,
+      height: Math.round(rect.height * 100) / 100,
+      rotation: 0,
+      zIndex: el.zIndex,
+      locked: false,
+      visible: true,
+      label: `${el.label || 'Frame'}${suffix}`,
+    });
+    let pair: [{ x: number; y: number; width: number; height: number },
+               { x: number; y: number; width: number; height: number }];
+    if (axis === 'x') {
+      if (cutPct <= el.x + minSize + g || cutPct >= el.x + el.width - minSize - g) return null;
+      pair = [
+        { x: el.x, y: el.y, width: cutPct - g - el.x, height: el.height },
+        { x: cutPct + g, y: el.y, width: el.x + el.width - (cutPct + g), height: el.height },
+      ];
+    } else {
+      if (cutPct <= el.y + minSize + g || cutPct >= el.y + el.height - minSize - g) return null;
+      pair = [
+        { x: el.x, y: el.y, width: el.width, height: cutPct - g - el.y },
+        { x: el.x, y: cutPct + g, width: el.width, height: el.y + el.height - (cutPct + g) },
+      ];
+    }
+    const [a, b] = [make(pair[0], 'a'), make(pair[1], 'b')];
+    get()._pushHistory();
+    set(state => {
+      const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
+      if (pageIdx === -1) return state;
+      const pages = [...state.pages];
+      pages[pageIdx] = {
+        ...pages[pageIdx],
+        elements: pages[pageIdx].elements.flatMap(e =>
+          e.id === elementId ? [a, b] : [e]),
+      };
+      return { pages, selectedElementId: b.id };
+    });
+    return [a.id, b.id];
+  },
+
+  createSplitPair: (axis, cutPct, gutterPct = 2, marginPct = 2) => {
+    const page = get().pages.find(p => p.id === get().currentPageId);
+    if (!page) return null;
+    const g = gutterPct / 2;
+    const lo = marginPct, hi = 100 - marginPct;
+    if (cutPct <= lo + 5 || cutPct >= hi - 5) return null;
+    get()._pushHistory();
+    const mk = (rect: { x: number; y: number; width: number; height: number }, label: string): ImageSlotElement => ({
+      id: uid(), type: 'image-slot', rotation: 0, locked: false, visible: true,
+      zIndex: page.elements.length,
+      x: Math.round(rect.x * 100) / 100, y: Math.round(rect.y * 100) / 100,
+      width: Math.round(rect.width * 100) / 100, height: Math.round(rect.height * 100) / 100,
+      label,
+    });
+    const pair = axis === 'x'
+      ? [mk({ x: lo, y: lo, width: cutPct - g - lo, height: hi - lo }, 'Frame 1'),
+         mk({ x: cutPct + g, y: lo, width: hi - (cutPct + g), height: hi - lo }, 'Frame 2')]
+      : [mk({ x: lo, y: lo, width: hi - lo, height: cutPct - g - lo }, 'Frame 1'),
+         mk({ x: lo, y: cutPct + g, width: hi - lo, height: hi - (cutPct + g) }, 'Frame 2')];
+    set(state => {
+      const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
+      if (pageIdx === -1) return state;
+      const pages = [...state.pages];
+      pages[pageIdx] = {
+        ...pages[pageIdx],
+        elements: [...pages[pageIdx].elements, ...pair],
+      };
+      return { pages, selectedElementId: pair[1].id };
+    });
+    return [pair[0].id, pair[1].id];
   },
 
   addPageImage: () => {

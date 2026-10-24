@@ -3,7 +3,7 @@ import {
   FiMousePointer, FiType, FiMessageCircle,
   FiRotateCcw, FiRotateCw, FiDownload,
   FiCopy, FiTrash2, FiSave, FiBook, FiX, FiPlusSquare, FiTrash,
-  FiImage, FiZap, FiLayout,
+  FiImage, FiZap, FiLayout, FiScissors,
 } from 'react-icons/fi';
 import { useComposerStore, TEMPLATES } from '../../store/composerStore';
 import { useProjectStore } from '../../store/projectStore';
@@ -540,6 +540,14 @@ export function ComposerTab() {
             >
               <FiMousePointer size={15} />
               <span className="composer-tool-label">{t.composer.select}</span>
+            </button>
+            <button
+              className={`composer-tool-btn composer-tool-labeled ${activeTool === 'split' ? 'active' : ''}`}
+              title={t.composer.split || 'Cut'}
+              onClick={() => setActiveTool('split')}
+            >
+              <FiScissors size={15} />
+              <span className="composer-tool-label">{t.composer.split || 'Cut'}</span>
             </button>
             <button
               className={`composer-tool-btn composer-tool-labeled ${activeTool === 'text' ? 'active' : ''}`}
