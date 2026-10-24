@@ -96,11 +96,14 @@ curl -s -X PUT $BASE/api/agent/projects/$PID/panels -H 'Content-Type: applicatio
     {"scene":"She stops, breathing hard","characters":["Yuki"],"dialogue":"I cannot go back..."}]}'
 
 # 3a. Batch-generate panel art (SwarmUI must be running; steps/sampler come from
-#     global settings — configure them in the UI Settings tab or data/settings.json).
-#     Returns HTTP 202 {"job_id": "...", "total": N}.
+#     global settings — read/write them via GET/PUT /api/agent/settings, or the
+#     UI Settings tab). Returns HTTP 202 {"job_id": "...", "total": N}.
 #     Per job you may override: model, loras, prompt_format ("danbooru"|"prose"),
 #     init_image (+init_creativity) for img2img, seed, width/height, and
 #     inject_characters (auto style/character prompt injection, default on).
+#     variants: 1-4 generates N seeds; apply_variant: i binds variant i to the
+#     panel (default 0) — generate 4, look at them, PATCH panel.image if a
+#     different one wins.
 curl -s -X POST $BASE/api/agent/generate-batch -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PID\",\"concurrency\":1,\"jobs\":[
      {\"panel_id\":\"panel_1\",\"prompt\":\"1girl, rain, street, running, cinematic lighting\"},
@@ -121,13 +124,22 @@ curl -s -X POST $BASE/api/agent/generate -H 'Content-Type: application/json' \
 # 3d. Discover installed models (name + architecture metadata):
 curl -s $BASE/api/agent/models
 
+# 3e. Tune generation defaults without the UI (takes effect on next /generate,
+#     persists to data/settings.json):
+curl -s -X PUT $BASE/api/agent/settings -H 'Content-Type: application/json' \
+  -d '{"currentSteps":28,"currentWidth":832,"currentLoras":[{"name":"ink","weight":0.8}]}'
+
 # 4. (Optional, recommended) Set a project style profile + character prompt
 #    blocks. `style` is appended to EVERY panel prompt; a character block is
 #    injected whenever a panel lists that character (project entries override
 #    the global Characters library). Inspect with GET .../characters.
+#    `bible` is a free-text story bible (worldview, recap, established
+#    locations/props) — persisted with the project for cross-chapter
+#    continuity; read it back via GET .../projects/$PID.
 curl -s -X PUT $BASE/api/agent/projects/$PID/settings -H 'Content-Type: application/json' \
   -d '{"style":"chinese ink painting style, muted colors",
-       "characters":[{"name":"Yuki","prompt_block":"1girl, white hair, blue eyes, blue kimono"}]}'
+       "characters":[{"name":"Yuki","prompt_block":"1girl, white hair, blue eyes, blue kimono"}],
+       "bible":"ch1: Yuki loses the jade pendant on the rain bridge"}'
 
 # 5. Assemble pages: template + slot filling + auto dialogue bubbles
 #    (builtin ids: blank, manga-2v/2h/3/4/6/8, grid-12/21/23/32/232/323/223,
@@ -135,7 +147,8 @@ curl -s -X PUT $BASE/api/agent/projects/$PID/settings -H 'Content-Type: applicat
 #     dynamic presets: dyn-2-slant, dyn-3-diag, dyn-hero-3, dyn-5-mix;
 #     or {"kind":"rows","rows":[2,3]}, {"kind":"user","id":...}, {"kind":"custom",...})
 #    "dynamic": true slants every non-hero frame (quadrilateral corners) for a
-#    more cinematic page.
+#     more cinematic page. List all templates + slot counts dynamically:
+curl -s $BASE/api/agent/templates
 curl -s -X POST $BASE/api/agent/projects/$PID/pages -H 'Content-Type: application/json' \
   -d '{"template":{"kind":"builtin","id":"manga-2v"},"panel_ids":["panel_1","panel_2"],
        "reading":"rtl","name":"ch1-p1","dynamic":true}'
@@ -219,6 +232,9 @@ in for continuity.
   or omitted = random.
 - Generation is **idempotent and safe to re-run**; failed single calls return
   HTTP 502 with the SwarmUI error; batch items record their own error strings.
+- `GET /api/agent/assets/{asset_id}` returns the generation-time metadata
+  recorded for every asset (prompt, seed, model, alpha method) — your memory
+  for reproducing or tweaking a panel after the fact.
 - The in-memory job table is lost on server restart — just re-submit.
 - `POST /api/assets/file` registers arbitrary image bytes (e.g. your own
   post-processing output) as a reusable asset.

@@ -226,6 +226,7 @@ class GenerateRequest(BaseModel):
     seed: Optional[int] = None
     remove_background: bool = False
     variants: int = 1                  # 1-4
+    apply_variant: int = 0             # which variant (0-based) binds to the panel
     apply_to_panel: bool = True
     kind: str = "panel"                # panel | overlay | character
     # --- per-request overrides (fall back to global settings) ---
@@ -264,6 +265,9 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not prompt:
         raise ValueError("prompt is required")
     variants = max(1, min(4, int(payload.get("variants") or 1)))
+    apply_variant = int(payload.get("apply_variant") or 0)
+    if not (0 <= apply_variant < variants):
+        raise ValueError(f"apply_variant must be 0-{variants - 1}")
     seed = payload.get("seed")
     swarm_settings = settings.swarmui
 
@@ -275,9 +279,9 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         loras = [LoraConfig(name=l.get("name", ""), weight=l.get("weight", 1.0))
                  for l in lora_payload if l.get("name")]
     elif swarm_settings.currentLoras:
-        from ..core.config import LoraConfig
-        loras = [LoraConfig(name=l.get("name", ""), weight=l.get("weight", 1.0))
-                 for l in swarm_settings.currentLoras if l.get("name")]
+        # settings loras are LoraConfig models already (put_agent_settings
+        # normalizes) — copy as-is, never dict-style .get() on them
+        loras = [l for l in swarm_settings.currentLoras if l.name]
     else:
         loras = None
 
@@ -369,7 +373,7 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                              f"project {payload['project_id']}")
         from .assets import _save_panel_image
         _save_panel_image(payload["project_id"], payload["panel_id"],
-                          assets_out[0]["url"])
+                          assets_out[apply_variant]["url"])
         applied = True
     return {"assets": assets_out, "applied": applied,
             "model": model, "injected": injected}
@@ -441,9 +445,127 @@ async def list_models():
     return {"models": models}
 
 
+@router.get("/templates")
+async def list_templates():
+    """All build-page templates (builtin + dynamic presets), so agents can
+    discover slot counts instead of relying on the AGENTS.md list."""
+    from ..composer_builtins import TEMPLATES, DYNAMIC_TEMPLATES
+
+    def brief(t: dict, dynamic: bool) -> dict:
+        return {"id": t["id"], "name": t["name"],
+                "nameZh": t.get("nameZh", ""),
+                "width": t.get("width", 600), "height": t.get("height", 900),
+                "slots": sum(1 for e in t["elements"]
+                             if e.get("type") == "image-slot"),
+                "dynamic": dynamic}
+
+    return {
+        "templates": [brief(t, False) for t in TEMPLATES]
+                      + [brief(t, True) for t in DYNAMIC_TEMPLATES],
+        "other_kinds": {
+            "rows": '{"kind":"rows","rows":[2,3]} — n columns per row',
+            "custom": '{"kind":"custom","elements":[...],"width":600,"height":900}',
+            "user": '{"kind":"user","id":...} — list via GET /api/composer-templates',
+        },
+    }
+
+
+@router.get("/assets/{asset_id}")
+async def get_asset(asset_id: str):
+    """Generation-time metadata for one asset (prompt, seed, model, alpha
+    method...) — the agent's memory when it needs to reproduce or tweak."""
+    entry = asset_store.get(asset_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return {"asset": entry,
+            "url": asset_store.url_for(asset_id),
+            "file_exists": Path(entry.get("path", "")).is_file()}
+
+
+def _swarm_view() -> Dict[str, Any]:
+    sw = settings.swarmui
+    return {"address": sw.address,
+            "currentModel": sw.currentModel,
+            "currentSteps": sw.currentSteps,
+            "currentCfgScale": sw.currentCfgScale,
+            "currentWidth": sw.currentWidth,
+            "currentHeight": sw.currentHeight,
+            "currentSamplerName": sw.currentSamplerName,
+            "promptSuffix": sw.promptSuffix,
+            "currentLoras": [l.model_dump() for l in sw.currentLoras]}
+
+
+@router.get("/settings")
+async def get_agent_settings():
+    """Effective generation defaults /generate falls back to."""
+    return {"swarmui": _swarm_view()}
+
+
+class AgentSettingsUpdate(BaseModel):
+    currentModel: Optional[str] = None
+    currentSteps: Optional[int] = None
+    currentCfgScale: Optional[float] = None
+    currentWidth: Optional[int] = None
+    currentHeight: Optional[int] = None
+    currentSamplerName: Optional[str] = None
+    promptSuffix: Optional[str] = None
+    currentLoras: Optional[List[Dict[str, Any]]] = None
+
+
+_INT_RANGES = {"currentSteps": (1, 150),
+               "currentWidth": (64, 4096),
+               "currentHeight": (64, 4096)}
+
+
+@router.put("/settings")
+async def put_agent_settings(req: AgentSettingsUpdate):
+    """Update generation defaults (same fields the UI Settings tab edits).
+    Takes effect on the next /generate call and persists to settings.json."""
+    data = req.model_dump(exclude_none=True)
+    for field, (lo, hi) in _INT_RANGES.items():
+        if field in data and not (lo <= data[field] <= hi):
+            raise HTTPException(status_code=400,
+                                detail=f"{field} must be {lo}-{hi}")
+    if "currentWidth" in data and data["currentWidth"] % 8:
+        raise HTTPException(status_code=400,
+                            detail="currentWidth must be a multiple of 8")
+    if "currentHeight" in data and data["currentHeight"] % 8:
+        raise HTTPException(status_code=400,
+                            detail="currentHeight must be a multiple of 8")
+    if "currentCfgScale" in data and not (0 <= data["currentCfgScale"] <= 30):
+        raise HTTPException(status_code=400,
+                            detail="currentCfgScale must be 0-30")
+    if "currentLoras" in data:
+        for l in data["currentLoras"]:
+            if not isinstance(l.get("name"), str) or not l["name"].strip():
+                raise HTTPException(status_code=400,
+                                    detail="each lora needs a non-empty name")
+            w = l.get("weight", 1.0)
+            if not isinstance(w, (int, float)) or not (0 <= w <= 2):
+                raise HTTPException(status_code=400,
+                                    detail="lora weight must be 0-2")
+
+    sw = settings.swarmui
+    for k, v in data.items():
+        if k == "currentLoras":
+            from ..core.config import LoraConfig
+            setattr(sw, k, [LoraConfig(name=l["name"],
+                                       weight=float(l.get("weight", 1.0)))
+                            for l in v])
+        else:
+            setattr(sw, k, v)
+
+    from ..core.config import save_settings
+    save_settings(settings)
+    return {"success": True, "swarmui": _swarm_view()}
+
+
 class ProjectSettingsUpdate(BaseModel):
     style: Optional[str] = None
     characters: Optional[List[Dict[str, Any]]] = None   # [{name, prompt_block}]
+    bible: Optional[str] = None   # free-text story bible: worldview, recap,
+                                  # established locations/props — for the
+                                  # agent's own continuity across chapters
 
 
 @router.put("/projects/{project_id}/settings")
@@ -454,9 +576,11 @@ async def put_project_settings(project_id: str, req: ProjectSettingsUpdate):
     cfg = project.setdefault("settings", {})
     if req.style is not None:
         cfg["style"] = req.style.strip()
+    if req.bible is not None:
+        cfg["bible"] = req.bible.strip()
     if req.characters is not None:
         for c in req.characters:
-            if not (c.get("name") or "").strip() or not (c.get("prompt_block") or "").strip():
+            if not isinstance(c.get("name"), str) or not c["name"].strip()                     or not isinstance(c.get("prompt_block"), str) or not c["prompt_block"].strip():
                 raise HTTPException(status_code=400,
                                     detail="each character needs name and prompt_block")
         cfg["characters"] = req.characters
@@ -503,6 +627,26 @@ async def build_page_endpoint(project_id: str, req: BuildPageRequest):
         storage.save_project(project)
         saved = True
     return {"page": page, "warnings": warnings, "saved": saved}
+
+
+@router.get("/projects/{project_id}/pages/{page_id}")
+async def get_page(project_id: str, page_id: str):
+    project = _load_or_404(project_id)
+    return {"page": _find_page(project, page_id)}
+
+
+@router.delete("/projects/{project_id}/pages/{page_id}")
+async def delete_page(project_id: str, page_id: str):
+    project = _load_or_404(project_id)
+    pages = project.get("composerPages", [])
+    for i, page in enumerate(pages):
+        if page.get("id") == page_id:
+            pages.pop(i)
+            for j, q in enumerate(pages):   # keep order contiguous
+                q["order"] = j
+            storage.save_project(project)
+            return {"success": True, "pages_remaining": len(pages)}
+    raise HTTPException(status_code=404, detail="Page not found")
 
 
 # ---------------------------------------------------------------------------
