@@ -7,8 +7,10 @@ without it every entry point raises ``InferenceUnavailable`` and the API
 layer answers 503 with an install hint.
 
 Model notes: Real-ESRGAN family models are BSD-3-Clause upstream
-(realesrgan-anime-6b is the anime default); quicksrnet-small ships via
-Qualcomm AI Hub. Tiling follows the standard overlap-and-blend approach.
+(realesrgan-anime-6b is the anime default; realesr-animevideov3 is the
+small/fast option). Tiling follows the standard overlap-and-blend approach
+with a two-sided tent window, and the alpha channel (if any) is carried
+through with a Lanczos resize so transparent overlays survive.
 
 Public surface:
     available()          -> bool (onnxruntime importable)
@@ -20,7 +22,7 @@ import io
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from .core.config import DATA_DIR
 
@@ -134,27 +136,49 @@ def _session(model_id: str):
 
 def upscale_bytes(png_bytes: bytes, model_id: str = "realesrgan-anime-6b",
                   tile: int = 512) -> bytes:
-    """Upscale a PNG by the model's factor using overlap tiles (memory-safe
-    on print-size images)."""
+    """Upscale a PNG by the model's factor using overlap tiles blended with
+    a two-sided tent window (no visible seams). An alpha channel, when
+    present, is resized alongside so transparent overlays survive. A output
+    size guard keeps memory bounded (~16 bytes/output-pixel accumulators)."""
     import numpy as np
     from PIL import Image
 
     if model_id not in INFERENCE_MODELS:
         raise ModelError(f"unknown model: {model_id}")
-    sess = _session(model_id)
     scale = INFERENCE_MODELS[model_id]["scale"]
 
-    img = Image.open(io.BytesIO(png_bytes))
-    if img.mode != "RGB":
-        img = img.convert("RGB")
+    src = Image.open(io.BytesIO(png_bytes))
+    has_alpha = src.mode in ("RGBA", "LA") or (
+        src.mode == "P" and "transparency" in src.info)
+    alpha = None
+    if has_alpha:
+        rgba = src.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        img = rgba.convert("RGB")
+    else:
+        img = src.convert("RGB")
+
     arr = np.asarray(img, dtype=np.float32) / 255.0   # HWC
     h, w, _ = arr.shape
 
+    max_out_pixels = 64 * 1024 * 1024   # 64 MP output budget (~1 GB peak)
+    if h * w * scale * scale > max_out_pixels:
+        raise ModelError(
+            f"{w}x{h} input would exceed the {max_out_pixels // (1024 * 1024)} MP "
+            f"upscaled-output budget; crop first or use a smaller source")
+
+    sess = _session(model_id)
     tile = max(64, int(tile))
     overlap = 32
     out = np.zeros((h * scale, w * scale, 3), dtype=np.float32)
     weight = np.zeros((h * scale, w * scale, 1), dtype=np.float32)
     input_name = sess.get_inputs()[0].name
+
+    # tent window per axis: distance to the nearest tile edge, capped at the
+    # overlap; neighbouring tiles' windows overlap and sum smoothly
+    def tent(n: int) -> "np.ndarray":
+        d = np.minimum(np.arange(n), np.arange(n)[::-1]).astype(np.float32)
+        return np.minimum(d, overlap) / overlap + 1.0 / (overlap + 1)
 
     ys = list(range(0, max(1, h - overlap), tile - overlap)) or [0]
     xs = list(range(0, max(1, w - overlap), tile - overlap)) or [0]
@@ -162,23 +186,14 @@ def upscale_bytes(png_bytes: bytes, model_id: str = "realesrgan-anime-6b",
         for x0 in xs:
             y1, x1 = min(y0 + tile, h), min(x0 + tile, w)
             patch = arr[y0:y1, x0:x1]
-            ph, pw, _ = patch.shape
             blob = patch.transpose(2, 0, 1)[None]          # 1x3xh xw
             result = sess.run(None, {input_name: blob})[0]
             out_patch = np.clip(result[0].transpose(1, 2, 0), 0.0, 1.0)
-            # blend the overlap zone instead of hard seams
             yy, xx = y0 * scale, x0 * scale
             oh, ow = out_patch.shape[:2]
+            m = (tent(oh)[:, None] * tent(ow)[None, :])[..., None]
             region = out[yy:yy + oh, xx:xx + ow]
             wgt = weight[yy:yy + oh, xx:xx + ow]
-            edge_x = min(x0, w - x1) > 0
-            edge_y = min(y0, h - y1) > 0
-            m = np.ones((oh, ow, 1), dtype=np.float32)
-            ramp = np.linspace(0.05, 1.0, overlap, dtype=np.float32)
-            if edge_y:
-                m[:overlap, :, 0] *= ramp[:, None]
-            if edge_x:
-                m[:, :overlap, 0] *= ramp[None, :]
             region += out_patch * m
             wgt += m
             out[yy:yy + oh, xx:xx + ow] = region
@@ -186,6 +201,10 @@ def upscale_bytes(png_bytes: bytes, model_id: str = "realesrgan-anime-6b",
 
     out = np.where(weight > 0, out / np.maximum(weight, 1e-6), out)
     result_img = Image.fromarray((out * 255.0).round().astype("uint8"), "RGB")
+    if alpha is not None:
+        alpha_up = alpha.resize((w * scale, h * scale), Image.LANCZOS)
+        result_img = result_img.convert("RGBA")
+        result_img.putalpha(alpha_up)
     buf = io.BytesIO()
     result_img.save(buf, format="PNG")
     return buf.getvalue()

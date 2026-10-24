@@ -7,6 +7,7 @@ and the plan docs.
 """
 import asyncio
 import base64
+import httpx
 import io
 import json
 import logging
@@ -283,11 +284,13 @@ def _embed_png_parameters(img_bytes: bytes, meta: Dict[str, Any]) -> bytes:
             return img_bytes
         from PIL import PngImagePlugin
         prompt = meta.get("prompt") or ""
-        negative = meta.pop("negative_prompt", "") or ""
-        pairs = ", ".join(f"{k}: {v}" for k, v in meta.items() if v is not None)
+        negative = meta.get("negative_prompt") or ""
+        settings_line = ", ".join(
+            f"{k}: {v}" for k, v in meta.items()
+            if v is not None and k not in ("prompt", "negative_prompt"))
         block = "\n".join(x for x in (prompt,
                                       f"Negative prompt: {negative}" if negative else None,
-                                      pairs) if x)
+                                      settings_line) if x)
         info = PngImagePlugin.PngInfo()
         info.add_text("parameters", block)
         info.add_text("automanga", json.dumps(meta, ensure_ascii=False))
@@ -1087,17 +1090,22 @@ async def upscale_asset(req: UpscaleRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except ModelError as e:
         raise HTTPException(status_code=502, detail=str(e))
-    except ValueError as e:
+    except httpx.HTTPError as e:   # model download transport failure
+        raise HTTPException(status_code=502, detail=f"model download failed: {e}")
+    except (ValueError, OSError) as e:   # UnidentifiedImageError is an OSError
         raise HTTPException(status_code=400, detail=f"invalid image: {e}")
 
     img = Image.open(io.BytesIO(out))
+    from ..inference import INFERENCE_MODELS
+    factor = INFERENCE_MODELS[req.model]["scale"]
     dataurl = "data:image/png;base64," + base64.b64encode(out).decode()
     entry = asset_store.save_dataurl(
         dataurl, kind="upscale",
         meta={"source_asset": req.asset_url, "model": req.model,
-              "scale": 4, "width": img.size[0], "height": img.size[1]})
+              "scale": factor, "width": img.size[0], "height": img.size[1]})
     logger.info("agent/upscale model=%s %dx%d -> %dx%d", req.model,
-                img.size[0] // 4, img.size[1] // 4, img.size[0], img.size[1])
+                img.size[0] // factor, img.size[1] // factor,
+                img.size[0], img.size[1])
     return {"asset_id": entry["asset_id"],
             "url": asset_store.url_for(entry["asset_id"]),
             "width": img.size[0], "height": img.size[1],

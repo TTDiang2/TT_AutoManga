@@ -114,8 +114,13 @@ def test_generated_png_carries_parameters(client, pid, mock_swarm):
     assert "bridge at dusk" in params
     assert "Negative prompt: blurry" in params
     assert "seed: 123" in params
+    # machine-readable block keeps the full recipe (incl. negative prompt),
+    # the human block does not repeat the prompt in the settings line
     meta = __import__("json").loads(img.info["automanga"])
     assert meta["prompt"] == "bridge at dusk" and meta["seed"] == 123
+    assert meta["negative_prompt"] == "blurry"
+    settings_line = params.splitlines()[-1]
+    assert "prompt:" not in settings_line and "seed: 123" in settings_line
 
 
 # ------------------------------------------------------------------ G-16 webtoon
@@ -179,6 +184,84 @@ def test_upscale_requires_runtime_or_real_model(client):
         body = r.json()
         assert body["width"] == 32 and body["height"] == 32  # 8x8 -> x4
         assert body["model"] == "realesr-animevideov3"
+
+
+def test_upscale_error_mapping(client, monkeypatch):
+    # bad bytes -> 400 (UnidentifiedImageError is an OSError)
+    r = client.post("/api/agent/upscale", json={
+        "asset_url": "data:image/png;base64,QUJD", "model": "realesr-animevideov3"})
+    assert r.status_code == 400 and "invalid image" in r.json()["detail"]
+
+    # model download transport failure -> 502, not a bare 500
+    import httpx
+    from backend import inference as inf
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("no route to host")
+    monkeypatch.setattr(inf, "_model_file", boom)
+    monkeypatch.setattr(inf, "_SESSIONS", {})   # bypass the cached session
+    r = client.post("/api/agent/upscale", json={
+        "asset_url": _solid_png(), "model": "realesr-animevideov3"})
+    assert r.status_code == 502 and "model download failed" in r.json()["detail"]
+
+
+def test_upscale_alpha_preserved():
+    """Transparent overlays must survive upscaling (P3 review #4)."""
+    pytest.importorskip("onnxruntime")
+    import numpy as np
+    from backend.inference import upscale_bytes
+    img = Image.new("RGBA", (8, 8), (255, 0, 0, 255))
+    for y in range(8):
+        for x in range(8):
+            if x < 4:
+                img.putpixel((x, y), (255, 0, 0, 0))   # fully transparent half
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    out = upscale_bytes(buf.getvalue(), "realesr-animevideov3", tile=64)
+    up = Image.open(io.BytesIO(out))
+    assert up.mode == "RGBA" and up.size == (32, 32)
+    a = np.asarray(up.getchannel("A"))
+    assert a[:, :14].max() < 100          # transparent half stays transparent
+    assert a[:, 18:].min() > 150          # opaque half stays opaque
+    assert a[:, :16].mean() < 20
+
+
+def test_upscale_multitile_seamless():
+    """Multi-tile path blends with a tent window: no visible step across the
+    tile seam (P3 review #3)."""
+    pytest.importorskip("onnxruntime")
+    import numpy as np
+    from backend.inference import upscale_bytes
+    # smooth horizontal gradient, 96px wide with tile=64 -> seam at x=64
+    img = Image.new("RGB", (96, 32))
+    for x in range(96):
+        v = int(255 * x / 95)
+        for y in range(32):
+            img.putpixel((x, y), (v, v, v))
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    out = upscale_bytes(buf.getvalue(), "realesr-animevideov3", tile=64)
+    up = Image.open(io.BytesIO(out))
+    assert up.size == (384, 128)
+    arr = np.asarray(up, dtype=np.float32).mean(axis=(0, 2))   # column means
+    x = np.arange(arr.shape[0], dtype=np.float32)
+    slope, intercept = np.polyfit(x, arr, 1)
+    residual = arr - (slope * x + intercept)
+    seam = 64 * 4   # tile boundary in output pixels
+    # a hard seam is a step in the detrended profile (several levels with
+    # this model); tent blending keeps the profile smooth through the seam.
+    # (the model's own tone curve bends the residual globally — only the
+    # LOCAL behaviour at the seam is blending's responsibility)
+    assert abs(float(residual[seam - 1]) - float(residual[seam])) < 2.0
+    window = residual[seam - 24:seam + 24]
+    assert float(np.abs(np.diff(window)).max()) < 1.5
+
+
+def test_upscale_output_budget_guard():
+    """Oversized inputs raise a clean ModelError before allocating (P3 #5)."""
+    from backend.inference import ModelError, upscale_bytes
+    img = Image.new("RGB", (5000, 3000), (10, 10, 10))
+    buf = io.BytesIO(); img.save(buf, format="PNG")
+    with pytest.raises(ModelError):
+        upscale_bytes(buf.getvalue(), "realesr-animevideov3", tile=512)
 
 
 def test_upscale_unknown_model(client):
