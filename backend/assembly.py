@@ -8,6 +8,21 @@ from typing import Any, Dict, List, Tuple
 ROW_BUCKET = 5.0    # % of page height; slots whose y falls in the same
                     # bucket are treated as one row for reading order
 
+# "Name：台词" names the speaker when Name matches a panel character
+# (prevents ordinary colons like "时间：下午" from being misread).
+SPEAKER_RE = re.compile("^\s*([^:：\n]{1,24}?)\s*[:：]\s*(.+)$")
+
+
+def split_speaker(line, characters):
+    """Split a dialogue line into (speaker-or-None, clean text)."""
+    m = SPEAKER_RE.match(line)
+    if m and characters:
+        name = m.group(1).strip()
+        for c in characters:
+            if c and c.casefold() == name.casefold():
+                return c, m.group(2).strip()
+    return None, line
+
 
 def split_dialogue(text: str, max_bubbles: int = 3) -> List[str]:
     """Split a panel's dialogue into bubble lines by newline and sentence
@@ -82,10 +97,24 @@ def build_page(spec: dict, project: dict) -> Tuple[dict, List[str]]:
             panel = panels.get(pid)
             if not panel:
                 continue
-            for j, line in enumerate(split_dialogue(panel.get("dialogue") or "")):
-                el = _make_bubble(line, slot, page, j,
-                                  (spec.get("bubbles") or {}))
+            lines = split_dialogue(panel.get("dialogue") or "")
+            parsed = [split_speaker(l, panel.get("characters") or [])
+                      for l in lines]
+            speakers = list(dict.fromkeys(sp for sp, _ in parsed if sp))
+            for j, (speaker, clean) in enumerate(parsed):
+                el = _make_bubble(clean, slot, page, j,
+                                  (spec.get("bubbles") or {}),
+                                  shot=panel.get("shot"))
                 if el:
+                    if speaker:
+                        el["speaker"] = speaker
+                        # two speakers in one panel: point each one's tail a
+                        # different way so the reader can tell them apart
+                        # (heuristic — PATCH tailPosition after preview if the
+                        # characters stand the other way around)
+                        if len(speakers) >= 2:
+                            first = speakers[0]
+                            el["tailPosition"] = "left" if speaker == first else "right"
                     el["zIndex"] = z
                     z += 1
                     page["elements"].append(el)
@@ -116,19 +145,22 @@ def _apply_dynamic_corners(slots: List[dict]) -> None:
 
 
 def _make_bubble(text: str, slot: dict, page: dict, seq: int,
-                 opts: dict) -> dict:
+                 opts: dict, shot: str = None) -> dict:
     fs = opts.get("fontSize", 14)
     pad = 10
     fw, fh = slot["width"], slot["height"]
     vertical = bool(opts.get("vertical", True))
     bt = classify_bubble(text)
+    close = shot in ("close-up", "extreme-close-up")
     if vertical:
         # Vertical layout: columns of chars run top-to-bottom, right-to-left.
-        # Size so the text fits ~3 columns of balanced length.
-        n_cols_target = 3
+        # Size so the text fits ~3 columns of balanced length. Close-ups get
+        # a slimmer, shorter balloon (2 columns, half height) so it doesn't
+        # cover the face that fills the frame.
+        n_cols_target = 2 if close else 3
         chars_per_col = max(2, -(-len(text) // n_cols_target))
         bh_px = min(chars_per_col * fs * 1.3 + 2 * pad,
-                    fh * page["height"] * 0.9)
+                    fh * page["height"] * (0.5 if close else 0.9))
         col_cap = max(1, int((bh_px - 2 * pad) // (fs * 1.3)))
         n_cols = max(1, -(-len(text) // col_cap))
         bw_px = n_cols * fs * 1.3 + 2 * pad
@@ -144,7 +176,9 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
     bh_px *= headroom
     if vertical:
         bw_px *= headroom
-    bw = min(bw_px / page["width"] * 100, fw * 0.95)
+    # close-ups have no room for wide balloons
+    width_cap = fw * (0.6 if shot in ("close-up", "extreme-close-up") else 0.95)
+    bw = min(bw_px / page["width"] * 100, width_cap)
     bh = min(bh_px / page["height"] * 100, 40.0)
     x = slot["x"] + fw * 0.05 + (seq % 2) * (bw + 1.0)
     y = slot["y"] + fh * 0.04 + seq * (bh + 2.0)

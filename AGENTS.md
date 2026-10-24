@@ -28,6 +28,10 @@ Human ──UI────> /api/*      ──┴──> project.json (panels + 
 Start the server: `python -m backend.main 5180` (probe: `GET /api/health`).
 CLI alternative: `python -m backend.agent_cli <cmd>` (set `AUTOMANGA_URL` to
 override the base URL).
+MCP alternative: `python -m backend.mcp_server` exposes the same API as 26
+typed MCP tools (any MCP client; `render_page_preview` returns image
+content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
+(agentskills.io format).
 
 ## 2. Units & conventions (read before writing any geometry)
 
@@ -48,10 +52,12 @@ override the base URL).
     characters, SFX, splashes). Default border 0. Supports the same corners /
     rotation / offset / scale as `image`.
   - `image-slot` — empty placeholder (renders nothing).
-  - `text` — text block; `direction: "horizontal" | "vertical"`.
+  - `text` — text block; `direction: "horizontal" | "vertical"`; optional
+    `strokeWidth` (0-20) + `strokeColor` draw an outline (the SFX look).
   - `bubble` — dialogue balloon: 6 `bubbleType`s (speech/thought/shout/
-    whisper/narration/inner-voice), `tailPosition` (`top`/`bottom`/`left`/
-    `right`), `direction` h/v, fontSize, colors.
+  whisper/narration/inner-voice), `tailPosition` (`top`/`bottom`/`left`/
+  `right`), `direction` h/v, fontSize, colors, optional `speaker` (set by
+  assembly from "Name：台词" dialogue).
 - **Tail quirk** (inherited from the UI for parity): `tailPosition: "top"`
   renders the tail triangle **below** the bubble pointing down; `"bottom"`
   renders it **above** pointing up. To point a tail at a character below the
@@ -63,8 +69,9 @@ Project JSON = `{ id, name, createdAt, updatedAt,
 panels: Panel[], composerPages: ComposerPage[], settings }`.
 
 - **Panel** (storyboard cell): `{ id, order?, scene, characters: string[],
-  dialogue: string, prompt: { turbo?, tags?, negativePrompt?, seed?,
-  removeBG? }, image?: "<asset URL or data URL>" }`.
+  dialogue: string, shot?: "wide|medium|close-up|extreme-close-up|splash",
+  prompt: { turbo?, tags?, negativePrompt?, seed?, removeBG? },
+  image?: "<asset URL or data URL>" }`.
 - **ComposerPage**: `{ id, name, templateId, width, height, order,
   elements: ComposerElement[] }`.
 - **ComposerElement**: base `{ id, type, x, y, width, height, rotation,
@@ -89,11 +96,20 @@ BASE=http://127.0.0.1:5180
 PID=$(curl -s -X POST $BASE/api/agent/projects -H 'Content-Type: application/json' \
   -d '{"name":"My Comic"}' | python -c "import json,sys;print(json.load(sys.stdin)['project']['id'])")
 
-# 2. Write the storyboard (you write it — scene/characters/dialogue per cell)
+# 2. Write the storyboard (you write it — scene/characters/dialogue per cell).
+#    Optional per-panel fields:
+#    - "shot": wide|medium|close-up|extreme-close-up|splash — camera framing;
+#      injected into the image prompt AND used by assembly (close-ups get
+#      slimmer balloons; splash panels go solo in plan-pages).
+#    - Dialogue lines "Name：台词" (or "Name: ") mark the speaker when Name
+#      is in that panel's characters — the bubble records `speaker`, and with
+#      2+ speakers in one panel the tails point opposite ways (check preview).
 curl -s -X PUT $BASE/api/agent/projects/$PID/panels -H 'Content-Type: application/json' \
   -d '{"panels":[
-    {"scene":"Rain-soaked street, girl running","characters":["Yuki"],"dialogue":"Get away!"},
-    {"scene":"She stops, breathing hard","characters":["Yuki"],"dialogue":"I cannot go back..."}]}'
+    {"scene":"Rain-soaked street, girl running","characters":["Yuki"],
+     "dialogue":"Yuki：Get away!","shot":"wide"},
+    {"scene":"Her face, rain and tears","characters":["Yuki"],
+     "dialogue":"I cannot go back...","shot":"close-up"}]}'
 
 # 3a. Batch-generate panel art (SwarmUI must be running; steps/sampler come from
 #     global settings — read/write them via GET/PUT /api/agent/settings, or the
@@ -152,6 +168,22 @@ curl -s $BASE/api/agent/templates
 curl -s -X POST $BASE/api/agent/projects/$PID/pages -H 'Content-Type: application/json' \
   -d '{"template":{"kind":"builtin","id":"manga-2v"},"panel_ids":["panel_1","panel_2"],
        "reading":"rtl","name":"ch1-p1","dynamic":true}'
+# 5b. Heuristic pagination: chunk imaged panels into pages (splash panels go
+#     solo), template picked by slot count; apply=true builds them all:
+curl -s -X POST $BASE/api/agent/projects/$PID/plan-pages -H 'Content-Type: application/json' \
+  -d '{"panels_per_page":4,"apply":true}'
+# 5c. Pages are not append-only: delete a page, or set a new full order
+#     (page_ids must be a permutation of all existing page ids):
+curl -s -X DELETE $BASE/api/agent/projects/$PID/pages/<PAGE_ID>
+curl -s -X PUT $BASE/api/agent/projects/$PID/pages/order -H 'Content-Type: application/json' \
+  -d '{"page_ids":["<page2>","<page1>"]}'
+# 5d. Cover page: full-bleed art + outlined title, inserted as page 1.
+#     Generate art first (POST /generate kind="cover"), or reuse a panel:
+curl -s -X POST $BASE/api/agent/projects/$PID/cover -H 'Content-Type: application/json' \
+  -d '{"title":"雨桥物语","subtitle":"第一卷","panel_id":"panel_1"}'
+# 5e. SFX: styled text elements (fontSize + strokeWidth outline + rotation).
+#     Preset onomatopoeia library:
+curl -s $BASE/api/agent/sfx-presets
 
 # 6. Fine-tune anything: add a floating overlay (transparent PNG above frames)
 curl -s -X POST $BASE/api/agent/projects/$PID/pages/<PAGE_ID>/elements \
@@ -172,9 +204,10 @@ curl -s -X POST $BASE/api/assets/file -F file=@dragon_alpha.png -F kind=overlay
 
 # 9. Export the whole project
 curl -s -X POST $BASE/api/agent/export -H 'Content-Type: application/json' \
-  -d "{\"project_id\":\"$PID\",\"format\":\"both\",\"scale\":2}"
+  -d "{\"project_id\":\"$PID\",\"format\":\"both\",\"scale\":2,\"page_numbers\":true}"
 # → {"pages_dir": "...", "pdf": {"path": "...", "url": "/api/export/download/..."},
 #    "zip": {"path": "...", "url": "/api/export/download/..."}}
+#    page_numbers stamps bottom-center numbers on every page but the first.
 # (format "pdf" or "zip" returns only that key; download URLs are same-origin GETs)
 ```
 

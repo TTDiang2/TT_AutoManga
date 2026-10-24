@@ -34,6 +34,7 @@ class RenderExportRequest(BaseModel):
     pages: List[dict]
     format: str = "pdf"
     scale: float = 2.0
+    page_numbers: bool = False
 
 
 @router.post("/export")
@@ -42,7 +43,8 @@ async def render_export(req: RenderExportRequest):
         raise HTTPException(status_code=400, detail="No pages provided")
     scale = min(4.0, max(0.5, req.scale))
     try:
-        payload = export_pages_to_bytes(req.pages, req.format, scale, _resolver)
+        payload = export_pages_to_bytes(req.pages, req.format, scale,
+                                       _resolver, req.page_numbers)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if req.format == "pdf":

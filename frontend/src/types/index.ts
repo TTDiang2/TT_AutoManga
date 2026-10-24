@@ -300,12 +300,15 @@ export interface TextElement extends ComposerElementBase {
   direction: TextDirection;
   fontWeight: string;
   textAlign: 'left' | 'center' | 'right';
+  strokeWidth?: number;   // px at 1x page scale; >0 draws an outline (SFX look)
+  strokeColor?: string;
 }
 
 export interface BubbleElement extends ComposerElementBase {
   type: 'bubble';
   bubbleType: BubbleType;
   text: string;
+  speaker?: string;   // set by assembly when dialogue is "Name：台词"
   direction: TextDirection;
   fontSize: number;
   backgroundColor: string;

@@ -1,6 +1,7 @@
-import { useState, useLayoutEffect } from 'react';
+import { useState } from 'react';
 import { useComposerStore } from '../../store/composerStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import type { TranslationKeys } from '../../i18n';
 import { DEFAULT_CORNERS } from '../../types';
 import type {
   ComposerElement,
@@ -44,7 +45,7 @@ export function PropertiesPanel() {
   // Pick the border width of the first frame as the "current" value for the slider
   const currentBorderWidth =
     frameElements.length > 0
-      ? (frameElements[0] as any).frameBorderWidth ?? 1.5
+      ? (frameElements[0] as ImageElement | PageImageElement).frameBorderWidth ?? 1.5
       : 1.5;
 
   return (
@@ -128,11 +129,14 @@ function PageLevelControls({
 }) {
   const [gapPercent, setGapPercent] = useState(2);
   const [borderWidth, setBorderWidth] = useState(currentBorderWidth);
+  const [syncedBorderWidth, setSyncedBorderWidth] = useState(currentBorderWidth);
 
-  // Keep local slider in sync when page/frames change
-  useLayoutEffect(() => {
+  // Keep local slider in sync when page/frames change (render-time reset,
+  // the pattern from react.dev/learn/you-might-not-need-an-effect)
+  if (syncedBorderWidth !== currentBorderWidth) {
+    setSyncedBorderWidth(currentBorderWidth);
     setBorderWidth(currentBorderWidth);
-  }, [currentBorderWidth]);
+  }
 
   const handleBorderChange = (w: number) => {
     setBorderWidth(w);
@@ -492,7 +496,7 @@ function BubbleProps({
 }: {
   element: BubbleElement;
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
-  t: any;
+  t: TranslationKeys;
 }) {
   const bubbleTypes: BubbleType[] = ['speech', 'thought', 'shout', 'whisper', 'narration', 'inner-voice'];
   const tailPositions: TailPosition[] = ['top', 'bottom', 'left', 'right'];
@@ -500,6 +504,14 @@ function BubbleProps({
 
   return (
     <>
+      {element.speaker && (
+        <div className="composer-prop-group">
+          <span className="composer-prop-label">{t.composer.speaker || 'Speaker'}</span>
+          <span className="composer-prop-label" style={{ fontWeight: 600 }}>
+            {element.speaker}
+          </span>
+        </div>
+      )}
       <div className="composer-prop-group">
         <span className="composer-prop-label">{t.composer.bubble}</span>
         <div className="composer-prop-btn-group">
@@ -507,7 +519,7 @@ function BubbleProps({
             <button
               key={bt}
               className={`composer-prop-btn ${element.bubbleType === bt ? 'active' : ''}`}
-              onClick={() => updateElement(element.id, { bubbleType: bt } as any)}
+              onClick={() => updateElement(element.id, { bubbleType: bt })}
             >
               {bt === 'inner-voice' ? t.composer.innerVoice : bt}
             </button>
@@ -521,7 +533,7 @@ function BubbleProps({
             <button
               key={tp}
               className={`composer-prop-btn ${element.tailPosition === tp ? 'active' : ''}`}
-              onClick={() => updateElement(element.id, { tailPosition: tp } as any)}
+              onClick={() => updateElement(element.id, { tailPosition: tp })}
             >
               {tp}
             </button>
@@ -535,7 +547,7 @@ function BubbleProps({
             <button
               key={d}
               className={`composer-prop-btn ${element.direction === d ? 'active' : ''}`}
-              onClick={() => updateElement(element.id, { direction: d } as any)}
+              onClick={() => updateElement(element.id, { direction: d })}
             >
               {d === 'horizontal' ? t.composer.horizontal : t.composer.vertical}
             </button>
@@ -550,7 +562,7 @@ function BubbleProps({
           min={8}
           max={72}
           value={element.fontSize}
-          onChange={e => updateElement(element.id, { fontSize: +e.target.value } as any)}
+          onChange={e => updateElement(element.id, { fontSize: +e.target.value })}
         />
       </div>
       <div className="composer-prop-group">
@@ -559,7 +571,7 @@ function BubbleProps({
           type="color"
           className="composer-prop-color"
           value={element.backgroundColor}
-          onChange={e => updateElement(element.id, { backgroundColor: e.target.value } as any)}
+          onChange={e => updateElement(element.id, { backgroundColor: e.target.value })}
         />
       </div>
       <div className="composer-prop-group">
@@ -568,7 +580,7 @@ function BubbleProps({
           type="color"
           className="composer-prop-color"
           value={element.borderColor}
-          onChange={e => updateElement(element.id, { borderColor: e.target.value } as any)}
+          onChange={e => updateElement(element.id, { borderColor: e.target.value })}
         />
       </div>
     </>
@@ -582,7 +594,7 @@ function TextProps({
 }: {
   element: TextElement;
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
-  t: any;
+  t: TranslationKeys;
 }) {
   const directions: TextDirection[] = ['horizontal', 'vertical'];
   const aligns: Array<'left' | 'center' | 'right'> = ['left', 'center', 'right'];
@@ -597,7 +609,20 @@ function TextProps({
           min={8}
           max={120}
           value={element.fontSize}
-          onChange={e => updateElement(element.id, { fontSize: +e.target.value } as any)}
+          onChange={e => updateElement(element.id, { fontSize: +e.target.value })}
+        />
+      </div>
+      <div className="composer-prop-group">
+        <span className="composer-prop-label">{t.composer.strokeWidth || 'Outline'}</span>
+        <input
+          className="composer-prop-input"
+          type="number"
+          min={0}
+          max={20}
+          value={element.strokeWidth ?? 0}
+          onChange={e => updateElement(element.id, {
+            strokeWidth: Math.max(0, Math.min(20, +e.target.value || 0)),
+          })}
         />
       </div>
       <div className="composer-prop-group">
@@ -607,7 +632,7 @@ function TextProps({
             <button
               key={w}
               className={`composer-prop-btn ${element.fontWeight === w ? 'active' : ''}`}
-              onClick={() => updateElement(element.id, { fontWeight: w } as any)}
+              onClick={() => updateElement(element.id, { fontWeight: w })}
             >
               {w}
             </button>
@@ -621,7 +646,7 @@ function TextProps({
             <button
               key={a}
               className={`composer-prop-btn ${element.textAlign === a ? 'active' : ''}`}
-              onClick={() => updateElement(element.id, { textAlign: a } as any)}
+              onClick={() => updateElement(element.id, { textAlign: a })}
             >
               {a === 'left' ? t.composer.alignLeft : a === 'center' ? t.composer.alignCenter : t.composer.alignRight}
             </button>
@@ -635,7 +660,7 @@ function TextProps({
             <button
               key={d}
               className={`composer-prop-btn ${element.direction === d ? 'active' : ''}`}
-              onClick={() => updateElement(element.id, { direction: d } as any)}
+              onClick={() => updateElement(element.id, { direction: d })}
             >
               {d === 'horizontal' ? t.composer.horizontal : t.composer.vertical}
             </button>
@@ -648,7 +673,7 @@ function TextProps({
           type="color"
           className="composer-prop-color"
           value={element.color}
-          onChange={e => updateElement(element.id, { color: e.target.value } as any)}
+          onChange={e => updateElement(element.id, { color: e.target.value })}
         />
       </div>
     </>

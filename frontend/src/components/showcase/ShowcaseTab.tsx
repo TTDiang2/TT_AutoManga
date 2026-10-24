@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
 import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
-import { useComposerStore } from '../../store/composerStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import { renderPageToImage } from '../composer/pageRenderer';
-import type { Project } from '../../types';
+import type { Project, ComposerPage } from '../../types';
 
 export function ShowcaseTab() {
   const { setCurrentProject, setActiveTab, setComposerProjectId, loadProjectWithImages } = useProjectStore();
-  const {} = useComposerStore();
   const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -94,7 +92,7 @@ export function ShowcaseTab() {
         setReaderPage(0);
         setReaderImages([]);
         if (project.composerPages?.length) {
-          Promise.all(project.composerPages.map((page: any) => renderPageToImage(page)))
+          Promise.all((project.composerPages as ComposerPage[]).map(page => renderPageToImage(page)))
             .then(imgs => setReaderImages(imgs.filter(Boolean)));
         }
       } else {
@@ -106,6 +104,7 @@ export function ShowcaseTab() {
   };
 
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [pageNumbers, setPageNumbers] = useState(false);
 
   const handleExportProject = async (projectId: string) => {
     setExportingId(projectId);
@@ -115,7 +114,7 @@ export function ShowcaseTab() {
       const resp = await fetch('/api/agent/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, format: 'pdf', scale: 2 }),
+        body: JSON.stringify({ project_id: projectId, format: 'pdf', scale: 2, page_numbers: pageNumbers }),
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -133,11 +132,11 @@ export function ShowcaseTab() {
       const data = await res.json();
       if (!data.project?.composerPages?.length) return;
       const pages = data.project.composerPages;
-      const results = await Promise.all(pages.map((p: any) => renderPageToImage(p)));
-      const canvasPages = pages.map((p: any, i: number) => ({
+      const results = await Promise.all((pages as ComposerPage[]).map(p => renderPageToImage(p)));
+      const canvasPages = (pages as ComposerPage[]).map((p, i: number) => ({
         name: p.name || 'page',
         dataUrl: results[i],
-      })).filter((p: any) => p.dataUrl);
+      })).filter(p => Boolean(p.dataUrl));
 
       const legacyResp = await fetch('/api/export/composer-images', {
         method: 'POST',
@@ -192,6 +191,19 @@ export function ShowcaseTab() {
             >
               <FiFolder size={14} /> All Comics
             </button>
+          )}
+          {mode === 'browse' && (
+            <label
+              className="flex items-center gap-xs text-sm"
+              style={{ marginRight: 8, cursor: 'pointer', userSelect: 'none' }}
+            >
+              <input
+                type="checkbox"
+                checked={pageNumbers}
+                onChange={e => setPageNumbers(e.target.checked)}
+              />
+              {t.showcase.pageNumbers || 'Page numbers'}
+            </label>
           )}
           {mode === 'browse' && (
             <button className="btn btn-secondary" onClick={() => setShowNewModal(true)}>

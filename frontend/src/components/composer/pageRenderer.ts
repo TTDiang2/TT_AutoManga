@@ -125,6 +125,13 @@ function drawTextEl(
   ctx.font = `${style}${fs}px ${el.fontFamily || 'sans-serif'}`;
   ctx.textAlign = el.textAlign || 'left';
   ctx.textBaseline = 'top';
+  // outline pass for SFX-style text (parity: backend renderer stroke_width)
+  const sw = el.strokeWidth || 0;
+  if (sw > 0) {
+    ctx.lineWidth = sw;
+    ctx.strokeStyle = el.strokeColor || '#000000';
+    ctx.lineJoin = 'round';
+  }
 
   if (el.direction === 'vertical') {
     const chars = (el.content || '').split('');
@@ -132,6 +139,7 @@ function drawTextEl(
     const totalH = chars.length * charH;
     const startY = y + (eh - totalH) / 2;
     chars.forEach((ch, i) => {
+      if (sw > 0) ctx.strokeText(ch, x + ew / 2, startY + i * charH);
       ctx.fillText(ch, x + ew / 2, startY + i * charH);
     });
   } else {
@@ -143,6 +151,7 @@ function drawTextEl(
     const totalH = lines.length * lineH;
     const startY = y + (eh - totalH) / 2;
     lines.forEach((line, i) => {
+      if (sw > 0) ctx.strokeText(line, tx, startY + i * lineH);
       ctx.fillText(line, tx, startY + i * lineH);
     });
   }
@@ -313,7 +322,7 @@ function drawBubbleText(
   });
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+export function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
   const rawLines = text.split('\n');
   const result: string[] = [];
   for (const raw of rawLines) {

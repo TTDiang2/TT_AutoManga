@@ -139,9 +139,17 @@ def _draw_text(el, ew, eh, scale):
     color = _hex(el.get("color") or "#000000")
     content = el.get("content") or ""
     vertical = el.get("direction") == "vertical"
+    stroke = {}
+    sw = float(el.get("strokeWidth") or 0)
+    if sw > 0:
+        stroke = {"stroke_width": max(1, int(round(sw * scale))),
+                  "stroke_fill": _hex(el.get("strokeColor") or "#000000")}
 
-    # auto-shrink: never let a text element overflow its box
+    # auto-shrink: never let a text element overflow its box. The stroke
+    # halo (sw*scale px total, sw/2 per side) eats into the usable box.
     fs_req = (el.get("fontSize") or 14) * scale
+    stroke_px = max(1, int(round(sw * scale))) if sw > 0 else 0
+    box_w, box_h = ew - stroke_px, eh - stroke_px
     fs = fs_req
     while fs > fs_req * 0.55 and fs > 6:
         font = get_font(fs, el.get("fontFamily"),
@@ -155,7 +163,7 @@ def _draw_text(el, ew, eh, scale):
             lines = content.split("\n")
             needed_w = max((font_probe.getlength(l) for l in lines), default=0)
             needed_h = len(lines) * fs * 1.4
-        if needed_w <= ew and needed_h <= eh:
+        if needed_w <= box_w and needed_h <= box_h:
             break
         fs = max(6.0, fs * 0.9)
     font = get_font(fs, el.get("fontFamily"),
@@ -169,7 +177,7 @@ def _draw_text(el, ew, eh, scale):
         y0 = (eh - total) / 2
         for i, ch in enumerate(chars):
             d.text((ew / 2, y0 + i * char_h + char_h / 2), ch, font=font,
-                   fill=color, anchor="mm")
+                   fill=color, anchor="mm", **stroke)
     else:
         lines = content.split("\n")
         total = len(lines) * line_h
@@ -179,7 +187,7 @@ def _draw_text(el, ew, eh, scale):
         x = {"left": 0, "center": ew / 2, "right": ew}[align]
         for i, line in enumerate(lines):
             d.text((x, y0 + i * line_h + line_h / 2), line, font=font,
-                   fill=color, anchor=ax)
+                   fill=color, anchor=ax, **stroke)
     return out
 
 

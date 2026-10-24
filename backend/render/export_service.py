@@ -24,6 +24,22 @@ def _render_pngs(pages: List[dict], scale: float, resolve) -> List[Image.Image]:
     return [render_page(p, scale, resolve) for p in pages]
 
 
+def _stamp_page_numbers(images: List[Image.Image], scale: float) -> None:
+    """Number pages bottom-center; page 1 (the cover) stays unnumbered."""
+    from PIL import ImageDraw
+    from .fonts import get_font
+    for i, img in enumerate(images):
+        if i == 0:
+            continue
+        d = ImageDraw.Draw(img)
+        fs = max(10, int(14 * scale))
+        font = get_font(fs)
+        label = str(i + 1)
+        w = font.getlength(label)
+        d.text(((img.width - w) / 2, img.height - fs * 1.8), label,
+               font=font, fill=(102, 102, 102, 255))
+
+
 def _build_pdf(images: List[Image.Image], pages: List[dict]) -> bytes:
     from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.lib.utils import ImageReader
@@ -53,11 +69,13 @@ def _build_zip(images: List[Image.Image]) -> bytes:
 
 
 def export_pages_to_bytes(pages: List[dict], fmt: str, scale: float,
-                          resolve) -> dict:
+                          resolve, page_numbers: bool = False) -> dict:
     """fmt ∈ pdf|zip|both → {"pdf": bytes|None, "zip": bytes|None}."""
     if fmt not in ("pdf", "zip", "both"):
         raise ValueError(f"unknown export format: {fmt}")
     images = _render_pngs(pages, scale, resolve)
+    if page_numbers:
+        _stamp_page_numbers(images, scale)
     out = {"pdf": None, "zip": None}
     if fmt in ("pdf", "both"):
         out["pdf"] = _build_pdf(images, pages)
@@ -67,10 +85,13 @@ def export_pages_to_bytes(pages: List[dict], fmt: str, scale: float,
 
 
 def export_pages(pages: List[dict], fmt: str, scale: float, resolve,
-                 out_dir: Path, base_name: str) -> dict:
+                 out_dir: Path, base_name: str,
+                 page_numbers: bool = False) -> dict:
     """Render + write PNGs/PDF/ZIP; returns paths and /api/export/download URLs."""
     out_dir.mkdir(parents=True, exist_ok=True)
     images = _render_pngs(pages, scale, resolve)
+    if page_numbers:
+        _stamp_page_numbers(images, scale)
 
     png_dir = out_dir / f"{base_name}_pages"
     png_dir.mkdir(exist_ok=True)

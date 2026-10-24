@@ -80,6 +80,10 @@ def _validate_panels(panels: List[Dict[str, Any]]) -> None:
         if not (p.get("scene") or "").strip():
             raise HTTPException(status_code=400,
                                 detail="every panel needs a non-empty scene")
+        if p.get("shot") is not None and p["shot"] not in _SHOT_TAGS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"shot must be one of {sorted(_SHOT_TAGS)}")
 
 
 def _project_stats(project: Dict[str, Any]) -> Dict[str, Any]:
@@ -158,6 +162,12 @@ async def patch_panel(project_id: str, panel_id: str, updates: Dict[str, Any]):
     if "id" in updates and updates["id"] != panel_id:
         raise HTTPException(status_code=400, detail="cannot change panel id")
     updates.pop("id", None)
+    if updates.get("shot") is not None and updates["shot"] not in _SHOT_TAGS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"shot must be one of {sorted(_SHOT_TAGS)}")
+    if "scene" in updates and not (updates["scene"] or "").strip():
+        raise HTTPException(status_code=400, detail="scene cannot be empty")
     for panel in project.get("panels", []):
         if panel.get("id") == panel_id:
             panel.update(updates)
@@ -307,6 +317,11 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             panel = next((p for p in (project.get("panels") or [])
                           if p.get("id") == payload["panel_id"]), None)
         if panel:
+            shot = panel.get("shot")
+            if shot:
+                extra = _SHOT_TAGS[shot][0 if prompt_format_is_tags(payload) else 1]
+                prompt = f"{prompt}, {extra}" if prompt_format_is_tags(payload) else f"{prompt}。{extra}"
+                injected.append({"kind": "shot", "text": extra})
             for block in blocks_for_panel(project, panel):
                 prompt = f"{prompt}, {block}" if prompt_format_is_tags(payload) else f"{prompt}。{block}"
                 injected.append({"kind": "character", "text": block})
@@ -377,6 +392,17 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         applied = True
     return {"assets": assets_out, "applied": applied,
             "model": model, "injected": injected}
+
+
+# camera-shot descriptors injected into prompts when a panel declares a shot
+_SHOT_TAGS = {
+    "wide": ("wide shot, scenic view, full scenery", "全景远景，展现完整环境"),
+    "medium": ("medium shot, waist up", "中景，半身构图"),
+    "close-up": ("close-up, face focus", "近景特写，聚焦面部"),
+    "extreme-close-up": ("extreme close-up, macro detail", "极致特写，放大细节"),
+    "splash": ("splash illustration, dramatic composition, dynamic angle",
+               "整页大画面，戏剧性构图，充满张力"),
+}
 
 
 def prompt_format_is_tags(payload: Dict[str, Any]) -> bool:
@@ -649,6 +675,194 @@ async def delete_page(project_id: str, page_id: str):
     raise HTTPException(status_code=404, detail="Page not found")
 
 
+# exact slot-count match preferred, next larger accepted (extra slots stay
+# empty placeholders and render nothing)
+_PLAN_TEMPLATES = {1: "hero-splash", 2: "manga-2h", 3: "manga-3", 4: "manga-4",
+                   5: "dyn-5-mix", 6: "manga-6", 8: "manga-8"}
+
+
+def _plan_template(count: int) -> str:
+    if count in _PLAN_TEMPLATES:
+        return _PLAN_TEMPLATES[count]
+    larger = [n for n in _PLAN_TEMPLATES if n > count]
+    return _PLAN_TEMPLATES[min(larger)] if larger else "manga-8"
+
+
+class PlanPagesRequest(BaseModel):
+    panels_per_page: int = 4         # 1-8
+    splash_panel_ids: List[str] = [] # forced solo splash pages
+    only_with_image: bool = True     # skip panels that have no art yet
+    reading: str = "rtl"
+    bubbles: dict = {}
+    dynamic: bool = False
+    apply: bool = False              # execute the plan with build_page
+
+
+@router.post("/projects/{project_id}/plan-pages")
+async def plan_pages(project_id: str, req: PlanPagesRequest):
+    """Heuristic pagination: chunk panels into pages (page = the narrative
+    unit of manga), splash panels get a solo page, template picked by slot
+    count. Pure planning unless apply=true."""
+    project = _load_or_404(project_id)
+    ppp = max(1, min(8, req.panels_per_page))
+    splash = set(req.splash_panel_ids)
+
+    chosen = [p for p in project.get("panels", [])
+              if not req.only_with_image or p.get("image")]
+    groups: List[List[str]] = []
+    group: List[str] = []
+    for p in chosen:
+        pid = p.get("id")
+        if p.get("shot") == "splash" or pid in splash:
+            if group:
+                groups.append(group)
+                group = []
+            groups.append([pid])
+        else:
+            group.append(pid)
+            if len(group) >= ppp:
+                groups.append(group)
+                group = []
+    if group:
+        groups.append(group)
+
+    plan = [{"index": i + 1, "name": f"p{i + 1}",
+             "panel_ids": g,
+             "template": {"kind": "builtin", "id": _plan_template(len(g))}}
+            for i, g in enumerate(groups)]
+
+    pages_added = 0
+    if req.apply and plan:
+        for entry in plan:
+            page, _warnings = build_page(
+                {"template": entry["template"], "name": entry["name"],
+                 "panel_ids": entry["panel_ids"], "reading": req.reading,
+                 "bubbles": req.bubbles, "dynamic": req.dynamic},
+                project)
+            pages = project.setdefault("composerPages", [])
+            page["order"] = len(pages)
+            pages.append(page)
+            entry["page_id"] = page["id"]
+            pages_added += 1
+        storage.save_project(project)
+    return {"plan": plan, "applied": req.apply, "pages_added": pages_added}
+
+
+class CoverRequest(BaseModel):
+    title: str
+    subtitle: Optional[str] = None
+    asset_url: Optional[str] = None    # /api/assets/file/... or data: URL
+    panel_id: Optional[str] = None     # reuse an existing panel's image
+    title_color: str = "#ffffff"
+    font_size: int = 64
+
+
+@router.post("/projects/{project_id}/cover")
+async def build_cover(project_id: str, req: CoverRequest):
+    """Assemble a cover page (full-bleed art + outlined title) and insert it
+    as page 1. Generate the art first via /generate kind=\"cover\"."""
+    if not req.title.strip():
+        raise HTTPException(status_code=400, detail="title is required")
+    project = _load_or_404(project_id)
+    src = None
+    if req.asset_url:
+        if not (req.asset_url.startswith("/api/assets/file/")
+                or req.asset_url.startswith("data:")):
+            raise HTTPException(status_code=400,
+                                detail="asset_url must be an asset URL or data: URL")
+        src = req.asset_url
+    elif req.panel_id:
+        panel = next((p for p in project.get("panels", [])
+                      if p.get("id") == req.panel_id), None)
+        if panel is None:
+            raise HTTPException(status_code=404, detail="Panel not found")
+        src = panel.get("image")
+        if not src:
+            raise HTTPException(status_code=400,
+                                detail="panel has no image to use as cover art")
+    else:
+        raise HTTPException(status_code=400,
+                            detail="asset_url or panel_id is required")
+
+    els: List[Dict[str, Any]] = [{
+        "id": uuid.uuid4().hex, "type": "image", "src": src,
+        "x": 0, "y": 0, "width": 100, "height": 100, "rotation": 0,
+        "zIndex": 0, "locked": False, "visible": True, "frameBorderWidth": 0,
+    }, {
+        "id": uuid.uuid4().hex, "type": "text", "content": req.title.strip(),
+        "x": 8, "y": 6, "width": 84, "height": 16, "rotation": 0,
+        "zIndex": 1, "locked": False, "visible": True,
+        "fontSize": req.font_size, "fontFamily": "", "color": req.title_color,
+        "direction": "horizontal", "fontWeight": "bold", "textAlign": "center",
+        "strokeWidth": 6, "strokeColor": "#000000",
+    }]
+    if req.subtitle and req.subtitle.strip():
+        els.append({
+            "id": uuid.uuid4().hex, "type": "text",
+            "content": req.subtitle.strip(),
+            "x": 12, "y": 23, "width": 76, "height": 8, "rotation": 0,
+            "zIndex": 2, "locked": False, "visible": True,
+            "fontSize": max(12, int(req.font_size * 0.4)), "fontFamily": "",
+            "color": req.title_color, "direction": "horizontal",
+            "fontWeight": "normal", "textAlign": "center",
+            "strokeWidth": 3, "strokeColor": "#000000",
+        })
+    page = {"id": uuid.uuid4().hex, "name": "cover", "templateId": "cover",
+            "width": 600, "height": 900, "order": 0, "elements": els}
+    pages = project.setdefault("composerPages", [])
+    for p in pages:
+        p["order"] = p.get("order", 0) + 1
+    pages.insert(0, page)
+    storage.save_project(project)
+    return {"page": page}
+
+
+# curated onomatopoeia for the SFX text tool (zh / ja / en)
+_SFX_PRESETS = [
+    {"word": "轰", "meaning": "爆炸、引擎"}, {"word": "砰", "meaning": "撞击"},
+    {"word": "咔嚓", "meaning": "断裂、快门"}, {"word": "咚", "meaning": "重击、心跳"},
+    {"word": "唰", "meaning": "快速掠过"}, {"word": "啪", "meaning": "拍击"},
+    {"word": "哗啦", "meaning": "水流、散落"}, {"word": "扑通", "meaning": "落水"},
+    {"word": "滴答", "meaning": "钟表"}, {"word": "嘶", "meaning": "撕裂、嘶鸣"},
+    {"word": "ざっ", "meaning": "斩击"}, {"word": "どん", "meaning": "轰响"},
+    {"word": "ごごご", "meaning": "轰鸣渐进"}, {"word": "ドキッ", "meaning": "心跳"},
+    {"word": "BOOM", "meaning": "explosion"}, {"word": "WHOOSH", "meaning": "fast movement"},
+    {"word": "CRACK", "meaning": "impact"}, {"word": "THUD", "meaning": "heavy hit"},
+]
+
+
+@router.get("/sfx-presets")
+async def sfx_presets():
+    return {"presets": _SFX_PRESETS,
+            "default_style": {"fontSize": 48, "rotation": -8,
+                              "strokeWidth": 4, "strokeColor": "#000000",
+                              "color": "#ffffff", "fontWeight": "bold",
+                              "textAlign": "center"}}
+
+
+class ReorderPagesRequest(BaseModel):
+    page_ids: List[str]    # full desired order; must be a permutation
+
+
+@router.put("/projects/{project_id}/pages/order")
+async def reorder_pages(project_id: str, req: ReorderPagesRequest):
+    project = _load_or_404(project_id)
+    pages = project.setdefault("composerPages", [])
+    existing = [p.get("id") for p in pages]
+    if sorted(req.page_ids) != sorted(existing):
+        raise HTTPException(
+            status_code=400,
+            detail="page_ids must be a permutation of the existing page ids")
+    by_id = {p["id"]: p for p in pages}
+    ordered = [by_id[pid] for pid in req.page_ids]
+    for i, p in enumerate(ordered):
+        p["order"] = i
+    project["composerPages"] = ordered
+    storage.save_project(project)
+    return {"success": True,
+            "pages": [{"id": p["id"], "order": p["order"]} for p in ordered]}
+
+
 # ---------------------------------------------------------------------------
 # Element-level CRUD
 # ---------------------------------------------------------------------------
@@ -671,6 +885,15 @@ def _validate_element_payload(el: Dict[str, Any], partial: bool = False) -> None
         raise HTTPException(status_code=400, detail="width must be > 0")
     if "height" in el and el["height"] <= 0:
         raise HTTPException(status_code=400, detail="height must be > 0")
+    if "strokeWidth" in el and el["strokeWidth"] is not None:
+        v = el["strokeWidth"]
+        if not isinstance(v, (int, float)) or not (0 <= v <= 20):
+            raise HTTPException(status_code=400,
+                                detail="strokeWidth must be a number in 0-20")
+    if "strokeColor" in el and el["strokeColor"] is not None:
+        if not isinstance(el["strokeColor"], str):
+            raise HTTPException(status_code=400,
+                                detail="strokeColor must be a string")
     if "corners" in el and el["corners"] is not None:
         c = el["corners"]
         if not isinstance(c, dict) or set(c.keys()) != {"tl", "tr", "br", "bl"}:
@@ -765,6 +988,7 @@ class AgentExportRequest(BaseModel):
     project_id: str
     format: str = "both"       # pdf | zip | both
     scale: float = 2.0
+    page_numbers: bool = False # stamp page numbers (cover stays unnumbered)
 
 
 @router.post("/export")
@@ -779,7 +1003,8 @@ async def agent_export(req: AgentExportRequest):
     fmt = req.format
     base_name = f"manga_{req.project_id[:8]}_{time.strftime('%Y%m%d_%H%M%S')}"
     result = export_pages(pages, fmt, min(4.0, max(0.5, req.scale)),
-                          _resolver, _exports_dir(), base_name)
+                          _resolver, _exports_dir(), base_name,
+                          page_numbers=req.page_numbers)
     logger.info("agent/export project=%s fmt=%s base=%s", req.project_id, fmt,
                 base_name)
     return result

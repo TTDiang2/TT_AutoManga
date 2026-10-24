@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   FiMousePointer, FiType, FiMessageCircle,
   FiRotateCcw, FiRotateCw, FiDownload,
   FiCopy, FiTrash2, FiSave, FiBook, FiX, FiPlusSquare, FiTrash,
-  FiImage,
+  FiImage, FiZap, FiLayout,
 } from 'react-icons/fi';
 import { useComposerStore, TEMPLATES } from '../../store/composerStore';
 import { useProjectStore } from '../../store/projectStore';
@@ -116,6 +116,7 @@ export function ComposerTab() {
     redo,
     setPages: setComposerPages,
     addFrame,
+    addElement,
     removeElement,
     selectElement,
     userTemplates,
@@ -160,13 +161,96 @@ export function ComposerTab() {
   const [saveProjectName, setSaveProjectName] = useState('');
   const [saveMsg, setSaveMsg] = useState('');
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [sfxPresets, setSfxPresets] = useState<Array<{ word: string; meaning: string }>>([]);
+  const [showSfxMenu, setShowSfxMenu] = useState(false);
+  const [paginating, setPaginating] = useState(false);
+  const sfxRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleSfxMenu = () => {
+    const next = !showSfxMenu;
+    setShowSfxMenu(next);
+    if (next && sfxPresets.length === 0) {
+      fetch('/api/agent/sfx-presets')
+        .then(r => r.json())
+        .then(d => setSfxPresets(d.presets || []))
+        .catch(() => {
+          setSfxPresets([]);
+          setSaveMsg(t.composer.sfxUnavailable || 'SFX presets unavailable');
+          setTimeout(() => setSaveMsg(''), 2500);
+        });
+    }
+  };
+
+  // close the preset popover when clicking anywhere outside it
+  useEffect(() => {
+    if (!showSfxMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (sfxRef.current && !sfxRef.current.contains(e.target as Node)) {
+        setShowSfxMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [showSfxMenu]);
+
+  const addSfx = (word: string) => {
+    setShowSfxMenu(false);
+    addElement({
+      id: `el_${Date.now()}`, type: 'text', content: word,
+      x: 30, y: 40, width: 40, height: 12, rotation: -8,
+      zIndex: 999, locked: false, visible: true,
+      fontSize: 48, fontFamily: '', color: '#ffffff',
+      direction: 'horizontal', fontWeight: 'bold', textAlign: 'center',
+      strokeWidth: 4, strokeColor: '#000000',
+    });
+  };
+
+  // heuristic auto-pagination from the agent API: chunk imaged panels into
+  // pages and append them, then reload the project's pages
+  const autoPaginate = async () => {
+    if (!currentProjectId || paginating) return;
+    setPaginating(true);
+    const say = (msg: string) => {
+      setSaveMsg(msg);
+      setTimeout(() => setSaveMsg(''), 2500);
+    };
+    try {
+      const resp = await fetch(`/api/agent/projects/${currentProjectId}/plan-pages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply: true, panels_per_page: 4 }),
+      });
+      if (!resp.ok) {
+        console.error('plan-pages failed:', resp.status);
+        say(`${t.composer.autoPagesFailed || 'Auto pages failed'} (HTTP ${resp.status})`);
+        return;
+      }
+      const data = await resp.json();
+      if (!data.pages_added) {
+        say(t.composer.autoPagesEmpty || 'Generate panel art first');
+        return;
+      }
+      const res = await fetch(`/api/projects/load/${currentProjectId}`);
+      const proj = await res.json();
+      if (proj.project?.composerPages) {
+        setComposerPages(proj.project.composerPages);
+        say((t.composer.autoPagesAdded || 'Added {n} page(s)')
+          .replace('{n}', String(data.pages_added)));
+      }
+    } catch (e) {
+      console.error('auto-paginate failed:', e);
+      say(t.composer.autoPagesFailed || 'Auto pages failed');
+    } finally {
+      setPaginating(false);
+    }
+  };
   const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
 
   const saveToShowcase = async () => {
     const name = saveProjectName.trim();
     if (!name) return;
     try {
-      const body: any = {
+      const body: Record<string, unknown> = {
         name,
         panels: [],
         settings: { detailLevel: 3 },
@@ -435,6 +519,15 @@ export function ComposerTab() {
         <button className="composer-add-page-btn" onClick={() => addPage('blank')}>
           {t.composer.addPage}
         </button>
+        <button
+          className="composer-add-page-btn"
+          onClick={autoPaginate}
+          disabled={!currentProjectId || paginating}
+          title={t.composer.autoPaginate || 'Auto Pages'}
+        >
+          <FiLayout size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
+          {t.composer.autoPaginate || 'Auto Pages'}
+        </button>
       </div>
 
       <div className="composer-canvas-workspace">
@@ -523,6 +616,40 @@ export function ComposerTab() {
               <FiImage size={15} />
               <span className="composer-add-image-label">{t.composer.addImage || 'Add Image'}</span>
             </button>
+            <div ref={sfxRef} style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                className="composer-tool-btn composer-add-image-btn"
+                title={t.composer.sfx || 'SFX'}
+                onClick={toggleSfxMenu}
+              >
+                <FiZap size={15} />
+                <span className="composer-add-image-label">{t.composer.sfx || 'SFX'}</span>
+              </button>
+              {showSfxMenu && (
+                <div
+                  style={{
+                    position: 'absolute', top: '100%', left: 0, zIndex: 50,
+                    background: 'var(--bg-secondary)', border: '1px solid var(--border-default)',
+                    borderRadius: 6, padding: 6, display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(64px, 1fr))', gap: 4,
+                    maxHeight: 220, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.25)',
+                  }}
+                >
+                  {sfxPresets.map(p => (
+                    <button
+                      key={p.word}
+                      className="composer-prop-btn"
+                      style={{ display: 'flex', flexDirection: 'column', fontSize: 15, fontWeight: 700, padding: '6px 4px' }}
+                      title={p.meaning}
+                      onClick={() => addSfx(p.word)}
+                    >
+                      <span>{p.word}</span>
+                      <span style={{ fontSize: 9, fontWeight: 400, opacity: 0.7 }}>{p.meaning}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               className="composer-tool-btn composer-save-template-btn"
               title={t.composer.saveTemplate || 'Save current layout as template'}
