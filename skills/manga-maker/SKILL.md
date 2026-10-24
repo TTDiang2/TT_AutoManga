@@ -184,7 +184,7 @@ per page:
 |---|---|---|
 | 1 | **Comprehension**: follow the page with the script CLOSED — is every scene change captioned, every character introduced? | cut from street to underwater with no caption; a deity appears in the last page never introduced |
 | 2 | **Faces visible, bubbles off faces** | shout bubble covering the speaker's own face; bubble on a kneeling ghost's head |
-| 3 | **Text fits**: first AND last glyph inside the bubble; no overlap with other bubbles | very tall shout bubble swallowed its first glyph with the spike (fix: switch tall vertical text to `speech` type — the spike moves with the bubble, so moving the bubble does not help) |
+| 3 | **Text fits**: first AND last glyph inside the bubble; no overlap with other bubbles or caption boxes (captions and auto-placed bubbles both claim the panel top — nudge one of them) | very tall shout bubble swallowed its first glyph with the spike (fix: switch tall vertical text to `speech` type — the spike moves with the bubble, so moving the bubble does not help); caption box hiding a bubble behind it |
 | 4 | **Tails** point at the actual speaker | tail floating over nobody |
 | 5 | **Consistency**: same character = same beard/robe/hat across all panels and the cover; ONE instance per panel; extras don't clone the hero | white vs black beard across pages; two heroes in one image; guards looking like the hero |
 | 6 | **Art sanity**: anatomy, hands, anachronisms (western chess), heads cropped by panel borders, garbled in-art text | international chess pieces; emperor's head cut off at panel top |
