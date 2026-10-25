@@ -28,7 +28,23 @@ async def list_projects():
 @router.post("/save")
 async def save_project(project: Project):
     try:
-        result = storage.save_project(project.model_dump())
+        data = project.model_dump()
+        # Data-loss guard: the composer autosave historically posted
+        # panels: [] / settings: {detailLevel} for projects whose storyboard
+        # was written by the agent API, wiping them on disk. When a save
+        # carries an empty panel list while the stored project has panels,
+        # the sender is not managing the storyboard — keep the stored one.
+        # (A UI user deleting every panel goes through the storyboard store,
+        # which sends the real list; the empty-list case is legacy clients.)
+        existing = storage.load_project(project.id) if project.id else None
+        if not data.get("panels") and existing and existing.get("panels"):
+            data["panels"] = existing["panels"]
+        if existing:
+            # settings are independent keys (UI edits detailLevel, the agent
+            # writes style/characters/locations/bible): merge, never replace
+            data["settings"] = {**existing.get("settings", {}),
+                                **(data.get("settings") or {})}
+        result = storage.save_project(data)
         return {"success": True, "project": result}
     except InvalidProjectIdError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -97,6 +97,10 @@ export function ComposerTab() {
   const { t } = useTranslation();
   const language = useProjectStore(s => s.settings.language);
   const { composerProjectId, setComposerProjectId } = useProjectStore();
+  // the composer's save payload must carry the live storyboard + project
+  // settings — posting panels: [] used to wipe agent-written storyboards
+  const storePanels = useProjectStore(s => s.panels);
+  const storeProject = useProjectStore(s => s.currentProject);
   const {
     pages,
     currentPageId,
@@ -252,8 +256,8 @@ export function ComposerTab() {
     try {
       const body: Record<string, unknown> = {
         name,
-        panels: [],
-        settings: { detailLevel: 3 },
+        panels: storePanels,
+        settings: { ...(storeProject?.settings || {}), detailLevel: 3 },
         composerPages: pages,
       };
       if (currentProjectId) body.id = currentProjectId;
@@ -285,8 +289,8 @@ export function ComposerTab() {
         body: JSON.stringify({
           id: currentProjectId,
           name: currentProjectName,
-          panels: [],
-          settings: { detailLevel: 3 },
+          panels: storePanels,
+          settings: { ...(storeProject?.settings || {}), detailLevel: 3 },
           composerPages: pages,
         }),
       });

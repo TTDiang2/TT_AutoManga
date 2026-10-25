@@ -96,6 +96,8 @@ export function ShowcaseTab() {
             .then(imgs => setReaderImages(imgs.filter(Boolean)));
         }
       } else {
+        // load panels into the store too, or the Storyboard tab shows 0
+        loadProjectWithImages(project.id);
         setActiveTab('composer');
       }
     } catch (error) {
