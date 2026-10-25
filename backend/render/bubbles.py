@@ -204,7 +204,12 @@ def _extents_fit_shape(extents, bt: str, ew: int, eh: int, inset: float) -> bool
 def _fit_font_size(el: dict, ew: int, eh: int, pad_px: float,
                    bold: bool, k: float) -> ImageFont.FreeTypeFont:
     """Shrink the font until the REAL drawn layout fits the REAL bubble shape
-    (same layout function as drawing), floor at 55% of the requested size."""
+    (same layout function as drawing), floor at 55% of the requested size.
+
+    Lettering floor: a vertical layout whose shortest column carries fewer
+    than 5 glyphs reads badly (the production-review bar), so keep shrinking
+    while a larger capacity would still balance into fewer columns — unless
+    the line is shorter than 5 glyphs or the floor is hit."""
     bt = el.get("bubbleType", "speech")
     fs_req = (el.get("fontSize") or 12) * k
     text = el.get("text") or ""
@@ -216,8 +221,15 @@ def _fit_font_size(el: dict, ew: int, eh: int, pad_px: float,
         # lay out with the size the font actually resolved to (get_font
         # int-rounds) so fit-check and draw see identical metrics
         _, extents = _text_layout(text, ew, eh, pad_px, font, float(font.size), vertical)
-        if _extents_fit_shape(extents, bt, ew, eh, inset) \
-                or fs <= fs_req * 0.55 or fs <= 6:
+        fits = _extents_fit_shape(extents, bt, ew, eh, inset)
+        at_floor = fs <= fs_req * 0.55 or fs <= 6
+        min_col_ok = True
+        if vertical and not at_floor:
+            n = len([c for c in text if c != "\n"])
+            if n >= 5:
+                cols = max(1, len(extents))
+                min_col_ok = n // cols >= 5
+        if (fits and min_col_ok) or at_floor:
             return font
         fs = max(6.0, fs * 0.9)
 

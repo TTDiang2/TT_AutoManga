@@ -86,18 +86,44 @@ def test_classify_bubble_always_speech():
 def test_make_bubble_metrics_match_vtext():
     page = {"width": 600, "height": 900}
     slot = {"x": 2, "y": 2, "width": 47, "height": 47}
-    text = "每日一尾金色鲤鱼"          # 8 glyphs
+    text = "每日一尾金色鲤鱼"          # 8 glyphs -> single column of 8
     el = _make_bubble(text, slot, page, 0, {}, shot=None)
     assert el["bubbleType"] == "speech" and el["direction"] == "vertical"
     fs = el["fontSize"]
-    # box must hold ceil(8/3)=3 glyphs per column at the shared metrics
     inner_h = el["height"] / 100 * page["height"] - 2 * 10
     capacity = int(inner_h // (fs * CHAR_ADV))
-    assert capacity >= 3
-    # width fits the estimated column count
-    n_cols = max(1, math.ceil(len(text) / capacity))
+    assert capacity >= 8
     inner_w = el["width"] / 100 * page["width"] - 2 * 10
-    assert inner_w >= n_cols * fs * COL_ADV * 0.98
+    assert inner_w >= 1 * fs * COL_ADV * 0.98
+
+
+def test_make_bubble_min_five_per_column():
+    # the lettering floor: no assembled vertical bubble may balance into
+    # columns shorter than 5 glyphs
+    page = {"width": 600, "height": 900}
+    slot = {"x": 2, "y": 2, "width": 47, "height": 47}
+    for n in (8, 10, 12, 13, 14):
+        text = "字" * n
+        el = _make_bubble(text, slot, page, 0, {}, shot=None)
+        fs = el["fontSize"]
+        inner_h = el["height"] / 100 * page["height"] - 2 * 10
+        capacity = max(1, int(inner_h // (fs * CHAR_ADV)))
+        cols = -(-n // capacity)
+        assert n // cols >= 5, f"n={n}: {cols} cols -> min col {n // cols}"
+
+
+def test_fit_shrinks_until_min_column_length():
+    # a box too short for 5 glyphs/col must shrink the font (renderer-side
+    # enforcement of the same floor for hand-made / legacy bubbles)
+    from backend.render import bubbles
+    from backend.render.vtext import layout_vertical
+    el = {"bubbleType": "speech", "text": "一二三四五六七八九十",
+          "direction": "vertical", "fontSize": 20}
+    font = bubbles._fit_font_size(el, 120, 120, 10, False, 1.0)
+    fs = float(font.size)
+    _, ext = layout_vertical(el["text"], 120, 120, 10, fs)
+    n, cols = 10, len(ext)
+    assert n // cols >= 5 or fs <= 20 * 0.55 + 1e-9
 
 
 def test_dynamic_corners_one_uniform_gesture():

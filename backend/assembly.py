@@ -155,15 +155,20 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
         # Vertical layout: tight columns run top-to-bottom, right-to-left.
         # Metrics mirror render/vtext.py (CHAR_ADV 1.06 / COL_ADV 1.14) so the
         # box the assembler picks matches what the renderer actually draws.
-        # Close-ups get a slimmer, shorter balloon (2 columns, half height) so
-        # it doesn't cover the face that fills the frame.
+        # Lettering floor: every column must carry >=5 glyphs, so the column
+        # count is floor(n/5) (capped at 4) and the box is sized to hold the
+        # resulting per-column length whole. Close-ups get a shorter balloon
+        # (half slot height) so it doesn't cover the face filling the frame.
         from .render.vtext import CHAR_ADV, COL_ADV
-        n_cols_target = 2 if close else 3
-        chars_per_col = max(2, -(-len(text) // n_cols_target))
+        n = len(text)
+        # close-ups stay slimmer (max 2 columns) so the balloon doesn't cover
+        # the face that fills the frame; normal panels cap at 4 columns
+        n_cols = max(1, min(n // 5, 2 if close else 4))
+        chars_per_col = max(2, -(-n // n_cols))
         bh_px = min(chars_per_col * fs * CHAR_ADV + 2 * pad,
                     fh * page["height"] * (0.5 if close else 0.9))
         col_cap = max(1, int((bh_px - 2 * pad) // (fs * CHAR_ADV)))
-        n_cols = max(1, -(-len(text) // col_cap))
+        n_cols = max(1, -(-n // col_cap))
         bw_px = n_cols * fs * COL_ADV + 2 * pad
     else:
         # Horizontal: rows of chars sized by bubble width.
