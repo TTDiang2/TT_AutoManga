@@ -20,9 +20,8 @@ docs/plans/
 docs/prompts/
 
 # ---------- README screenshots ----------
-# Screenshots may contain personal project output / generated images.
-# Use a placeholder for now and only commit curated public screenshots.
-docs/screenshots/
+# Curated public screenshots and the sample-comic pages ARE tracked now
+# (they back README.md). Personal output still lands only under data/.
 
 # ---------- Environment / Secrets ----------
 .env

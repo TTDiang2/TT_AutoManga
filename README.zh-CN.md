@@ -4,9 +4,10 @@
 
 # TT_AutoManga
 
-**从一段文字,到一本漫画。**
+**从一个想法，到一部漫画——全自动。**
 
-把小说文本自动拆解为分镜 → 生成专业提示词 → 调用本地 AI 出图 → 排版成稿并导出 PDF。一条龙完成从「故事」到「成书」的完整创作流程。
+故事进来，排好版、画好图、配好对白的漫画页出去。你可以用网页操作，
+也可以把整条流水线交给 AI 智能体——同一份数据，同一套 API。
 
 **[English](README.md) · [简体中文](README.zh-CN.md)**
 
@@ -14,212 +15,164 @@
 
 ---
 
-## 📸 界面预览
-
-<!--
-  截图占位符 —— 请替换为真实截图。
-  推荐路径（保证 URL 稳定）：
-    docs/screenshots/01-storyboard.png
-    docs/screenshots/02-prompt-lab.png
-    docs/screenshots/03-composer.png
-    docs/screenshots/04-assets.png
-    docs/screenshots/05-showcase.png
-  注意：docs/screenshots/ 已在 .gitignore 中，不会随代码推送，
-  提交前请确认截图不含个人项目内容。
--->
+## 🎬 演示
 
 <p align="center">
-  <em>① 分镜拆解 —— 把一整段小说拆成一个个可编辑的漫画分镜</em>
+  <a href="docs/assets/demo.mp4"><img src="docs/assets/demo-poster.jpg" alt="TT_AutoManga 演示视频" width="860"></a>
 </p>
-
 <p align="center">
-  <img src="docs/screenshots/01-storyboard.png" alt="分镜拆解" width="800" />
+  <a href="docs/assets/demo.mp4"><strong>▶ 观看演示（78 秒）</strong></a>
+  —— 一个想法，二十格分镜，八页成品，全程零手绘。
+  演示片本身也由代码渲染（<code>docs/video/</code>）。
 </p>
 
-<p align="center">
-  <em>② 提示词实验室 —— 一键把分镜转成 SDXL / Danbooru 标签</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/02-prompt-lab.png" alt="提示词实验室" width="800" />
-</p>
-
-<p align="center">
-  <em>③ 视觉编辑器 —— 拖拽式排版,内置 19+ 漫画/写真模板与对话气泡</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/03-composer.png" alt="视觉编辑器" width="800" />
-</p>
-
-<p align="center">
-  <em>④ 素材管理 —— 上传本地图片,或调用 SwarmUI 批量出图</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/04-assets.png" alt="素材管理" width="800" />
-</p>
-
-<p align="center">
-  <em>⑤ 作品陈列 —— 项目管理 + 一键导出 PDF / 图片压缩包</em>
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/05-showcase.png" alt="作品陈列" width="800" />
-</p>
-
----
-
-## 为什么需要它?
-
-写故事不难,把故事画成漫画却很难 —— 通常需要分镜师的功力、提示词工程的经验、一套本地出图环境,再加一套排版软件。TT_AutoManga 把这四件事合而为一:
-
-- **一条流水线,零切换成本** — 故事 → 分镜 → 提示词 → 图片 → 页面,全程在同一个界面里完成。
-- **本地优先,隐私无忧** — 你的文字、图片、项目全部留在本地(`data/` 目录,设计上就已 git 忽略)。
-- **模型无关** — 文字侧可接任意 OpenAI 兼容端点(Ollama、vLLM、OpenAI…),图片侧可挂任意 SwarmUI 模型 / LoRA。
-- **为真正的漫画排版而生** — 非矩形分镜框、对话气泡、从右到左的阅读顺序,而不是一排排死板的方格。
-
-## ✨ 功能一览
-
-| 模块 | 能力 |
-|---|---|
-| **分镜拆解** | 把小说文本拆成独立漫画分镜(场景 / 角色 / 对白),支持 1–5 档详细度,可拖拽排序。 |
-| **提示词实验室** | 把每个分镜转成 SDXL / Danbooru 标签或自然语言提示词;支持反向提示词、种子、批量生成、JSON 导入。 |
-| **素材管理** | 上传本地图片,或调用 SwarmUI 出图(带连接检测);归档到文件夹、一键下载 ZIP。 |
-| **视觉编辑器** | 拖拽式排版,**19+ 内置模板**、6 种对话气泡、自由漂浮「破图」、非矩形(四角可变形)分镜框。 |
-| **角色设计** | 自动从分镜提取角色,记录外貌设定,生成一致的角色参考图。 |
-| **作品陈列** | 项目管理(新建 / 保存 / 加载 / 复制)+ PDF / 图片 ZIP 导出。 |
-| **设置** | 完整掌控 LLM 端点、SwarmUI 预设、模型 / LoRA / 采样器 / 步数 / CFG,以及界面语言。 |
-
-## 🖌 视觉编辑器 —— 核心亮点
-
-这是为漫画专门打造的页面编辑器,而不是普通的图片网格:
-
-- **19+ 种模板** — 经典漫画格(2/3/4/6/8 格)、灵活混合布局(1+2、2+3、2+3+2…)、强调 / 大特写布局、写真 / 相册网格。
-- **6 种气泡** — 对白、思考、喊叫、耳语、旁白、内心独白,尾巴可拖动,颜色、透明度均可调。
-- **非矩形分镜框** — 拖动任意分镜的四个角,把方格斜切成真正漫画里那种充满张力的动感构图。
-- **「破图」自由图** — 让一张图脱离网格浮在页面上,自由缩放、变形,用作跨页特写或特效字。
-- **自动间距 / 边缘吸附 / 统一描边** — 一键让多分镜页面严丝合缝地对齐。
-- **撤销 / 重做**(50 步)与**自定义模板** — 精心排好的版式可以存成模板,下次直接复用。
-
-## 🏗 系统架构
+## 它做什么
 
 ```
-┌─────────────────────────────────────────────────┐
-│  前端  —  React 19 + TypeScript + Vite           │
-│  (Zustand, framer-motion, @dnd-kit, react-icons) │
-└────────────────────────┬────────────────────────┘
-                         │ HTTP (FastAPI)
-┌────────────────────────┴────────────────────────┐
-│  后端  —  FastAPI (Python 3.10+)                │
-│  ├─ /api/storyboard     — 分镜拆解              │
-│  ├─ /api/prompt         — 提示词增强            │
-│  ├─ /api/assets         — 上传 + 出图           │
-│  ├─ /api/characters     — 角色 CRUD             │
-│  ├─ /api/composer       — 用户模板              │
-│  ├─ /api/archive        — 图片文件夹            │
-│  └─ /api/export         — PDF / ZIP 导出        │
-└────────┬───────────────────────┬────────────────┘
-         │                       │
-   ┌─────┴─────┐         ┌───────┴───────┐
-   │  LLM API  │         │    SwarmUI    │
-   │ (OpenAI-  │         │ (本地图片     │
-   │ compatible│         │  生成服务)    │
-   └───────────┘         └───────────────┘
+想法 ──► 分镜 ──► 出图 ──► 排版 ──► 排字 ──► PDF / ZIP
+        20 格      SwarmUI    27 模板    竖排紧排    自动页码
+        带景别     任意模型   动态斜框   SFX/旁白    最高 4800×7200
+```
+
+管线是 **Agent 优先**的：上面每一步都是类型化工具（28 个 MCP 工具、
+30 个 REST 端点、CLI、Agent Skill），LLM 智能体接到"给我画一部关于 X
+的漫画"就能跑完全程；人也可以在 UI 里打开同一项目手工打磨。两边读写
+同一份 project.json。
+
+<details>
+<summary><strong>演示漫画背后的真实生产</strong>（点击展开）</summary>
+
+演示漫画《魏征斩龙王》由 AI 智能体驱动本管线端到端完成：每格一段中文
+散文提示词、qwen-image 出图、刚性角色提示块保证一致性、自动对白气泡
+（说话人识别）、原生竖排排字、以及画面透视需要的梯形分镜框。
+
+| | |
+|---|---|
+| ![page 1](docs/screenshots/pages/page-00.jpg) | ![page 2](docs/screenshots/pages/page-01.jpg) |
+| ![page 5](docs/screenshots/pages/page-04.jpg) | ![page 7](docs/screenshots/pages/page-06.jpg) |
+
+</details>
+
+## ✨ 功能
+
+**分镜与故事**
+- LLM 把小说文本拆成分镜（细粒度可调），或手写每格
+- 每格：场景、角色、台词（"名字：台词"自动识别说话人）、景别（远/中/特/大特/全页）、场景地点
+- 项目画风、角色提示块、场景库、故事圣经——注入每次生成，跨章节保持连贯
+
+**图像生成**
+- 对接 SwarmUI；支持 danbooru 标签系（SDXL/Illustrious/NoobAI）与自然语言系（qwen-image），按请求覆盖模型 / LoRA / 提示词格式
+- 批量任务逐格报错；变体 1-4 挑选采用；固定种子可复现
+- 图生图链（init_image + 创作度）与蒙版局部重绘
+- 透明背景覆盖层（自动抠图兜底）；每张 PNG 内嵌完整生成配方
+- 本地 Real-ESRGAN（ONNX）放大到印刷级
+
+**排版与排字**
+- 27 套内置模板（漫画/网格/主格/照片/条漫长图/动态），自定义行布局，可存用户模板
+- 自动对白气泡：说话人识别、双人分向气泡尾、特写格窄气泡
+- 原生中文竖排排版：紧排均衡分列（**每列 ≥5 字，管线强制**）、竖排标点（︐ ︕ ︒ …）
+- 排字风格预算由管线强制：默认全部椭圆气泡；尖角/耳语/旁白是显式的重音
+- SFX 描边字（时代合适的拟声词预设）、旁白框、画面有透视时铺满画面的梯形框
+- 排字器"拖一条线"切分分镜框、贴边对齐/自动均匀间距、撤销重做
+
+**导出与质量**
+- 一次调用同时出 PDF + ZIP，自动页码（封面免页码），渲染倍率最高 8×（4800×7200）
+- 强制视觉 QC 环节：任意页面任意倍率渲染成 PNG，交给智能体（或你）过目
+- 129 个后端测试；路径穿越 / id 注入 / 密钥掩码等安全加固经过专项审计
+
+## 🏗 架构
+
+```mermaid
+flowchart LR
+    subgraph clients ["同一个 API 的两种用法"]
+        UI["Web UI\nReact 19 + Vite"]
+        AG["AI 智能体\nMCP · HTTP · CLI · Skill"]
+    end
+    subgraph backend ["FastAPI 后端 :5180"]
+        API["30 个 agent 端点\n+ 分镜/提示词/素材\n+ 导出/放大"]
+        R["PIL 页面渲染器\n原生竖排排版"]
+    end
+    UI --> API
+    AG --> API
+    API --> R
+    API --> LLM["LLM（OpenAI 兼容）\n分镜 + 提示词增强"]
+    API --> S["SwarmUI\n本地图像生成"]
+    R --> OUT["data/projects · data/assets\ndata/exports (PDF/ZIP)"]
 ```
 
 ## 🚀 快速开始
 
-**前置依赖**
-
-- **Python 3.10+**(使用全局环境,不创建 venv)
-- **Node.js 20+** 与 npm
-- *(可选)* 本地运行的 [SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI)(默认 `127.0.0.1:7801`)
-- *(可选)* 任意 OpenAI 兼容的 LLM 接入点(Ollama、vLLM、OpenAI 等)
+- **Python 3.10+**（建议虚拟环境）、**Node.js 20+**
+- （可选）[SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI) 跑在 `127.0.0.1:7801`
+- （可选）OpenAI 兼容 LLM 端点
 
 ```bash
-# 1. 安装后端依赖
 pip install -r backend/requirements.txt
-
-# 2. 安装前端依赖
 cd frontend && npm install && cd ..
-
-# 3. 构建前端(生产模式)—— 开发热更新用 `npm --prefix frontend run dev`
 npm --prefix frontend run build
-
-# 4. 启动服务(把构建好的前端托管在 http://localhost:5180)
-python -m backend.main 5180
+python -m backend.main 5180     # UI 在 http://localhost:5180
 ```
 
-Windows 用户直接运行 `run.bat` 即可。
+Windows 直接运行 `run.bat`。
 
-## ⚙️ 配置说明
+## 🤖 智能体接入（MCP / Skill / CLI）
 
-首次启动后,TT_AutoManga 会生成 `data/settings.json`(已被 git 忽略)。可配置:
+- **MCP 服务**：`python -m backend.mcp_server`（stdio），28 个类型化工具，
+  `render_page_preview` 直接返回图像内容，多模态智能体能"看见"并自查页面。
+  注册示例（Claude Desktop / Codex / Cursor / ZCode 通用）：
 
-- **API 端点** — 你的 LLM 地址(默认 `http://127.0.0.1:11434/v1`,适配 Ollama)
-- **API 密钥** — 本地模型留空即可
-- **模型** — 任意 chat-completions 兼容模型
-- **SwarmUI** — 服务器地址,以及组合了模型、LoRA、步数、CFG、采样器和全局提示词后缀的预设
+  ```json
+  {
+    "mcpServers": {
+      "automanga": {
+        "command": "python",
+        "args": ["-m", "backend.mcp_server"],
+        "cwd": "D:/path/to/TT_AutoManga",
+        "env": {
+          "AUTOMANGA_URL": "http://127.0.0.1:5180",
+          "PYTHONPATH": "D:/path/to/TT_AutoManga"
+        }
+      }
+    }
+  }
+  ```
 
-## 📦 打包(可选)
+- **Agent Skill**：`skills/manga-maker/SKILL.md`（agentskills.io 格式），
+  内含完整制作 SOP 与工艺手册；内容中立，管线不做过滤
+- **HTTP / CLI**：`AGENTS.md` 是操作手册；`GET /openapi.json` 是机器 schema；
+  或用 `python -m backend.agent_cli --help`
 
-通过 [Pake](https://github.com/tw93/Pake) 把应用打包成轻量 WebView 可执行文件:
+## 🎞 演示片是代码
 
-```bash
-npm install -g pake-cli
-build.bat
-```
+`docs/video/` 是演示片的源码：`index.html` 的 `window.render(t)` 确定性地
+画出第 t 帧（纸张、水墨、真实页面与截图的 Ken-Burns），`build.mjs` 用无头
+Chrome 逐帧采样、ffmpeg 合成——没有使用任何视频生成模型。改一个分镜，
+重跑 `node build.mjs`，就是新的一版。
 
 ## 🛠 技术栈
 
-| 层级 | 技术 |
+| 层 | 技术 |
 |---|---|
-| 前端 | React 19、TypeScript、Vite、Zustand、framer-motion、@dnd-kit、react-icons |
-| 后端 | FastAPI、uvicorn、pydantic v2、httpx、openai |
-| 导出 | ReportLab (PDF)、Pillow (图片) |
-| AI | 任意 OpenAI 兼容 LLM + SwarmUI 出图 |
+| 前端 | React 19, TypeScript, Vite, Zustand, framer-motion, @dnd-kit |
+| 后端 | FastAPI, pydantic v2, httpx, openai |
+| 渲染 | Pillow（服务端页面渲染器，原生竖排排版） |
+| 导出 | ReportLab (PDF), Pillow / ZIP |
+| 放大 | ONNX Runtime (Real-ESRGAN) |
+| AI | 任意 OpenAI 兼容 LLM + SwarmUI |
 
-## 📁 项目结构
+## 🤝 参与贡献
 
-```
-TT_AutoManga/
-├── backend/
-│   ├── main.py              # FastAPI 入口
-│   ├── api/                 # 路由处理
-│   ├── core/                # 配置 + OpenAI/SwarmUI 客户端
-│   ├── storage/             # 文件存储
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── components/      # 七个功能页签
-│   │   ├── store/           # Zustand 状态
-│   │   ├── i18n/            # 中英文翻译
-│   │   └── types/           # TypeScript 类型
-│   └── package.json
-├── data/                    # ⚠️ 运行时数据(已 git 忽略)
-├── docs/
-│   └── screenshots/         # README 截图(已 git 忽略)
-├── SPEC.md                  # 完整技术规范
-├── run.bat / build.bat      # 启动 / 打包脚本
-└── LICENSE
-```
+欢迎 Issue 与 PR。后端测试：`python -m pytest backend/tests/`（129 通过）。
+提交前请勿提交 `data/` 下的任何内容——那是用户的私有数据。
 
-## 🤝 贡献指南
+## 📄 许可
 
-欢迎提交 PR。请注意:
+MIT —— 见 [LICENSE](LICENSE)。
 
-1. 提交前在 `frontend/` 下运行 `npm run lint`
-2. 保持现有代码风格(纯 CSS、不引入 Tailwind;状态管理使用 Zustand)
-3. 不要提交 `data/` 下的任何内容 —— 那是用户的私有数据
+## ⚠️ 说明
 
-## 📄 开源协议
-
-MIT — 详见 [LICENSE](LICENSE)。
-
-## ⚠️ 免责声明
-
-本项目用于**合法的创意工作**。图片生成预设可能涉及 NSFW 友好的模型以提供艺术创作的灵活性,使用者需自行负责确保符合当地法律法规与平台服务条款。
+TT_AutoManga 按你的创作指令执行。故事题材、尺度与画风由操作者及其配置的
+模型决定；管线本身不做过滤，也不做内容评判。
 
 ---
 
