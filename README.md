@@ -16,20 +16,6 @@ agent — same data, same API.
 
 ---
 
-## 🎬 Demo
-
-<!-- Swap the source below for a GitHub user-attachment URL or YouTube embed
-     whenever a hosted version exists — everything else stays the same. -->
-
-<p align="center">
-  <a href="docs/assets/demo.mp4"><img src="docs/assets/demo-poster.jpg" alt="TT_AutoManga demo video" width="860"></a>
-</p>
-<p align="center">
-  <a href="docs/assets/demo.mp4"><strong>▶ Watch the showcase (78s)</strong></a>
-  — one idea, twenty panels, eight finished pages, zero manual drawing.
-  Built with the app itself and rendered as code (<code>docs/video/</code>).
-</p>
-
 ## What it does
 
 ```
@@ -205,14 +191,6 @@ Settings live in `data/settings.json` (gitignored, created on first change):
 
 - **API Endpoint / Key / Model** — any chat-completions-compatible LLM (point at `http://127.0.0.1:11434/v1` for Ollama)
 - **SwarmUI** — address plus presets combining model, LoRAs, steps, CFG, sampler and a global prompt suffix
-
-## 🎞 The demo film is code
-
-`docs/video/` contains the showcase film's source: an `index.html` whose
-`window.render(t)` draws frame *t* deterministically (paper, ink, Ken-Burns
-over real pages and screenshots), and `build.mjs` which samples it with
-headless Chrome and muxes with ffmpeg — no video-generation model involved.
-Tweak a scene, re-run `node build.mjs`, get a new cut.
 
 ## 🛠 Tech Stack
 

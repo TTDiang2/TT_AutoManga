@@ -15,17 +15,6 @@
 
 ---
 
-## 🎬 演示
-
-<p align="center">
-  <a href="docs/assets/demo.mp4"><img src="docs/assets/demo-poster.jpg" alt="TT_AutoManga 演示视频" width="860"></a>
-</p>
-<p align="center">
-  <a href="docs/assets/demo.mp4"><strong>▶ 观看演示（78 秒）</strong></a>
-  —— 一个想法，二十格分镜，八页成品，全程零手绘。
-  演示片本身也由代码渲染（<code>docs/video/</code>）。
-</p>
-
 ## 它做什么
 
 ```
@@ -141,13 +130,6 @@ Windows 直接运行 `run.bat`。
   内含完整制作 SOP 与工艺手册；内容中立，管线不做过滤
 - **HTTP / CLI**：`AGENTS.md` 是操作手册；`GET /openapi.json` 是机器 schema；
   或用 `python -m backend.agent_cli --help`
-
-## 🎞 演示片是代码
-
-`docs/video/` 是演示片的源码：`index.html` 的 `window.render(t)` 确定性地
-画出第 t 帧（纸张、水墨、真实页面与截图的 Ken-Burns），`build.mjs` 用无头
-Chrome 逐帧采样、ffmpeg 合成——没有使用任何视频生成模型。改一个分镜，
-重跑 `node build.mjs`，就是新的一版。
 
 ## 🛠 技术栈
 
