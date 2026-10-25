@@ -161,26 +161,8 @@ def _text_layout(text: str, ew: int, eh: int, pad_px: float,
     Returns (positions, extents): anchors for draw.text plus per-line/column
     bounding boxes (x0, x1, y0, y1) for the shape-fit check."""
     if vertical:
-        char_h = fs * 1.3
-        capacity = max(1, int((eh - 2 * pad_px) // char_h))
-        chars = list(text)
-        if not chars:
-            return [], []
-        col_w = fs * 1.3
-        total_cols = math.ceil(len(chars) / capacity)
-        # block centered horizontally (columns still read right-to-left);
-        # right-aligned columns would hug the ellipse edge and always clip
-        first_cx = ew / 2 + (total_cols * col_w) / 2 - col_w / 2
-        positions, extents = [], []
-        for c in range(total_cols):
-            col_chars = chars[c * capacity:(c + 1) * capacity]
-            x = first_cx - c * col_w
-            col_h = len(col_chars) * char_h
-            y0 = (eh - col_h) / 2
-            for i, ch in enumerate(col_chars):
-                positions.append((ch, x, y0 + i * char_h + char_h / 2))
-            extents.append((x - col_w / 2, x + col_w / 2, y0, y0 + col_h))
-        return positions, extents
+        from .vtext import layout_vertical
+        return layout_vertical(text, ew, eh, pad_px, fs, font)
 
     max_w = ew - 2 * pad_px
     lines = _wrap_text(font, text, max_w)
@@ -231,7 +213,9 @@ def _fit_font_size(el: dict, ew: int, eh: int, pad_px: float,
     fs = fs_req
     while True:
         font = get_font(fs, None, bold=bold)
-        _, extents = _text_layout(text, ew, eh, pad_px, font, fs, vertical)
+        # lay out with the size the font actually resolved to (get_font
+        # int-rounds) so fit-check and draw see identical metrics
+        _, extents = _text_layout(text, ew, eh, pad_px, font, float(font.size), vertical)
         if _extents_fit_shape(extents, bt, ew, eh, inset) \
                 or fs <= fs_req * 0.55 or fs <= 6:
             return font

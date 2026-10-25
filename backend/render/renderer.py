@@ -155,13 +155,17 @@ def _draw_text(el, ew, eh, scale):
         font = get_font(fs, el.get("fontFamily"),
                         bold=(el.get("fontWeight") or "").lower() == "bold")
         if vertical:
-            char_h = fs * 1.3
-            needed_h = len(content.replace("\n", "")) * char_h
-            needed_w = char_h
+            # measure the REAL balanced-column block, not a one-column model —
+            # when the 55% floor is hit the drawn block can span several columns
+            from .vtext import layout_vertical
+            _, exts = layout_vertical(content, ew, eh, 0.0, fs, font)
+            if not exts:
+                break
+            needed_w = max(x1 for _, x1, _, _ in exts) - min(x0 for x0, _, _, _ in exts)
+            needed_h = max(y1 for *_, y1 in exts) - min(y0 for *_, y0, _ in exts)
         else:
-            font_probe = font
             lines = content.split("\n")
-            needed_w = max((font_probe.getlength(l) for l in lines), default=0)
+            needed_w = max((font.getlength(l) for l in lines), default=0)
             needed_h = len(lines) * fs * 1.4
         if needed_w <= box_w and needed_h <= box_h:
             break
@@ -171,13 +175,10 @@ def _draw_text(el, ew, eh, scale):
 
     line_h = fs * 1.4
     if vertical:
-        char_h = fs * 1.3
-        chars = list(content.replace("\n", ""))
-        total = len(chars) * char_h
-        y0 = (eh - total) / 2
-        for i, ch in enumerate(chars):
-            d.text((ew / 2, y0 + i * char_h + char_h / 2), ch, font=font,
-                   fill=color, anchor="mm", **stroke)
+        from .vtext import layout_vertical
+        positions, _ = layout_vertical(content, ew, eh, 0.0, fs, font)
+        for ch, x, y in positions:
+            d.text((x, y), ch, font=font, fill=color, anchor="mm", **stroke)
     else:
         lines = content.split("\n")
         total = len(lines) * line_h

@@ -42,10 +42,10 @@ def split_dialogue(text: str, max_bubbles: int = 3) -> List[str]:
 
 
 def classify_bubble(text: str) -> str:
-    if text.endswith(("！", "!")):
-        return "shout"
-    if "…" in text or "..." in text or text.startswith(("（", "(")):
-        return "whisper"
+    """Auto-assembled dialogue is ALWAYS a plain speech balloon. Shout stars,
+    whisper dashes and narration boxes are deliberate stylistic accents —
+    sprinkling them on every exclamation line devalues them; add them via an
+    element PATCH on the few lines that truly carry the beat."""
     return "speech"
 
 
@@ -122,26 +122,25 @@ def build_page(spec: dict, project: dict) -> Tuple[dict, List[str]]:
 
 
 def _apply_dynamic_corners(slots: List[dict]) -> None:
-    """Give the page a cinematic feel: slanted quadrilateral frames on all
-    but the largest slot, cycling deterministic corner patterns (no RNG so
-    rebuilds are reproducible). The hero (largest area, ties broken by page
-    element order) stays rectangular."""
+    """Cinematic lean as ONE deliberate gesture, not per-slot randomness:
+    every non-hero slot gets the same mild keystone (top corners inset by the
+    same amount), so the page reads as a single camera tilt. Note a data-model
+    limit: corner values are 0-100 % of each element's own box, so slanted
+    edges shared between two frames can never stay perfectly parallel — for
+    truly parallel dividers use rectangular templates (the novelai-style
+    'dividers are uniform lines' look) or set corners by hand on frames whose
+    ART has a matching perspective. Slant serves the content, never the
+    reverse. The hero (largest area) stays rectangular."""
     if not slots:
         return
-    patterns = [
-        {"tl": (0, 4), "tr": (100, 0), "br": (100, 96), "bl": (0, 100)},
-        {"tl": (0, 0), "tr": (97, 5), "br": (100, 100), "bl": (3, 95)},
-        {"tl": (5, 0), "tr": (100, 6), "br": (95, 100), "bl": (0, 94)},
-        {"tl": (0, 6), "tr": (100, 2), "br": (98, 100), "bl": (0, 100)},
-    ]
+    d = 2.5
+    pattern = {"tl": (d, 0), "tr": (100 - d, 0),
+               "br": (100, 100), "bl": (0, 100)}
     hero = max(slots, key=lambda e: e["width"] * e["height"])
-    n = 0
     for slot in slots:
         if slot is hero or slot.get("corners"):
             continue
-        p = patterns[n % len(patterns)]
-        n += 1
-        slot["corners"] = {k: {"x": v[0], "y": v[1]} for k, v in p.items()}
+        slot["corners"] = {k: {"x": v[0], "y": v[1]} for k, v in pattern.items()}
 
 
 def _make_bubble(text: str, slot: dict, page: dict, seq: int,
@@ -153,17 +152,19 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
     bt = classify_bubble(text)
     close = shot in ("close-up", "extreme-close-up")
     if vertical:
-        # Vertical layout: columns of chars run top-to-bottom, right-to-left.
-        # Size so the text fits ~3 columns of balanced length. Close-ups get
-        # a slimmer, shorter balloon (2 columns, half height) so it doesn't
-        # cover the face that fills the frame.
+        # Vertical layout: tight columns run top-to-bottom, right-to-left.
+        # Metrics mirror render/vtext.py (CHAR_ADV 1.06 / COL_ADV 1.14) so the
+        # box the assembler picks matches what the renderer actually draws.
+        # Close-ups get a slimmer, shorter balloon (2 columns, half height) so
+        # it doesn't cover the face that fills the frame.
+        from .render.vtext import CHAR_ADV, COL_ADV
         n_cols_target = 2 if close else 3
         chars_per_col = max(2, -(-len(text) // n_cols_target))
-        bh_px = min(chars_per_col * fs * 1.3 + 2 * pad,
+        bh_px = min(chars_per_col * fs * CHAR_ADV + 2 * pad,
                     fh * page["height"] * (0.5 if close else 0.9))
-        col_cap = max(1, int((bh_px - 2 * pad) // (fs * 1.3)))
+        col_cap = max(1, int((bh_px - 2 * pad) // (fs * CHAR_ADV)))
         n_cols = max(1, -(-len(text) // col_cap))
-        bw_px = n_cols * fs * 1.3 + 2 * pad
+        bw_px = n_cols * fs * COL_ADV + 2 * pad
     else:
         # Horizontal: rows of chars sized by bubble width.
         bw_px = min(fw * page["width"] * 0.8, 0.30 * page["width"])
@@ -172,6 +173,8 @@ def _make_bubble(text: str, slot: dict, page: dict, seq: int,
         bh_px = n_lines * fs * 1.4 + 2 * pad
     # Assembled bubbles are sized tight to the text block; ellipse/star shapes
     # need headroom or the renderer's shape-fit check would shrink the font.
+    # shout/narration keys stay for bubbles those types via PATCH later —
+    # assembly itself now only ever emits speech.
     headroom = {"shout": 1.45, "narration": 1.05}.get(bt, 1.3)
     bh_px *= headroom
     if vertical:

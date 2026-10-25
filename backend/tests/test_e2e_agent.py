@@ -129,7 +129,9 @@ def test_full_agent_pipeline(client):
     assert len(imgs) == 4
     assert all(e["src"].startswith("/api/assets/file/") for e in imgs)
     types = {b["bubbleType"] for b in bubs}
-    assert "shout" in types and "whisper" in types
+    # exclamation/ellipsis lines must NOT auto-upgrade to shout/whisper —
+    # balloons stay plain speech; accents are explicit element PATCHes
+    assert types == {"speech"}
     assert all(b["zIndex"] > max(e["zIndex"] for e in imgs) for b in bubs)
 
     # --- 5. add a transparent breakout overlay element ---

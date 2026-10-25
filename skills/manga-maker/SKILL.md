@@ -76,7 +76,17 @@ Grammar rules:
 5. **Silent panels** carry mood only — never plot-critical information. If
    the reader must understand "he fell asleep and his soul ascended", a
    silent art panel will NOT say it; add the caption.
-6. The speaker of every line should be visible (or clearly off-panel) in
+6. **Frames serve the content.** Default to rectangular frames — dividers
+   read as clean uniform lines (the novelai_local_web philosophy).
+   `dynamic:true` now applies ONE mild shared keystone to non-hero slots
+   (a single deliberate gesture, not per-slot warping), and slanted frames
+   can never keep dividers perfectly parallel (corner values are 0-100 % of
+   each element's own box) — so slant ONLY when the art's own composition
+   calls for it: an 上大下小 perspective subject earns a matching trapezoid,
+   and the art must FILL the frame (cover-crop guarantees this; dead space
+   inside a deformed frame means straighten it). Upright subjects belong in
+   upright frames.
+7. The speaker of every line should be visible (or clearly off-panel) in
    that panel's art.
 
 ## 3. Character consistency protocol
@@ -143,20 +153,25 @@ of him in one panel).
 **Bubble discipline** (the reader reads art first, text second — protect
 both):
 
-1. **Style budget**: speech is the default. shout for ≤2 climactic moments
-   per chapter; whisper only for secrecy beats; narration for captions.
-   Never mix more than TWO styles on one page.
-2. **Length cap**: ≤14 CJK characters per bubble (≈2 vertical columns). A
-   bubble taller than ~30% of the page is unreadable — split the line into
-   sequential bubbles. Imperial edicts, monologues, announcements: split or
-   move to caption.
+1. **Style budget is now ENFORCED by the pipeline**: assembly emits plain
+   speech balloons only — exclamation and ellipsis lines no longer auto-upgrade
+   to shout/whisper. Reserve shout for ≤2 climactic moments per chapter and
+   apply it explicitly (`patch_element` bubbleType, background `#fff9c4`);
+   whisper only for secrecy beats; narration for captions. Never mix more
+   than TWO styles on one page.
+2. **Vertical text is natively typeset** (server + frontend canvas): tight
+   glyph/column advances (1.06/1.14 × fontSize), columns balanced so lengths
+   differ by at most one (no 1-2 glyph orphans), and punctuation renders in
+   vertical presentation forms (，→︐ ！→︕ …→︙ ——→︱ 「」→﹁﹂). Keep lines
+   ≤14 CJK characters — a bubble taller than ~30% of the page is still
+   unreadable; split instead.
 3. **Never cover a face.** Place bubble bodies in sky/ground/empty zones
    (you prompted for them, §4.3); the tail touches the speaker's head, the
    body does not. Check every page render; nudge with `patch_element`.
-4. **Vertical text quirks**: em-dashes 「——」 and long ellipses render
-   rotated in vertical columns and look broken — prefer 「…」/periods, or
-   use `direction:"horizontal"` for long narration captions (horizontal
-   captions-in-box are standard in Chinese comics).
+4. **Captions compete with bubbles for the panel top**: auto bubbles spawn
+   at the panel's top-left, so caption boxes anchored top-left will hide
+   them. Anchor captions bottom-left on panels that have dialogue; top-left
+   only on silent panels. Re-check after every rebuild.
 5. **Reading order**: bubbles must not force zigzag; anchor dialogue per
    panel top-right → bottom-left (rtl).
 6. **SFX**: era-appropriate onomatopoeia (轰/咚/咔嚓/哗啦; 滴答 is a clock —

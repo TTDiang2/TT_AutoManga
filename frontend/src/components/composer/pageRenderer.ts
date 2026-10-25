@@ -134,13 +134,14 @@ function drawTextEl(
   }
 
   if (el.direction === 'vertical') {
-    const chars = (el.content || '').split('');
-    const charH = fs * 1.3;
-    const totalH = chars.length * charH;
-    const startY = y + (eh - totalH) / 2;
-    chars.forEach((ch, i) => {
-      if (sw > 0) ctx.strokeText(ch, x + ew / 2, startY + i * charH);
-      ctx.fillText(ch, x + ew / 2, startY + i * charH);
+    // layoutVertical returns cell-CENTER anchors — match the backend's
+    // anchor="mm" regardless of the element's horizontal textAlign
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const positions = layoutVertical(el.content || '', ew, eh, 0, fs);
+    positions.forEach(p => {
+      if (sw > 0) ctx.strokeText(p.ch, x + p.cx, y + p.cy);
+      ctx.fillText(p.ch, x + p.cx, y + p.cy);
     });
   } else {
     let tx = x;
@@ -291,6 +292,48 @@ function drawTail(
   }
 }
 
+// Native CJK vertical typesetting — must mirror backend/render/vtext.py.
+export const VCHAR_ADV = 1.06;  // glyph advance within a column, × fontSize
+export const VCOL_ADV = 1.14;   // column-to-column advance, × fontSize
+
+const VERTICAL_MAP: Record<string, string> = {
+  '，': '︐', '。': '︒', '：': '︓', '；': '︔',
+  '！': '︕', '？': '︖', '（': '︵', '）': '︶',
+  '【': '︻', '】': '︼', '《': '︽', '》': '︾',
+  '「': '﹁', '」': '﹂', '『': '﹃', '』': '﹄',
+  '…': '︙', '‥': '︰', '—': '︱', '－': '︱', 'ー': '︱',
+};
+
+function toVerticalPunctuation(text: string): string {
+  return text.replace(/[，。：；！？（）【】《》「」『』…‥—－ー]/g,
+    c => VERTICAL_MAP[c] ?? c);
+}
+
+export function layoutVertical(
+  text: string, ew: number, eh: number, padPx: number, fs: number,
+): { ch: string; cx: number; cy: number }[] {
+  const chars = toVerticalPunctuation(text).replace(/\n/g, '').split('');
+  if (!chars.length) return [];
+  const charH = fs * VCHAR_ADV;
+  const colW = fs * VCOL_ADV;
+  const capacity = Math.max(1, Math.floor((eh - 2 * padPx) / charH));
+  const totalCols = Math.max(1, Math.ceil(chars.length / capacity));
+  const per = Math.floor(chars.length / totalCols);
+  const rem = chars.length % totalCols;
+  const firstCx = ew / 2 + (totalCols * colW) / 2 - colW / 2;
+  const positions: { ch: string; cx: number; cy: number }[] = [];
+  let idx = 0;
+  for (let c = 0; c < totalCols; c++) {
+    const count = per + (c < rem ? 1 : 0);
+    const col = chars.slice(idx, idx + count);
+    idx += count;
+    const x = firstCx - c * colW;
+    const y0 = (eh - col.length * charH) / 2;
+    col.forEach((ch, i) => positions.push({ ch, cx: x, cy: y0 + i * charH + charH / 2 }));
+  }
+  return positions;
+}
+
 function drawBubbleText(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, ew: number, eh: number,
@@ -311,6 +354,11 @@ function drawBubbleText(
 
   const text = el.text || '';
   const padding = 10;
+  if (el.direction === 'vertical') {
+    const positions = layoutVertical(text, ew, eh, padding, fs);
+    positions.forEach(p => ctx.fillText(p.ch, x + p.cx, y + p.cy));
+    return;
+  }
   const maxW = ew - padding * 2;
   const lines = wrapText(ctx, text, maxW);
   const lineH = fs * 1.4;
