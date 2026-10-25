@@ -159,12 +159,14 @@ both):
    apply it explicitly (`patch_element` bubbleType, background `#fff9c4`);
    whisper only for secrecy beats; narration for captions. Never mix more
    than TWO styles on one page.
-2. **Vertical text is natively typeset** (server + frontend canvas): tight
-   glyph/column advances (1.06/1.14 × fontSize), columns balanced so lengths
-   differ by at most one (no 1-2 glyph orphans), and punctuation renders in
-   vertical presentation forms (，→︐ ！→︕ …→︙ ——→︱ 「」→﹁﹂). Keep lines
-   ≤14 CJK characters — a bubble taller than ~30% of the page is still
-   unreadable; split instead.
+2. **Vertical text is natively typeset AND floor-enforced** (server + frontend
+   canvas): tight glyph/column advances (1.06/1.14 × fontSize), and **every
+   column carries ≥5 glyphs** — the assembler sizes balloons for
+   `floor(n/5)` columns (cap 4; close-ups 2) and the renderer shrink-loop
+   refuses layouts with a shorter column, so short columns can no longer
+   happen at any font size. Punctuation renders in vertical presentation
+   forms (，→︐ ！→︕ …→︙ ——→︱ 「」→﹁﹂). Keep lines ≤14 CJK characters —
+   8-12 char lines become 1-2 comfortable columns.
 3. **Never cover a face.** Place bubble bodies in sky/ground/empty zones
    (you prompted for them, §4.3); the tail touches the speaker's head, the
    body does not. Check every page render; nudge with `patch_element`.
