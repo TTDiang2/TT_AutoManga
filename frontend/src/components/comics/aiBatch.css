@@ -1,5 +1,6 @@
 /* Batch AI rewrite: the dialog (Outline panel "Batch AI…") and the review view (Comics tab "AI batch") */
 .ai-batch-dialog {
+  margin: auto;   /* the global "* { margin: 0 }" reset would pin a modal dialog to the top left */
   width: min(720px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   padding: var(--space-md);
