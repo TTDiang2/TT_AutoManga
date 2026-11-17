@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
-import { useTranslation } from '../../hooks/useTranslation';
+import { fill, useTranslation } from '../../hooks/useTranslation';
 import { renderPageToImage } from '../composer/pageRenderer';
-import type { Project, ComposerPage } from '../../types';
+import type { Project, ComposerPage, ContentRating } from '../../types';
 import { CollectionsView } from './CollectionsView';
+import { MatureCover } from './MatureCover';
+import { effectiveRating } from './rating';
 import './collections.css';
 
 export function ShowcaseTab() {
@@ -23,6 +25,36 @@ export function ShowcaseTab() {
   // browse: every comic (as before) or the collections (series of episodes)
   const [view, setView] = useState<'comics' | 'collections'>('comics');
   const [openCollectionId, setOpenCollectionId] = useState<string | null>(null);
+  // settings.content.defaultRating: the rating of projects that set none
+  const [defaultRating, setDefaultRating] = useState<ContentRating>('sfw');
+
+  useEffect(() => {
+    fetch('/api/settings/')
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (data?.content?.defaultRating === 'mature') setDefaultRating('mature'); })
+      .catch(() => { /* keep sfw */ });
+  }, []);
+
+  // a project's own rating ("" = the default), saved in its settings
+  const handleSetRating = async (project: Project, value: string) => {
+    const rating = value === 'mature' || value === 'sfw' ? value : '';
+    const becomesMature = rating === 'mature' || (rating === '' && defaultRating === 'mature');
+    if (becomesMature && effectiveRating(project.settings, defaultRating) !== 'mature'
+        && !confirm(fill(t.showcase.ratingConfirm, { name: project.name }))) return;
+    try {
+      const r = await fetch(`/api/agent/projects/${encodeURIComponent(project.id)}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentRating: rating }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      setProjects(prev => prev.map(p => (p.id === project.id
+        ? { ...p, settings: { ...(data.settings || {}) } as Project['settings'] } : p)));
+    } catch (err) {
+      alert(fill(t.showcase.requestFailed, { error: String(err) }));
+    }
+  };
 
   const loadProjects = async () => {
     setIsLoading(true);
@@ -251,22 +283,35 @@ export function ShowcaseTab() {
         </div>
       ) : mode === 'browse' ? (
         <div className="projects-grid">
-          {projects.map(project => (
+          {projects.map(project => {
+            const mature = effectiveRating(project.settings, defaultRating) === 'mature';
+            const own = project.settings?.contentRating;
+            return (
             <div key={project.id} className="project-card card">
               <div className="project-cover">
-                {coverImages[project.id] ? (
-                  <img src={coverImages[project.id]} alt={project.name} />
-                ) : (
-                  <div className="cover-placeholder">
-                    <FiGrid size={24} />
-                  </div>
-                )}
+                <MatureCover id={project.id} src={coverImages[project.id]} alt={project.name} mature={mature}
+                  placeholder={<div className="cover-placeholder"><FiGrid size={24} /></div>} />
               </div>
               <div className="project-info">
-                <h4>{project.name}</h4>
+                <h4>
+                  {project.name}
+                  {mature && <span className="mature-badge">{t.showcase.matureBadge}</span>}
+                </h4>
                 <p className="text-sm text-muted">
                   {project.composerPages?.length || 0} pages • {new Date(project.updatedAt).toLocaleDateString()}
                 </p>
+                <select
+                  className="input select rating-select"
+                  aria-label={t.showcase.ratingLabel}
+                  title={t.showcase.ratingLabel}
+                  value={own === 'mature' || own === 'sfw' ? own : ''}
+                  onChange={e => handleSetRating(project, e.target.value)}
+                >
+                  <option value="">{fill(t.showcase.ratingDefault, {
+                    rating: defaultRating === 'mature' ? t.showcase.ratingMature : t.showcase.ratingSfw })}</option>
+                  <option value="sfw">{t.showcase.ratingSfw}</option>
+                  <option value="mature">{t.showcase.ratingMature}</option>
+                </select>
               </div>
               <div className="project-card-actions">
                 <button
@@ -300,7 +345,8 @@ export function ShowcaseTab() {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : mode === 'viewing' && activeProject ? (
         <ComicReader

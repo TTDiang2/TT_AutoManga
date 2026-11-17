@@ -520,6 +520,63 @@ reproducible outside the asset index.
 - `POST /api/assets/file` registers arbitrary image bytes (e.g. your own
   post-processing output) as a reusable asset.
 
+### Content rating (SFW default, opt-in Mature) and minor protections
+
+Every generation path — `/api/agent/generate` and `/generate-batch` (so the
+MCP `generate_image`/`generate_batch` tools and `agent_cli`), the Assets tab's
+`/api/assets/swarmui/generate`, the Characters tab's sheet
+`/api/characters/templates/generate-image` and the LoRA dataset generator —
+runs through one function, `backend/content_rating.py` `apply_rating`, right
+before SwarmUI is called.
+
+- **The rating.** `data/settings.json` → `content.defaultRating`
+  (`"sfw"` by default, or `"mature"`; Settings → Content rating, or
+  `POST /api/settings/ {"content": {"defaultRating": "..."}}`) applies to
+  generations without a project and to projects that set none. A project's
+  own `settings.contentRating` (`"sfw"` | `"mature"`) wins:
+  `PUT /api/agent/projects/$PID/settings {"contentRating": "mature"}` (`""`
+  unsets it; anything else is 400), or the rating selector on its Showcase
+  card. A character sheet uses the rating of the project it is generated for
+  (the Characters tab sends none: the default). The LoRA dataset generator is
+  **always SFW**.
+- **Character ages.** Library characters have `age` (whole number 0-120, or
+  `null` = unknown; Characters tab "Age", `PATCH /api/characters/<id>
+  {"age": 34}`; 422 outside 0-120). A project entry in `settings.characters[]`
+  may carry `age` too (it wins). A character is a **minor** if its age is
+  under 18, or its name/appearance/description/prompt block reads as a minor
+  ("N years old" / "N-year-old" / "aged N" / "N yo" with N < 18, or teen,
+  teenage, kid, child, toddler, baby, schoolgirl, schoolboy, loli, shota,
+  young girl/boy, little girl/boy, middle school, high school student,
+  minor, ...; a minor description wins over an adult age). It is an
+  **adult** if not a minor and its age is 18+, or its text says
+  "N years old" with N >= 18 or "adult". Otherwise its age is **unknown**.
+- **SFW** generations get `nsfw, nude, naked, nipples, cleavage, underwear,
+  lingerie` added to the negative prompt (prompt otherwise unchanged).
+- **Mature** generations drop those, and always get `adult, mature adult`
+  in the prompt and `child, loli, shota, childlike, teen, young, underage,
+  petite child body` in the negative — but only when every character on the
+  panel (`panel.characters`, resolved like the LoRA/prompt-block injection)
+  is a known adult and the panel's scene mentions no minor. A panel with a
+  minor or a character of unknown age (or not in the library) is **forced to
+  SFW**; the response carries `"notice": "forced SFW: Kim has no age ..."`
+  and the `injected` list a `{"kind": "rating", "rating": "sfw",
+  "requested": "mature", "forced": true, "notice": ...}` entry. Set the
+  character's age to fix an unknown one.
+- **Refusals.** In mature mode a prompt that mentions a minor (the terms
+  above, "16 years old", "teenage", "schoolgirl", "underage", "preteen", ...)
+  is refused with **HTTP 400** and a message naming the words — never
+  silently rewritten. `/generate-batch` checks every job up front (400
+  `job <i>: ...`).
+- Every response and asset records the outcome: `content_rating` in the
+  `/generate` response, the asset metadata (`GET /api/agent/assets/<id>`,
+  with the `negative_prompt` actually sent) and the PNG's parameters.
+- Showcase: mature projects show a "Mature" badge and blurred covers until
+  clicked (once per browser session); the collection export dialog notes
+  mature episodes (`/api/collections` episodes carry `contentRating`, the
+  collection `mature`).
+- Negative prompts reduce what a model draws; they do not guarantee it.
+  Check mature output yourself.
+
 ## 7. Errors & limits
 
 - FastAPI standard errors: `{"detail": "..."}`. 404 unknown project/page/
@@ -585,6 +642,13 @@ which paints with comic.js and rebuilds the project here. Names are
 - Images: `GET /api/comics/scripts/{name}/file/page_01.png` (or `draft_01`),
   `/panel/p01-02.png` (`p01-02.prev.png` = the one it replaced),
   `/variant/p01-02_seed4301.png`.
+
+Content rating: a script's `rating: sfw|mature` header (default sfw; a
+panel's `rating: sfw` keeps one panel SFW) and `age NAME: <n>` lines follow
+the same rules as here (Comics README); `automanga.js` sets the project's
+`contentRating` to the script's rating and fills a library character's `age`
+from the script when it has none. A mature script's `--plan` panels carry
+`rating` (and `notice` when forced SFW).
 
 Pick a variant: `variants` run → set the seed in the script (`seed: N` line if
 the panel has one, else `PANEL … seed=N`) → `PUT` the script → `repaint`

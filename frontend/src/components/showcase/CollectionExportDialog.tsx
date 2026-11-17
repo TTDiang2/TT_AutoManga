@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FiDownload, FiX } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import { clampScale, exportPercent } from './collectionUtils';
+import { matureNames } from './rating';
 import type { Collection, CollectionExportJob } from './collectionUtils';
 
 type Format = 'pdf' | 'zip' | 'both';
@@ -81,6 +82,12 @@ export function CollectionExportDialog({ collection, onClose }: {
           </button>
         </div>
         <p className="text-sm text-secondary mt-sm">{collection.name}</p>
+        {matureNames(collection.episodes).length > 0 && (
+          <p className="collection-mature-notice text-sm mt-sm" role="note">
+            <span className="mature-badge" style={{ marginLeft: 0, marginRight: 6 }}>{t.showcase.matureBadge}</span>
+            {fill(t.showcase.matureExportNotice, { names: matureNames(collection.episodes).join(', ') })}
+          </p>
+        )}
 
         <div className="collection-export-options mt-md">
           <label className="collection-export-row">

@@ -146,12 +146,27 @@ class TrainingConfig(BaseModel):
     cacheTextEmbeddings: bool = False
 
 
+class ContentConfig(BaseModel):
+    # The content rating of generations made outside a project, and of
+    # projects that set none (project settings.contentRating wins):
+    # "sfw" (default) or "mature" (adult fictional characters only). Minor
+    # protections apply in both: backend/content_rating.py.
+    defaultRating: str = "sfw"
+
+    @field_validator("defaultRating")
+    @classmethod
+    def _rating(cls, v: str) -> str:
+        v = str(v or "").strip().lower()
+        return v if v in ("sfw", "mature") else "sfw"
+
+
 class AppSettings(BaseModel):
     api: APIConfig = APIConfig()
     swarmui: SwarmUIConfig = SwarmUIConfig()
     defaults: DefaultSettings = DefaultSettings()
     auth: AuthConfig = AuthConfig()
     training: TrainingConfig = TrainingConfig()
+    content: ContentConfig = ContentConfig()
     language: str = "en"
 
 

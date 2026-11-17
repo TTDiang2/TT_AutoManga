@@ -384,11 +384,27 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                                  "weight": ref_kwargs["ipadapter_weight"],
                                  "preset": ref_kwargs["ipadapter"]})
 
+    # the content rating (backend/content_rating.py): the project's rating
+    # (else the global default) for this panel's cast; a mature prompt with
+    # minor terms is refused (RatingRefused is a ValueError: HTTP 400)
+    from ..content_rating import apply_rating
+    rating_panel = None
+    if project and payload.get("panel_id"):
+        rating_panel = next((p for p in (project.get("panels") or [])
+                             if p.get("id") == payload["panel_id"]), None)
+    rated = apply_rating(prompt, payload.get("negative_prompt") or "", project=project,
+                         panel=rating_panel, free_prompt=payload.get("prompt") or "",
+                         sep=", " if prompt_format_is_tags(payload) else "。")
+    prompt, negative = rated["prompt"], rated["negative"]
+    injected.append(rated["injected"])
+    if rated["notice"]:
+        logger.info("agent/generate panel=%s: %s", payload.get("panel_id"), rated["notice"])
+
     assets_out = []
     for v in range(variants):
         result = await swarm_client.generate_image(
             prompt=prompt,
-            negative_prompt=payload.get("negative_prompt") or "",
+            negative_prompt=negative,
             model=model,
             steps=payload.get("steps") or swarm_settings.currentSteps,
             cfg_scale=payload.get("cfg_scale") or swarm_settings.currentCfgScale,
@@ -415,7 +431,7 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
 
         img_bytes = _embed_png_parameters(img_bytes, {
             "prompt": prompt,
-            "negative_prompt": payload.get("negative_prompt") or "",
+            "negative_prompt": negative,
             "seed": (seed + v) if seed is not None else None,
             "model": model,
             "steps": payload.get("steps") or swarm_settings.currentSteps,
@@ -428,6 +444,7 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             "alpha_method": alpha_method if payload.get("remove_background") else None,
             "ipadapter": ({"preset": ref_kwargs["ipadapter"], "weight": ref_kwargs["ipadapter_weight"]}
                           if ref_kwargs else None),
+            "content_rating": rated["rating"],
         })
         img = Image.open(io.BytesIO(img_bytes))
         has_alpha = (img.mode == "RGBA"
@@ -443,6 +460,8 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                   "width": img.size[0], "height": img.size[1],
                   "has_alpha": has_alpha, "model": model,
                   "prompt_format": payload.get("prompt_format"),
+                  "negative_prompt": negative,
+                  "content_rating": rated["rating"],
                   "injected": injected},
         )
         assets_out.append({
@@ -466,8 +485,11 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         _save_panel_image(payload["project_id"], payload["panel_id"],
                           assets_out[apply_variant]["url"])
         applied = True
-    return {"assets": assets_out, "applied": applied,
-            "model": model, "injected": injected}
+    out = {"assets": assets_out, "applied": applied,
+           "model": model, "injected": injected, "content_rating": rated["rating"]}
+    if rated["notice"]:
+        out["notice"] = rated["notice"]
+    return out
 
 
 # camera-shot descriptors injected into prompts when a panel declares a shot
@@ -520,6 +542,21 @@ async def agent_generate_batch(req: GenerateBatchRequest):
         if req.project_id and not p.get("project_id"):
             p["project_id"] = req.project_id
         payloads.append(p)
+    # a mature job whose prompt mentions a minor is refused up front (400),
+    # not queued to fail; _do_generate checks every job again when it runs
+    from ..content_rating import RatingRefused, check_prompt, project_rating
+    ratings: Dict[str, str] = {}
+    for i, p in enumerate(payloads):
+        pid = p.get("project_id") or ""
+        if pid not in ratings:
+            try:
+                ratings[pid] = project_rating(storage.load_project(pid) if pid else None)
+            except InvalidProjectIdError as e:
+                raise HTTPException(status_code=400, detail=f"job {i}: {e}")
+        try:
+            check_prompt(p.get("prompt") or "", ratings[pid])
+        except RatingRefused as e:
+            raise HTTPException(status_code=400, detail=f"job {i}: {e}")
     job = create_job(payloads, req.concurrency)
     task = asyncio.create_task(run_job(job.id, _do_generate))
     _background_tasks.add(task)
@@ -667,6 +704,9 @@ class ProjectSettingsUpdate(BaseModel):
     style: Optional[str] = None
     characters: Optional[List[Dict[str, Any]]] = None   # [{name, prompt_block}]
     locations: Optional[List[Dict[str, Any]]] = None    # [{name, prompt_block}]
+    # "sfw" | "mature" (adult fictional characters only); "" = unset (the
+    # global settings.content.defaultRating applies)
+    contentRating: Optional[str] = None
     bible: Optional[str] = None   # free-text story bible: worldview, recap,
                                   # established locations/props — for the
                                   # agent's own continuity across chapters
@@ -683,6 +723,15 @@ async def put_project_settings(project_id: str, req: ProjectSettingsUpdate):
         cfg["style"] = req.style.strip()
     if req.bible is not None:
         cfg["bible"] = req.bible.strip()
+    if req.contentRating is not None:
+        rating = req.contentRating.strip().lower()
+        if rating not in ("", "sfw", "mature"):
+            raise HTTPException(status_code=400,
+                                detail='contentRating must be "sfw", "mature" or "" (unset)')
+        if rating:
+            cfg["contentRating"] = rating
+        else:
+            cfg.pop("contentRating", None)
     if req.characters is not None:
         for c in req.characters:
             if not isinstance(c.get("name"), str) or not c["name"].strip()                     or not isinstance(c.get("prompt_block"), str) or not c["prompt_block"].strip():
