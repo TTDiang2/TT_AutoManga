@@ -160,7 +160,7 @@ def test_render_export_endpoint_smoke():
     """HTTP-level smoke: pdf/zip happy path + empty-pages 400."""
     from fastapi.testclient import TestClient
     from backend.main import app
-    client = TestClient(app, client=("127.0.0.1", 50000))
+    client = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     page = base_page()
     r = client.post("/api/render/export",
                     json={"pages": [page], "format": "pdf", "scale": 1})

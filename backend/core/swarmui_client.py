@@ -1,11 +1,54 @@
+import ipaddress
+import socket
+from collections import OrderedDict
+from urllib.parse import urlsplit
+
 import httpx
 from typing import Optional, Dict, Any, List
 from ..core.config import settings, LoraConfig
+
+MAX_ONE_SHOT_SESSIONS = 3     # sessions kept for per-request address overrides
 
 
 def _normalize_address(address: str) -> str:
     address = (address or "").strip().rstrip("/")
     return address if address.startswith("http") else f"http://{address}"
+
+
+def _private_ip(ip: str) -> bool:
+    try:
+        a = ipaddress.ip_address(ip.split("%")[0])
+    except ValueError:
+        return False
+    if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped:
+        a = a.ipv4_mapped
+    return (a.is_private or a.is_loopback or a.is_link_local) and not a.is_multicast \
+        and not a.is_unspecified
+
+
+def check_override_address(address: str) -> str:
+    """A per-request SwarmUI address, normalized, if it is an http(s) URL on
+    a loopback/private/link-local network (every address the name resolves
+    to); else ValueError. Blocking (DNS): call via asyncio.to_thread."""
+    raw = (address or "").strip()
+    if "://" in raw and urlsplit(raw).scheme.lower() not in ("http", "https"):
+        raise ValueError("swarmui_address must be an http(s) URL")
+    base = _normalize_address(raw)
+    try:
+        parts = urlsplit(base)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        raise ValueError("swarmui_address is not a valid URL")
+    if parts.scheme not in ("http", "https") or not host or parts.username or parts.password:
+        raise ValueError("swarmui_address must be an http(s) URL with a host")
+    try:
+        infos = socket.getaddrinfo(host, port or 80, proto=socket.IPPROTO_TCP)
+    except (OSError, UnicodeError):
+        raise ValueError(f"swarmui_address host {host!r} does not resolve")
+    ips = {i[4][0] for i in infos}
+    if not ips or not all(_private_ip(ip) for ip in ips):
+        raise ValueError("swarmui_address must be on this machine or the local network")
+    return base
 
 
 class SwarmUIClient:
@@ -18,7 +61,19 @@ class SwarmUIClient:
     """
 
     def __init__(self):
-        self._sessions: Dict[str, str] = {}
+        self._sessions: Dict[str, str] = OrderedDict()
+
+    def _remember(self, base: str, session_id: str) -> None:
+        """Store a session: the configured address always, plus at most
+        MAX_ONE_SHOT_SESSIONS other (one-shot override) addresses, oldest
+        evicted first."""
+        self._sessions[base] = session_id
+        if isinstance(self._sessions, OrderedDict):
+            self._sessions.move_to_end(base)
+        keep = self.address
+        others = [a for a in self._sessions if a != keep]
+        for a in others[:max(0, len(others) - MAX_ONE_SHOT_SESSIONS)]:
+            self._sessions.pop(a, None)
 
     @property
     def address(self) -> str:
@@ -44,7 +99,7 @@ class SwarmUIClient:
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        self._sessions[base] = data.get("session_id", "")
+                        self._remember(base, data.get("session_id", ""))
                         return True
             except Exception as e:
                 import logging
@@ -79,7 +134,7 @@ class SwarmUIClient:
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    self._sessions[base] = data.get("session_id", "")
+                    self._remember(base, data.get("session_id", ""))
                     return {"connected": True, "status": "ok", "version": data.get("version", "")}
                 return {"connected": False, "status": f"HTTP {response.status_code}"}
         except Exception as e:

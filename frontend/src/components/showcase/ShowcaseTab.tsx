@@ -88,7 +88,6 @@ export function ShowcaseTab() {
       const project = data.project;
       setActiveProject(project);
       setCurrentProject(project);
-      setComposerProjectId(project.id);
 
       if (action === 'view') {
         // pages render server-side on demand (see ComicReader)
@@ -97,6 +96,8 @@ export function ShowcaseTab() {
       } else {
         // load panels into the store too, or the Storyboard tab shows 0
         loadProjectWithImages(project.id);
+        // only "edit" opens it in the Composer (that replaces the pages open there)
+        setComposerProjectId(project.id);
         setActiveTab('composer');
       }
     } catch (error) {

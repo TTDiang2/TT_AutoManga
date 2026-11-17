@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
-import { useTranslation } from '../../hooks/useTranslation';
+import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Character, CharacterLora } from '../../types';
 import { TrainingPanel } from './TrainingPanel';
 
@@ -40,6 +40,9 @@ export function CharacterTab() {
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<CharacterTemplateMeta[]>([]);
+  // the server's library is empty: characters this browser has (or the storyboard names),
+  // added only when the user asks (opening the tab writes nothing)
+  const [seedCandidates, setSeedCandidates] = useState<Character[]>([]);
 
   // The library is shared (the Comics converter adds characters too), so
   // changes go through the per-item endpoints; posting the full list would
@@ -81,20 +84,13 @@ export function CharacterTab() {
       .then(checked)
       .then(r => r.json())
       .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setCharacters(data);
-          return;
+        if (!Array.isArray(data)) return;
+        if (data.length === 0) {
+          // the library is empty: offer what's known locally ("Add characters from storyboard")
+          const { characters: local } = useProjectStore.getState();
+          setSeedCandidates(local.length > 0 ? local : extractCharactersFromPanels());
         }
-        // the library is empty: seed it once (nothing there to overwrite)
-        const { characters: local } = useProjectStore.getState();
-        const seed = local.length > 0 ? local : extractCharactersFromPanels();
-        if (seed.length === 0) return;
-        if (local.length === 0) setCharacters(seed);
-        fetch('/api/characters/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(seed),
-        }).then(checked).catch(reportSyncError('seed'));
+        setCharacters(data);
       })
       .catch(() => {
         // offline: show what can be derived locally, but don't write anything
@@ -118,6 +114,19 @@ export function CharacterTab() {
       .then(data => setIpadapter(!!data?.ipadapter))
       .catch(() => setIpadapter(false));
   }, [isEditing]);
+
+  // the explicit seed of an empty library (POST replaces the list: only done while it is empty)
+  const addFromStoryboard = () => {
+    const seed = seedCandidates;
+    if (seed.length === 0) return;
+    setSeedCandidates([]);
+    setCharacters(seed);
+    fetch('/api/characters/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(seed),
+    }).then(checked).catch(reportSyncError('seed'));
+  };
 
   const startEdit = (char: Character) => {
     setEditForm({ name: char.name, description: char.description, appearance: char.appearance || '' });
@@ -332,6 +341,11 @@ export function CharacterTab() {
               <FiUser size={48} style={{ opacity: 0.3 }} />
               <p style={{ marginTop: '12px', color: 'var(--text-secondary)' }}>{t.characters.noCharacters}</p>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t.characters.noCharactersDesc}</p>
+              {seedCandidates.length > 0 && (
+                <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={addFromStoryboard}>
+                  <FiPlus size={14} /> {fill(t.characters.addFromStoryboard, { n: seedCandidates.length })}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -373,8 +387,9 @@ export function CharacterTab() {
                 />
               </div>
               <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }}>{t.characters.lora}</label>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-lora">{t.characters.lora}</label>
                 <select
+                  id="char-lora"
                   className="input"
                   style={{ width: '100%' }}
                   value={loraForm.name}
@@ -390,8 +405,9 @@ export function CharacterTab() {
                 </select>
                 {loraForm.name && (
                   <div className="flex gap-sm items-center" style={{ marginTop: '8px' }}>
-                    <label style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>{t.characters.loraWeight}</label>
+                    <label style={{ fontSize: '12px', whiteSpace: 'nowrap' }} htmlFor="char-lora-weight">{t.characters.loraWeight}</label>
                     <input
+                      id="char-lora-weight"
                       type="range"
                       min={0}
                       max={1.2}

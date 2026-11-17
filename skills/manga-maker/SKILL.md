@@ -231,7 +231,7 @@ the story yourself.
 | Layer | How | Good for |
 |---|---|---|
 | **MCP tools** | `automanga` MCP server (`python -m backend.mcp_server`, stdio) | Claude/Codex/Cursor/ZCode & any MCP client — tool names + schemas are self-documenting; `render_page_preview` returns an image you can SEE |
-| **HTTP** | `curl` the same endpoints (contract: `AGENTS.md` in the repo, schema: `GET /openapi.json`) | any agent with a shell |
+| **HTTP** | `curl` the same endpoints (contract: `AGENTS.md` in the repo, schema: `GET /api/openapi.json`) | any agent with a shell |
 | **CLI** | `python -m backend.agent_cli <cmd>` | quick one-offs |
 
 All three hit the identical REST API. Ids: projects are opaque; panels

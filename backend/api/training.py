@@ -14,9 +14,14 @@ progress → when run.py exits 0, pull <name>.safetensors into SwarmUI's
 Models/Lora/<loraFolder>/, refresh SwarmUI's model list and set the
 character's lora. A restart while the trainer runs loses nothing: the next
 poll picks the job up from its pid and log. A restart during the short
-push/launch phase marks the job failed (start it again).
+push phase marks the job failed (start it again); one during "launching"
+adopts the job from the pid the launcher wrote next to the log. Each job has
+its own remote dir (automanga-training/<name>/<job id>/), and the job lock is
+never held across ssh/scp: steps snapshot the job, talk to the trainer
+unlocked, then re-check that the job is still current before merging.
 """
 import asyncio
+import binascii
 import io
 import json
 import logging
@@ -47,6 +52,9 @@ JOB_LOG = DATA_DIR / "training_job.log"          # local mirror of the trainer's
 SWARM_LORA_DIR = Path(os.environ.get("AUTOMANGA_SWARM_LORA_DIR",
                                      Path.home() / "SwarmUI" / "Models" / "Lora")).expanduser()
 MIN_IMAGES = 15
+MAX_DATASET_IMAGES = 200
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024   # per image
+MAX_IMAGE_PIXELS = 40_000_000
 DEFAULT_STEPS = 1500
 DEFAULT_LORA_WEIGHT = 0.8
 POLL_INTERVAL = 2.0          # seconds between trainer polls (GETs in between reuse the last one)
@@ -58,7 +66,8 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_]{1,62}$")
 _TRIGGER_RE = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 _IMAGE_RE = re.compile(r"^img_(\d{3,5})\.png$")
 
-_lock = threading.RLock()
+_lock = threading.RLock()                 # job file read-modify-write only; never across ssh
+_poll_lock = threading.Lock()             # one trainer poll at a time
 _worker: Optional[threading.Thread] = None
 _last_poll = 0.0
 _gen: Dict[str, Dict[str, Any]] = {}            # slug → generation status
@@ -101,21 +110,30 @@ def _next_index(d: Path) -> int:
 
 
 def _add_image(slug: str, data: bytes) -> str:
-    """Store one image as PNG with its trigger caption; returns the file name."""
+    """Store one image as PNG with its trigger caption; returns the file name.
+    Blocking (decode + encode): call it from async code via asyncio.to_thread."""
     from PIL import Image
     meta = _meta(slug)
     d = _dataset_dir(slug)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"images are limited to {MAX_UPLOAD_BYTES >> 20} MB")
+    if len(_images(d)) >= MAX_DATASET_IMAGES:
+        raise HTTPException(status_code=400, detail=f"a dataset holds at most {MAX_DATASET_IMAGES} images")
     try:
         img = Image.open(io.BytesIO(data))
+        if img.width * img.height > MAX_IMAGE_PIXELS:
+            raise ValueError("too many pixels")
         img.load()
     except Exception:
-        raise HTTPException(status_code=400, detail="not an image")
+        raise HTTPException(status_code=400, detail="not an image (or too large)")
     if img.mode not in ("RGB", "L"):
         bg = Image.new("RGB", img.size, (255, 255, 255))
         rgba = img.convert("RGBA")
         bg.paste(rgba, mask=rgba.split()[-1])
         img = bg
     with _lock:
+        if len(_images(d)) >= MAX_DATASET_IMAGES:
+            raise HTTPException(status_code=400, detail=f"a dataset holds at most {MAX_DATASET_IMAGES} images")
         n = _next_index(d)
         name = f"img_{n:03d}.png"
         img.convert("RGB").save(d / name, format="PNG")
@@ -204,7 +222,16 @@ async def delete_image(slug: str, file: str):
 @router.post("/datasets/{slug}/upload")
 async def upload_images(slug: str, files: List[UploadFile] = File(...)):
     _meta(slug)
-    added = [_add_image(slug, await f.read()) for f in files]
+    d = _dataset_dir(slug)
+    if len(_images(d)) + len(files) > MAX_DATASET_IMAGES:
+        raise HTTPException(status_code=400, detail=f"a dataset holds at most {MAX_DATASET_IMAGES} images")
+    added = []
+    for f in files:
+        data = await f.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"{f.filename}: images are limited to "
+                                                        f"{MAX_UPLOAD_BYTES >> 20} MB")
+        added.append(await asyncio.to_thread(_add_image, slug, data))
     return {**_dataset_view(slug), "added": added}
 
 
@@ -213,14 +240,28 @@ class ImportPanelsRequest(BaseModel):
     panelIds: List[str] = []      # empty: every panel with an image
 
 
-def _panel_bytes(ref: str) -> Optional[bytes]:
+def _decode_data_url(ref: str) -> bytes:
     import base64
+    payload = ref.partition(",")[2]
+    if len(payload) > MAX_UPLOAD_BYTES * 4 // 3 + 4:
+        raise HTTPException(status_code=413, detail=f"images are limited to {MAX_UPLOAD_BYTES >> 20} MB")
+    try:
+        return base64.b64decode(payload)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="a panel image is not valid base64")
+
+
+def _panel_bytes(ref: str) -> Optional[bytes]:
     if ref.startswith("data:"):
-        return base64.b64decode(ref.partition(",")[2])
+        return _decode_data_url(ref)
     if ref.startswith("/api/assets/file/"):
         from ..storage import asset_store as asset_store_mod
         p = asset_store_mod.asset_store.path_for(ref.rsplit("/", 1)[-1])
-        return p.read_bytes() if p else None
+        if not p:
+            return None
+        if p.stat().st_size > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"images are limited to {MAX_UPLOAD_BYTES >> 20} MB")
+        return p.read_bytes()
     return None
 
 
@@ -239,11 +280,11 @@ async def import_panels(slug: str, req: ImportPanelsRequest):
     for panel in project.get("panels", []):
         if wanted and panel.get("id") not in wanted:
             continue
-        data = _panel_bytes(panel.get("image") or "")
+        data = await asyncio.to_thread(_panel_bytes, panel.get("image") or "")
         if not data:
             skipped += 1
             continue
-        added.append(_add_image(slug, data))
+        added.append(await asyncio.to_thread(_add_image, slug, data))
     return {**_dataset_view(slug), "added": added, "skipped": skipped}
 
 
@@ -293,9 +334,9 @@ async def _generate(slug: str, appearance: str, count: int, start: int) -> None:
                 width=832, height=1216, seed=SEED_BASE + i * SEED_STEP,
                 loras=[LoraConfig(name="", weight=0)])
             if res.get("success") and res.get("image", "").startswith("data:"):
-                import base64
                 try:
-                    _add_image(slug, base64.b64decode(res["image"].partition(",")[2]))
+                    await asyncio.to_thread(
+                        lambda: _add_image(slug, _decode_data_url(res["image"])))
                     st["done"] += 1
                 except HTTPException as e:
                     st["failed"] += 1
@@ -395,13 +436,25 @@ def _current(job_id: str) -> Optional[Dict[str, Any]]:
     return job if job and job["id"] == job_id else None
 
 
-def _prepare_and_launch(job_id: str) -> None:
-    """push → render config → launch (a worker thread)."""
+class _Superseded(Exception):
+    """The job was stopped or replaced while a worker step ran."""
+
+
+def _check_current(job_id: str, phase: str) -> Dict[str, Any]:
+    """The job, still current, in ``phase`` and not stopped; else _Superseded.
+    Called before every remote step of a worker."""
     with _lock:
         job = _current(job_id)
-    if not job:
-        return
+    if not job or job["phase"] != phase or job.get("stopRequested"):
+        raise _Superseded()
+    return job
+
+
+def _prepare_and_launch(job_id: str) -> None:
+    """push → render config → launch (a worker thread). The job lock is only
+    taken to read and merge job state, never across ssh/scp."""
     try:
+        job = _check_current(job_id, "pushing")
         remote = tr.Remote(config.settings.training)
         found = remote.check()
         missing = [k for k, ok in found.items() if not ok]
@@ -410,13 +463,15 @@ def _prepare_and_launch(job_id: str) -> None:
                 {"toolkit": f"ai-toolkit run.py in {remote.toolkit_dir}",
                  "python": f"{remote.python} in {remote.toolkit_dir}",
                  "model": f"base model {remote.base_model}"}[k] for k in missing))
+        job = _check_current(job_id, "pushing")
         if not job.get("resume") and remote.output_exists(job["name"]):
             raise tr.RemoteError(f"{remote.toolkit_dir}/output/{job['name']} has checkpoints on the trainer "
                                  "(ai-toolkit would resume it): pick another name, or start with resume")
         d = DATASETS_DIR / job["slug"]
         files = [f for p in _images(d) for f in (p, p.with_suffix(".txt")) if f.exists()]
-        folder = remote.push_dataset(files, job["name"])
-        jd = remote.job_dir(job["name"])
+        job = _check_current(job_id, "pushing")
+        folder = remote.push_dataset(files, job["name"], job_id)
+        jd = remote.job_dir(job["name"], job_id)
         trig = job["trigger"]
         prompts = [f"{trig}, {job.get('appearance') or 'solo'}, standing, smiling, cowboy shot, "
                    "plain light grey background",
@@ -425,39 +480,91 @@ def _prepare_and_launch(job_id: str) -> None:
                                     base_model=remote.base_model, steps=job["steps"], prompts=prompts,
                                     sampling=config.settings.training.sampling)
         cfg_path, log = f"{jd}/config.yaml", f"{jd}/train.log"
+        job = _check_current(job_id, "pushing")
         remote.write_file(cfg_path, cfg_text)
         with _lock:
             job = _current(job_id)
-            if not job or job["phase"] != "pushing":
+            if not job or job["phase"] != "pushing" or job.get("stopRequested"):
                 return       # stopped meanwhile
             job.update(phase="launching", remote={"jobDir": jd, "config": cfg_path, "log": log,
+                                                  "pidfile": tr.Remote.pidfile(log),
                                                   "output": remote.output_file(job["name"])})
             _event(job, f"pushed {len(files) // 2} images to {folder}; config {cfg_path}")
             _save_job(job)
         pid = remote.launch(cfg_path, log)
         with _lock:
             job = _current(job_id)
-            if not job:
-                return
-            job["pid"] = pid
-            _event(job, f"launched on {remote.host} (pid {pid})")
-            stopped = bool(job.get("stopRequested"))
-            if not stopped:
-                job["phase"] = "running"
-            _save_job(job)
-        if stopped:   # stop was pressed while launching
+            stopped = not job or bool(job.get("stopRequested"))
+            if job:
+                job["pid"] = pid
+                _event(job, f"launched on {remote.host} (pid {pid})")
+                if not stopped:
+                    job["phase"] = "running"
+                _save_job(job)
+        if stopped:   # stopped (or replaced) while launching: don't orphan the GPU process
             remote.stop(pid, log)
             with _lock:
                 job = _current(job_id)
                 if job:
                     _event(job, "stopped right after launch")
                     _save_job(job)
+    except _Superseded:
+        return
     except Exception as e:   # noqa: BLE001
         logger.exception("training launch failed")
         with _lock:
             job = _current(job_id)
             if job and job["phase"] in ("pushing", "launching"):
                 _fail(job, str(e))
+
+
+def _adopt(job_id: str) -> None:
+    """After a restart while "launching": the launcher may have started the
+    trainer. Read its pidfile and adopt the process (or stop it, if a stop
+    was requested), else fail the job. Remote I/O outside the lock."""
+    with _lock:
+        job = _current(job_id)
+        if not job or job.get("pid") or job.get("adoptChecked"):
+            return
+        log = (job.get("remote") or {}).get("log")
+    pid = err = None
+    if log:
+        try:
+            pid = tr.Remote(config.settings.training).read_pidfile(log)
+        except tr.RemoteError as e:
+            err = str(e)
+    if err:          # trainer unreachable: try again on the next poll
+        with _lock:
+            job = _current(job_id)
+            if job:
+                job["pollError"] = err
+                _save_job(job)
+        return
+    stop = False
+    with _lock:
+        job = _current(job_id)
+        if not job or job.get("pid") or job.get("adoptChecked"):
+            return
+        job["adoptChecked"] = True
+        if pid is None:
+            if job["phase"] == "launching":
+                _fail(job, "interrupted by a server restart before the trainer started; start again")
+            else:
+                _save_job(job)
+            return
+        job["pid"] = pid
+        if job.get("stopRequested"):
+            stop = True
+            _event(job, f"found the trainer (pid {pid}) after a restart; stopping it")
+        else:
+            job["phase"] = "running"
+            _event(job, f"adopted the trainer (pid {pid}) after a server restart")
+        _save_job(job)
+    if stop:
+        try:
+            tr.Remote(config.settings.training).stop(pid, log)
+        except tr.RemoteError as e:
+            logger.warning("could not stop adopted trainer pid %s: %s", pid, e)
 
 
 def _refresh_swarmui() -> None:
@@ -471,34 +578,42 @@ def _refresh_swarmui() -> None:
 
 def _set_character_lora(character_id: str, lora: Dict[str, Any]) -> bool:
     from . import characters as chars_mod
-    chars = chars_mod._load_characters()
-    for c in chars:
-        if c.get("id") == character_id:
-            c["lora"] = chars_mod.CharacterLora.model_validate(lora).model_dump()
-            c["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            chars_mod._save_characters(chars)
-            return True
+    value = chars_mod.CharacterLora.model_validate(lora).model_dump()
+    with chars_mod.CHARACTERS_LOCK:
+        chars = chars_mod._load_characters()
+        for c in chars:
+            if c.get("id") == character_id:
+                c["lora"] = value
+                c["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                chars_mod._save_characters(chars)
+                return True
     return False
 
 
 def _finish(job_id: str) -> None:
-    """pull the LoRA → refresh SwarmUI → set the character's lora (a worker thread)."""
-    with _lock:
-        job = _current(job_id)
-    if not job or job["phase"] != "finishing":
-        return
+    """pull the LoRA → refresh SwarmUI → set the character's lora (a worker
+    thread). Never overwrites an existing LoRA file: the name gets _2, _3…"""
     try:
+        job = _check_current(job_id, "finishing")
         remote = tr.Remote(config.settings.training)
         folder = config.settings.training.loraFolder.strip("/") or "Comics"
-        local = SWARM_LORA_DIR / folder / f"{job['name']}.safetensors"
-        remote.pull(job["remote"]["output"], local)
-        lora = {"name": f"{folder}/{job['name']}", "weight": DEFAULT_LORA_WEIGHT,
+        prev = Path(job["loraFile"]) if job.get("loraFile") else None
+        if prev is not None and prev.exists():
+            local = prev                  # a retried collect: this job's own file
+        else:
+            local = tr.free_lora_path(SWARM_LORA_DIR / folder, job["name"])
+            remote.pull(job["remote"]["output"], local, overwrite=False)
+        lora = {"name": f"{folder}/{local.stem}", "weight": DEFAULT_LORA_WEIGHT,
                 "trigger": job["trigger"]}
         with _lock:
-            job = _current(job_id) or job
+            job = _current(job_id)
+            if not job:
+                return
             job.update(loraFile=str(local), lora=lora)
-            _event(job, f"pulled {local} ({local.stat().st_size // 1024} KB)")
+            note = f" (as {local.stem}: {job['name']} existed)" if local.stem != job["name"] else ""
+            _event(job, f"pulled {local} ({local.stat().st_size // 1024} KB){note}")
             _save_job(job)
+        _check_current(job_id, "finishing")
         try:
             _refresh_swarmui()
             msg = "SwarmUI model list refreshed"
@@ -509,72 +624,105 @@ def _finish(job_id: str) -> None:
             ok = _set_character_lora(job["characterId"], lora)
             char_msg = "character lora set" if ok else "character not found; lora not set"
         with _lock:
-            job = _current(job_id) or job
+            job = _current(job_id)
+            if not job:
+                return
             _event(job, msg)
             if char_msg:
                 _event(job, char_msg)
             job.update(phase="done", ended=time.time())
+            job.pop("collectable", None)
             _save_job(job)
+    except _Superseded:
+        return
     except Exception as e:   # noqa: BLE001
         logger.exception("training finish failed")
         with _lock:
             job = _current(job_id)
             if job and job["phase"] == "finishing":
+                job["collectable"] = True      # POST /jobs/current/collect retries
                 _fail(job, f"could not collect the LoRA: {e}")
 
 
-def _poll(job: Dict[str, Any]) -> None:
+def _poll(job_id: str) -> None:
     """One trainer poll: append new log bytes to the mirror, update step and
-    phase. Called with _lock held; throttled to POLL_INTERVAL."""
+    phase. Throttled to POLL_INTERVAL; one at a time; the ssh call runs
+    without the job lock and its result is merged only into the same job."""
     global _last_poll
-    if time.time() - _last_poll < POLL_INTERVAL:
-        return
-    _last_poll = time.time()
-    offset = JOB_LOG.stat().st_size if JOB_LOG.exists() else 0
+    if not _poll_lock.acquire(blocking=False):
+        return                          # another request is polling right now
     try:
-        code, alive, data = tr.Remote(config.settings.training).poll(
-            job["pid"], job["remote"]["log"], offset)
-    except tr.RemoteError as e:
-        job["pollError"] = str(e)
-        _save_job(job)
-        return
-    job.pop("pollError", None)
-    if data:
-        with open(JOB_LOG, "ab") as f:
-            f.write(data)
-    raw = JOB_LOG.read_bytes().decode("utf-8", errors="replace") if JOB_LOG.exists() else ""
-    step = tr.parse_progress(raw[-200_000:], job["steps"])
-    if step is not None:
-        job["step"] = step
-    if code is not None and not job.get("stopRequested"):
-        if code == 0:
-            job["step"] = job["steps"]
-            job["phase"] = "finishing"
-            _event(job, "training finished")
-        else:
-            _fail(job, f"trainer exited with code {code} (see the log)")
+        if time.time() - _last_poll < POLL_INTERVAL:
             return
-    elif code is not None or (not alive and job.get("stopRequested")):
-        job.update(phase="stopped", ended=time.time())
-        _event(job, "stopped")
-    elif not alive:
-        _fail(job, "the trainer process is gone without an exit code (killed or rebooted)")
-        return
-    _save_job(job)
+        _last_poll = time.time()
+        with _lock:
+            job = _current(job_id)
+            if not job or job["phase"] != "running":
+                return
+            pid, log = job["pid"], job["remote"]["log"]
+        offset = JOB_LOG.stat().st_size if JOB_LOG.exists() else 0
+        try:
+            code, alive, data = tr.Remote(config.settings.training).poll(pid, log, offset)
+        except tr.RemoteError as e:
+            with _lock:
+                job = _current(job_id)
+                if job and job["phase"] == "running":
+                    job["pollError"] = str(e)
+                    _save_job(job)
+            return
+        with _lock:
+            job = _current(job_id)
+            if not job or job["phase"] != "running":
+                return
+            job.pop("pollError", None)
+            if data:
+                with open(JOB_LOG, "ab") as f:
+                    f.write(data)
+            raw = JOB_LOG.read_bytes().decode("utf-8", errors="replace") if JOB_LOG.exists() else ""
+            step = tr.parse_progress(raw[-200_000:], job["steps"])
+            if step is not None:
+                job["step"] = step
+            if code is not None and not job.get("stopRequested"):
+                if code == 0:
+                    job["step"] = job["steps"]
+                    job["phase"] = "finishing"
+                    _event(job, "training finished")
+                else:
+                    _fail(job, f"trainer exited with code {code} (see the log)")
+                    return
+            elif code is not None or (not alive and job.get("stopRequested")):
+                job.update(phase="stopped", ended=time.time())
+                _event(job, "stopped")
+            elif not alive:
+                _fail(job, "the trainer process is gone without an exit code (killed or rebooted)")
+                return
+            _save_job(job)
+    finally:
+        _poll_lock.release()
 
 
 def _advance() -> Optional[Dict[str, Any]]:
-    """Bring the persisted job up to date (also the restart pickup)."""
+    """Bring the persisted job up to date (also the restart pickup). Blocking
+    (ssh): from async code call it via asyncio.to_thread."""
     with _lock:
         job = _load_job()
         if not job:
             return None
-        phase = job["phase"]
-        if phase in ("pushing", "launching") and not _worker_alive():
+        phase, job_id = job["phase"], job["id"]
+        worker = _worker_alive()
+        if phase == "pushing" and not worker:
             _fail(job, "interrupted by a server restart before the trainer started; start again")
-        elif phase == "running":
-            _poll(job)
-        if job["phase"] == "finishing" and not _worker_alive():
+            return job
+    adopt = not worker and not job.get("pid") and not job.get("adoptChecked") \
+        and (job.get("remote") or {}).get("log") \
+        and (phase == "launching" or (phase == "stopped" and job.get("stopRequested")))
+    if adopt:
+        _adopt(job_id)
+    elif phase == "running":
+        _poll(job_id)
+    with _lock:
+        job = _load_job()
+        if job and job["phase"] == "finishing" and not _worker_alive():
             _spawn(_finish, job["id"])
         return job
 
@@ -614,14 +762,15 @@ async def start_job(req: StartJobRequest):
     _remote()   # settings sanity (os, host) before anything is persisted
     char_id = req.characterId or meta.get("characterId")
     char = _character(char_id)
+    await asyncio.to_thread(_advance)      # ssh: off the event loop, outside the lock
     with _lock:
-        busy = _advance()
+        busy = _load_job()
         if busy and busy["phase"] in _ACTIVE:
             raise HTTPException(status_code=409, detail=f"already training {busy['name']}")
         JOB_LOG.unlink(missing_ok=True)
         job = {"id": uuid.uuid4().hex, "name": name, "slug": req.slug, "trigger": meta["trigger"],
                "characterId": char_id if char else None, "steps": req.steps, "resume": req.resume,
-               "appearance": (char or {}).get("appearance") or "",
+               "appearance": tr.clean_text((char or {}).get("appearance") or ""),
                "images": count, "phase": "pushing", "pid": None, "step": 0,
                "started": time.time(), "ended": None, "error": None, "events": []}
         _event(job, f"training {name} on {count} images, {req.steps} steps")
@@ -645,15 +794,42 @@ def stop_job():
         if not job or job["phase"] not in ("pushing", "launching", "running"):
             raise HTTPException(status_code=409, detail="nothing is training")
         job["stopRequested"] = True
-        if job["phase"] == "running":
-            try:
-                tr.Remote(config.settings.training).stop(job["pid"], job["remote"]["log"])
-            except tr.RemoteError as e:
-                raise HTTPException(status_code=502, detail=f"could not stop the trainer: {e}")
-            _event(job, "stop sent")
-        else:
+        running = job["phase"] == "running"
+        if not running:
             # not launched yet: the launch worker sees the flag (or stops right after launching)
             job.update(phase="stopped", ended=time.time())
             _event(job, "stopped before launch")
         _save_job(job)
+        job_id, pid, log = job["id"], job.get("pid"), (job.get("remote") or {}).get("log")
+    if running:
+        try:   # ssh outside the lock
+            tr.Remote(config.settings.training).stop(pid, log)
+        except tr.RemoteError as e:
+            with _lock:
+                job = _current(job_id)
+                if job and job["phase"] == "running":
+                    job.pop("stopRequested", None)
+                    _save_job(job)
+            raise HTTPException(status_code=502, detail=f"could not stop the trainer: {e}")
+        with _lock:
+            job = _current(job_id) or job
+            _event(job, "stop sent")
+            _save_job(job)
+    return {"job": _snapshot(job)}
+
+
+@router.post("/jobs/current/collect")
+def collect_job():
+    """Retry the finish (pull → SwarmUI refresh → character lora) of a job
+    whose training succeeded but whose collection failed."""
+    with _lock:
+        job = _load_job()
+        if not job or job["phase"] != "failed" or not job.get("collectable"):
+            raise HTTPException(status_code=409, detail="no finished training to collect")
+        if _worker_alive():
+            raise HTTPException(status_code=409, detail="the previous step is still running")
+        job.update(phase="finishing", error=None, ended=None)
+        _event(job, "collecting again")
+        _save_job(job)
+        _spawn(_finish, job["id"])
     return {"job": _snapshot(job)}

@@ -459,13 +459,13 @@ def _old_render(page, scale, resolve):
         ew, eh = int(round(EW)), int(round(EH))
         t = el.get("type")
         if t in ("image", "page-image"):
-            local, pad = R._draw_image(el, ew, eh, scale, resolve), 0
+            local, pad = R._draw_image(el, ew, eh, scale, resolve), (0, 0)
         elif t == "text":
-            local, pad = R._draw_text(el, ew, eh, scale), 0
+            local, pad = R._draw_text(el, ew, eh, scale), (0, 0)
         else:
             local, pad = R.bubbles.draw_bubble(el, ew, eh, scale)
         layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        layer.paste(local, (int(round(X)) - pad, int(round(Y)) - pad))
+        layer.paste(local, (int(round(X)) - pad[0], int(round(Y)) - pad[1]))
         rot = el.get("rotation") or 0
         if rot:
             layer = layer.rotate(-float(rot), center=(X + EW / 2, Y + EH / 2),
@@ -703,3 +703,40 @@ def test_finished_jobs_are_pruned():
     jobs.create_job([])
     assert old.id not in jobs._jobs and old.id not in jobs._semaphores
     assert running.id in jobs._jobs and recent.id in jobs._jobs
+
+
+# ---------------------------------------------------------------------------
+# SwarmUI: one-shot address overrides are LAN-only, sessions are bounded
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("addr", ["192.168.1.9:7801", "http://127.0.0.1:7801", "https://10.0.0.2",
+                                  "localhost:7801", "http://[::1]:7801"])
+def test_swarmui_override_address_allowed(addr):
+    from backend.core import swarmui_client as sc
+    assert sc.check_override_address(addr).startswith("http")
+
+
+@pytest.mark.parametrize("addr", ["http://8.8.8.8", "file:///etc/passwd", "ftp://192.168.1.9",
+                                  "http://user:pw@192.168.1.9", "http://", "http://0.0.0.0:7801",
+                                  "http://224.0.0.1"])
+def test_swarmui_override_address_refused(addr):
+    from backend.core import swarmui_client as sc
+    with pytest.raises(ValueError):
+        sc.check_override_address(addr)
+
+
+def test_swarmui_generate_refuses_public_override(client):
+    r = client.post("/api/assets/swarmui/generate", json={
+        "prompt": "x", "panel_id": "p", "project_id": "nope", "swarmui_address": "http://8.8.8.8"})
+    assert r.status_code == 400
+
+
+def test_swarmui_sessions_are_bounded():
+    from backend.core import swarmui_client as sc
+    c = sc.SwarmUIClient()
+    c._remember(c.address, "main")
+    for i in range(10):
+        c._remember(f"http://192.168.1.{i}:7801", f"s{i}")
+    assert c._sessions[c.address] == "main"
+    assert len(c._sessions) == 1 + sc.MAX_ONE_SHOT_SESSIONS
+    assert "http://192.168.1.9:7801" in c._sessions and "http://192.168.1.0:7801" not in c._sessions

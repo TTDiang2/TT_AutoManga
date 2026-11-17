@@ -67,7 +67,7 @@ def client(tmp_path, monkeypatch):
                                                  "architecture": "qwen"}]))
 
     from backend.main import app
-    yield TestClient(app, client=("127.0.0.1", 50000)), captured
+    yield TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)), captured
 
 
 def _mk_project(client):

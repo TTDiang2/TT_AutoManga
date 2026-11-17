@@ -1,8 +1,12 @@
+from contextlib import contextmanager
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import json
+import math
+import re
+import threading
 
 from ..core.config import atomic_write_json
 
@@ -10,14 +14,38 @@ router = APIRouter(prefix="/api/characters", tags=["characters"])
 
 CHARACTERS_FILE = Path(__file__).parent.parent.parent / "data" / "characters.json"
 
+# One lock around every read-modify-write of characters.json: the API
+# handlers here and the training worker (training._set_character_lora).
+CHARACTERS_LOCK = threading.RLock()
+
+_LORA_NAME_RE = re.compile(r"^[\w .-]+(/[\w .-]+)*$")
+
 
 class CharacterLora(BaseModel):
     """A trained LoRA for the character: the SwarmUI name relative to
     Models/Lora without extension (e.g. "SecondFloor/sf_nova"), its weight and
     trigger word (None: the name convention, sf_nova -> sfnova)."""
     name: str
-    weight: float = 0.8
+    weight: float = Field(default=0.8, ge=0, le=2, allow_inf_nan=False)
     trigger: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        v = v.strip()
+        if not _LORA_NAME_RE.fullmatch(v) or ".." in v:
+            raise ValueError("a LoRA name is folder/name of letters, digits, "
+                             "space, _ . and - (no ..)")
+        return v
+
+    @field_validator("trigger")
+    @classmethod
+    def _trigger(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if any(c in v for c in "<>:") or any(ord(c) < 32 for c in v):
+            raise ValueError("a trigger word can't contain <, >, : or control characters")
+        return v.strip() or None
 
 
 class CharacterInput(BaseModel):
@@ -30,7 +58,7 @@ class CharacterInput(BaseModel):
     lora: Optional[CharacterLora] = None
     # 0-1: how strongly the sheet (``image``) guides the character's solo
     # panels through SwarmUI's IP-Adapter; None / 0 = off (opt-in)
-    refWeight: Optional[float] = None
+    refWeight: Optional[float] = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -46,22 +74,33 @@ def _save_characters(characters: List[Dict[str, Any]]) -> None:
     atomic_write_json(CHARACTERS_FILE, characters, indent=2, ensure_ascii=False)
 
 
+@contextmanager
+def edit_characters():
+    """Read-modify-write characters.json under CHARACTERS_LOCK: yields the
+    list; it is saved when the block exits normally."""
+    with CHARACTERS_LOCK:
+        characters = _load_characters()
+        yield characters
+        _save_characters(characters)
+
+
 @router.get("/")
 async def list_characters():
-    return _load_characters()
+    with CHARACTERS_LOCK:
+        return _load_characters()
 
 
 @router.post("/")
 async def save_characters(characters: List[CharacterInput]):
-    _save_characters([c.model_dump() for c in characters])
+    with CHARACTERS_LOCK:
+        _save_characters([c.model_dump() for c in characters])
     return {"success": True}
 
 
 @router.post("/add")
 async def add_character(character: CharacterInput):
-    characters = _load_characters()
-    characters.append(character.model_dump())
-    _save_characters(characters)
+    with edit_characters() as characters:
+        characters.append(character.model_dump())
     return {"success": True}
 
 
@@ -81,21 +120,22 @@ async def update_character(character_id: str, updates: Dict[str, Any]):
         # null or 0 turns the sheet reference off; else a number in 0..1
         w = updates["refWeight"]
         if w is not None:
-            if isinstance(w, bool) or not isinstance(w, (int, float)) or not 0 <= w <= 1:
+            if isinstance(w, bool) or not isinstance(w, (int, float)) \
+                    or not math.isfinite(w) or not 0 <= w <= 1:
                 raise HTTPException(status_code=422, detail="refWeight: a number from 0 to 1 (0 = off)")
             updates["refWeight"] = round(float(w), 3) or None
-    characters = _load_characters()
-    for c in characters:
-        if c["id"] == character_id:
-            c.update(updates)
-            _save_characters(characters)
-            return {"success": True}
+    with CHARACTERS_LOCK:
+        characters = _load_characters()
+        for c in characters:
+            if c["id"] == character_id:
+                c.update(updates)
+                _save_characters(characters)
+                return {"success": True}
     raise HTTPException(status_code=404, detail="Character not found")
 
 
 @router.delete("/{character_id}")
 async def delete_character(character_id: str):
-    characters = _load_characters()
-    characters = [c for c in characters if c["id"] != character_id]
-    _save_characters(characters)
+    with edit_characters() as characters:
+        characters[:] = [c for c in characters if c["id"] != character_id]
     return {"success": True}

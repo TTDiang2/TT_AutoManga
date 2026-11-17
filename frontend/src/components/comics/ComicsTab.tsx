@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
+import { useComicsDrafts, openedDraft } from './scriptDrafts';
 import type { Project } from '../../types';
 import './comics.css';
 
@@ -51,7 +52,7 @@ interface PlanPanel {
   current: boolean;    // painted from this prompt and seed
   prev: boolean;
   mtime: number | null;
-  variants: { seed: number; same: boolean }[];   // same: painted from this prompt, so pinning it reuses the image
+  variants: { seed: number; same: boolean; mtime?: number }[];   // same: painted from this prompt, so pinning it reuses the image
 }
 
 type Plan = { ok: true; panels: PlanPanel[] } | { ok: false; error: string; line: number | null };
@@ -85,6 +86,10 @@ const MODE_LABEL = {
   'repaint': 'Repaint & import', 'variants': 'Seed variants',
 };
 
+/** The run log kept in the browser: the last lines only (a long paint prints thousands). */
+const MAX_LOG_LINES = 2000;
+const capLog = (lines: string[]) => (lines.length > MAX_LOG_LINES ? lines.slice(-MAX_LOG_LINES) : lines);
+
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const panelStem = (p: PlanPanel) => `p${pad2(p.page)}-${pad2(p.n)}`;
 /** A pinned seed with a variant painted from the current prompt, not yet in the panel: "Apply pinned" copies it. */
@@ -114,9 +119,13 @@ export function ComicsTab() {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [comicsDir, setComicsDir] = useState('');
   const [listError, setListError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [text, setText] = useState('');
-  const [savedText, setSavedText] = useState('');
+  // the open script and its editor text live in a store: they survive tab and script switches
+  const selected = useComicsDrafts(s => s.selected);
+  const setDraft = useComicsDrafts(s => s.setDraft);
+  const draft = useComicsDrafts(s => (s.selected ? s.drafts[s.selected] : undefined));
+  const text = draft?.text ?? '';
+  const savedText = draft?.savedText ?? '';
+  const setText = (value: string) => { if (selected) setDraft(selected, { text: value }); };
   const [view, setView] = useState<View>('script');
   const [face, setFace] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
@@ -124,14 +133,20 @@ export function ComicsTab() {
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [planText, setPlanText] = useState<string | null>(null);   // the editor text the plan was made from
   const [planTick, setPlanTick] = useState(0);   // bump to re-plan the same text (after a run, a pin)
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const logRef = useRef<HTMLPreElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const runRef = useRef<Run | null>(null);
   useEffect(() => { runRef.current = run; }, [run]);
+  const selectedRef = useRef<string | null>(selected);
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
 
   const dirty = text !== savedText;
+  // the plan was made from other text (typing, or the 600 ms check hasn't caught up): its line numbers
+  // and panel ids may be off, so the buttons acting on them wait for the next check
+  const planStale = planText !== text;
   const current = scripts.find(s => s.name === selected) || null;
   const running = run?.status === 'running';
   // the run's elapsed time ticks from a clock state, not a Date.now() during render
@@ -167,10 +182,11 @@ export function ComicsTab() {
     setError(null);
     try {
       const data = await json<Script & { text: string }>(await fetch(`/api/comics/scripts/${name}`));
-      setSelected(name);
-      setText(data.text);
-      setSavedText(data.text);
+      const { drafts, setDraft: putDraft, setSelected: select } = useComicsDrafts.getState();
+      putDraft(name, openedDraft(drafts[name], data.text));
+      select(name);
       setPlan(null);
+      setPlanText(null);
       setPicked(new Set());
       loadPages(name);
     } catch (e) { setError((e as Error).message); }
@@ -181,8 +197,13 @@ export function ComicsTab() {
     (async () => {
       const list = await loadScripts();
       const { run: r } = await json<{ run: Run | null }>(await fetch('/api/comics/runs/current'));
-      if (r) { setRun(r); await openScript(r.script); if (r.status === 'running') setView('log'); }
-      else if (list.length) await openScript(list[0].name);
+      if (r) setRun({ ...r, lines: capLog(r.lines) });
+      // back on the tab: the script that was open (its unsaved edits are kept), else the run's, else the first
+      const remembered = useComicsDrafts.getState().selected;
+      const name = remembered && list.some(s => s.name === remembered) ? remembered : r?.script ?? list[0]?.name;
+      if (!name) return;
+      await openScript(name);
+      if (r && r.script === name && r.status === 'running') setView('log');
     })().catch(e => setError((e as Error).message));
   }, [loadScripts, openScript]);
 
@@ -193,7 +214,9 @@ export function ComicsTab() {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const finished = (r: Run) => {
-      loadScripts(); loadPages(r.script); setPlanTick(t => t + 1);
+      loadScripts(); setPlanTick(t => t + 1);
+      // the pages of the run's script, if it is still the one open
+      if (r.script === selectedRef.current) loadPages(r.script);
       if (r.mode === 'repaint' || r.mode === 'variants') setView(v => (v === 'log' && r.status === 'done' ? 'panels' : v));
     };
     const poll = async () => {
@@ -203,7 +226,7 @@ export function ComicsTab() {
         const { run: next } = await json<{ run: Run | null }>(await fetch(`/api/comics/runs/current?since=${r.next}`));
         if (cancelled) return;
         if (next && next.id === r.id) {
-          setRun({ ...next, lines: [...r.lines, ...next.lines] });
+          setRun({ ...next, lines: capLog([...r.lines, ...next.lines]) });
           if (next.status !== 'running') { finished(next); return; }
         } else {
           // the server no longer reports this run as current: it has ended.
@@ -211,7 +234,7 @@ export function ComicsTab() {
           const { run: full } = await json<{ run: Run | null }>(await fetch('/api/comics/runs/current'));
           if (cancelled) return;
           if (full && full.id === r.id) {
-            setRun(full);
+            setRun({ ...full, lines: capLog(full.lines) });
             if (full.status !== 'running') { finished(full); return; }
           } else {
             setRun({
@@ -242,9 +265,9 @@ export function ComicsTab() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, face }), signal: ctl.signal,
         }));
-        if (!ctl.signal.aborted) setPlan(p);
+        if (!ctl.signal.aborted) { setPlan(p); setPlanText(text); }
       } catch (e) {
-        if (!ctl.signal.aborted) setPlan({ ok: false, error: (e as Error).message, line: null });
+        if (!ctl.signal.aborted) { setPlan({ ok: false, error: (e as Error).message, line: null }); setPlanText(text); }
       }
     }, 600);
     return () => { clearTimeout(timer); ctl.abort(); };
@@ -256,11 +279,12 @@ export function ComicsTab() {
 
   const save = async (body = text) => {
     if (!selected) return false;
+    const name = selected;   // the script being saved, even if another is opened meanwhile
     try {
-      await json(await fetch(`/api/comics/scripts/${selected}`, {
+      await json(await fetch(`/api/comics/scripts/${name}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }),
       }));
-      setSavedText(body);
+      setDraft(name, { savedText: body });
       loadScripts();
       return true;
     } catch (e) { setError((e as Error).message); return false; }
@@ -288,6 +312,7 @@ export function ComicsTab() {
   /** "Use seed N": pin it in the script, save, and re-plan (the variant then shows as pinned). */
   const chooseSeed = async (p: PlanPanel, seed: number) => {
     setError(null);
+    if (planStale) { setError(`${p.id}: the script changed since the check; wait for it to catch up`); return; }
     let next: string;
     try { next = pinSeed(text, p, seed); } catch (e) { setError(`${p.id}: ${(e as Error).message}; wait for the check to catch up`); return; }
     setText(next);
@@ -334,7 +359,7 @@ export function ComicsTab() {
 
   const select = (name: string) => {
     if (name === selected) return;
-    if (dirty && !window.confirm('Discard your unsaved changes to this script?')) return;
+    // no confirm: the draft of this script stays in useComicsDrafts and comes back when it is reopened
     openScript(name);
     setView(run?.script === name && run.status === 'running' ? 'log' : 'script');
   };
@@ -368,6 +393,8 @@ export function ComicsTab() {
   const pinned = planPanels.filter(pinnedPending).map(p => p.id);
   const pickedIds = planPanels.filter(p => picked.has(p.id)).map(p => p.id);   // in script order, still existing
   const scriptBusy = Boolean(running && runIsHere);
+  // variant files carry no mtime in older comic.js --plan output: the last run's end busts the cache
+  const variantStamp = Math.floor(run?.ended ?? run?.started ?? 0);
 
   return (
     <div className="comics-tab">
@@ -499,7 +526,12 @@ export function ComicsTab() {
                 spellCheck={false}
                 value={text}
                 onChange={e => setText(e.target.value)}
-                onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); } }}
+                onKeyDown={e => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                    e.preventDefault();
+                    if (dirty && !scriptBusy) save();   // the Save button's own check
+                  }
+                }}
               />
             )}
             {view === 'log' && runIsHere && run && (
@@ -531,17 +563,17 @@ export function ComicsTab() {
                         onChange={e => setPicked(new Set(e.target.checked ? planPanels.map(p => p.id) : []))} />
                       {pickedIds.length ? `${pickedIds.length} selected` : 'Select all'}
                     </label>
-                    <button className="btn btn-secondary" disabled={running || !pickedIds.length}
+                    <button className="btn btn-secondary" disabled={running || planStale || !pickedIds.length}
                       onClick={() => start('repaint', { panels: pickedIds, force: true })} title="Paint the selected panels again, even if they are current, then import">
                       <FiRefreshCw size={14} /> Repaint selected
                     </button>
                     {[2, 4, 6].map(n => (
-                      <button key={n} className="btn btn-secondary" disabled={running || !pickedIds.length}
+                      <button key={n} className="btn btn-secondary" disabled={running || planStale || !pickedIds.length}
                         onClick={() => start('variants', { panels: pickedIds, variants: n })} title={`Paint ${n} seeds of each selected panel to choose from (nothing is imported)`}>
                         <FiShuffle size={14} /> Variants ×{n}
                       </button>
                     ))}
-                    <button className="btn btn-primary" disabled={running || !pinned.length}
+                    <button className="btn btn-primary" disabled={running || planStale || !pinned.length}
                       onClick={() => start('repaint', { panels: pinned })} title="Put the pinned variants into their panels (no painting), then import">
                       <FiCheck size={14} /> Apply pinned{pinned.length ? ` (${pinned.length})` : ''}
                     </button>
@@ -582,14 +614,15 @@ export function ComicsTab() {
                             <div className="comics-variants">
                               {p.variants.map(v => {
                                 const chosen = p.seedPinned && v.seed === p.seed;
+                                const variantUrl = `/api/comics/scripts/${current.name}/variant/${panelStem(p)}_seed${v.seed}.png?v=${v.mtime ?? variantStamp}`;
                                 return (
                                   <figure key={v.seed} className={chosen ? 'chosen' : ''}>
-                                    <a href={`/api/comics/scripts/${current.name}/variant/${panelStem(p)}_seed${v.seed}.png`} target="_blank" rel="noreferrer">
-                                      <img src={`/api/comics/scripts/${current.name}/variant/${panelStem(p)}_seed${v.seed}.png`} alt={`seed ${v.seed}`} loading="lazy" />
+                                    <a href={variantUrl} target="_blank" rel="noreferrer">
+                                      <img src={variantUrl} alt={`seed ${v.seed}`} loading="lazy" />
                                     </a>
                                     <figcaption>
                                       {chosen ? <span>seed {v.seed} ✓</span> : (
-                                        <button className="btn btn-ghost" disabled={scriptBusy} onClick={() => chooseSeed(p, v.seed)}
+                                        <button className="btn btn-ghost" disabled={scriptBusy || planStale} onClick={() => chooseSeed(p, v.seed)}
                                           title={v.same ? 'Pin this seed; Apply pinned then uses this picture' : 'Painted from an older prompt: pinning the seed repaints it'}>
                                           Use seed {v.seed}{v.same ? '' : ' *'}
                                         </button>

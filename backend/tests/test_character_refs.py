@@ -75,7 +75,7 @@ def client(tmp_path, monkeypatch, library):
                         AsyncMock(side_effect=fake_generate))
 
     from backend.main import app
-    return TestClient(app, client=("127.0.0.1", 50000)), captured
+    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)), captured
 
 
 def _project(c):

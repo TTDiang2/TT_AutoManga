@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from ..storage.manager import storage, InvalidProjectIdError, pages_base
+from ..render.bubbles import sanitize_pages
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -30,6 +31,7 @@ async def list_projects():
 async def save_project(project: Project):
     try:
         data = project.model_dump()
+        sanitize_pages(data.get("composerPages"))   # tailTip into the renderer's range
         # Data-loss guard: the composer autosave historically posted
         # panels: [] / settings: {detailLevel} for projects whose storyboard
         # was written by the agent API, wiping them on disk. When a save
@@ -97,6 +99,7 @@ async def put_composer_pages(project_id: str, req: ComposerPagesUpdate):
     if req.base is not None and req.base != current:
         return JSONResponse(status_code=409, content={
             "detail": "pages changed elsewhere", "base": current})
+    sanitize_pages(req.pages)       # tailTip into the renderer's range
     project["composerPages"] = req.pages
     saved = storage.save_project(project)
     return {"success": True, "base": pages_base(saved),

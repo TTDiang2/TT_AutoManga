@@ -183,6 +183,7 @@ function PageLevelControls({
             step={0.25}
             value={borderWidth}
             onChange={e => handleBorderChange(+e.target.value)}
+            aria-label="Frame border width"
             style={{ width: '70%' }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', width: '30%', textAlign: 'right' }}>
@@ -227,6 +228,7 @@ function PageLevelControls({
             step={0.5}
             value={gapPercent}
             onChange={e => setGapPercent(+e.target.value)}
+            aria-label="Auto gap (%)"
             style={{ width: '70%' }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', width: '15%', textAlign: 'right' }}>
@@ -262,6 +264,7 @@ function PositionSizeProps({
           value={Math.round(element.x)}
           onChange={e => updateElement(element.id, { x: +e.target.value })}
           placeholder="X"
+          aria-label="X (%)"
           style={{ width: '25%' }}
         />
         <input
@@ -270,6 +273,7 @@ function PositionSizeProps({
           value={Math.round(element.y)}
           onChange={e => updateElement(element.id, { y: +e.target.value })}
           placeholder="Y"
+          aria-label="Y (%)"
           style={{ width: '25%' }}
         />
         <input
@@ -278,6 +282,7 @@ function PositionSizeProps({
           value={Math.round(element.width)}
           onChange={e => updateElement(element.id, { width: +e.target.value })}
           placeholder="W"
+          aria-label="Width (%)"
           style={{ width: '25%' }}
         />
         <input
@@ -286,6 +291,7 @@ function PositionSizeProps({
           value={Math.round(element.height)}
           onChange={e => updateElement(element.id, { height: +e.target.value })}
           placeholder="H"
+          aria-label="Height (%)"
           style={{ width: '25%' }}
         />
       </div>
@@ -296,6 +302,7 @@ function PositionSizeProps({
           value={Math.round(element.rotation)}
           onChange={e => updateElement(element.id, { rotation: +e.target.value })}
           placeholder="Rotation"
+          aria-label="Rotation (degrees)"
           style={{ width: '50%' }}
         />
       </div>
@@ -354,6 +361,7 @@ function CornerProps({
               value={Math.round(corners[key].x)}
               onChange={e => setCorner(key, 'x', +e.target.value)}
               placeholder="X"
+              aria-label={`${labels[key]} corner X (%)`}
             />
             <input
               className="composer-prop-input"
@@ -361,6 +369,7 @@ function CornerProps({
               value={Math.round(corners[key].y)}
               onChange={e => setCorner(key, 'y', +e.target.value)}
               placeholder="Y"
+              aria-label={`${labels[key]} corner Y (%)`}
             />
           </div>
         ))}
@@ -430,6 +439,7 @@ function ImageProps({
             } as Partial<ImageElement>)
           }
           placeholder="Offset X (%)"
+          aria-label="Image offset X (%)"
           style={{ width: '50%' }}
           title="Horizontal image offset (% of frame width)"
         />
@@ -446,6 +456,7 @@ function ImageProps({
             } as Partial<ImageElement>)
           }
           placeholder="Offset Y (%)"
+          aria-label="Image offset Y (%)"
           style={{ width: '50%' }}
           title="Vertical image offset (% of frame height)"
         />
@@ -480,6 +491,7 @@ function ImageProps({
             } as Partial<ImageElement>)
           }
           title="Scale image within the frame"
+          aria-label="Image scale"
         />
         <input
           className="composer-prop-input"
@@ -488,6 +500,7 @@ function ImageProps({
           min={0.1}
           max={4}
           value={Number(scale.toFixed(2))}
+          aria-label="Image scale (number)"
           onChange={e =>
             updateElement(element.id, {
               imageScale: Math.max(0.1, Math.min(4, +e.target.value || 1)),
@@ -567,6 +580,36 @@ function BubbleProps({
           />
           Point tail (drag the orange handle)
         </label>
+        {element.tailTip && (
+          <div className="composer-prop-row" style={{ marginTop: 4 }}>
+            <input
+              className="composer-prop-input"
+              type="number"
+              step={5}
+              value={Math.round(element.tailTip.x * 100)}
+              onChange={e => updateElement(element.id, {
+                tailTip: { ...element.tailTip!, x: (+e.target.value || 0) / 100 },
+              } as Partial<BubbleElement>)}
+              placeholder="Tail X"
+              aria-label="Tail X (% of bubble width)"
+              title="Tail tip X (% of the bubble's width)"
+              style={{ width: '50%' }}
+            />
+            <input
+              className="composer-prop-input"
+              type="number"
+              step={5}
+              value={Math.round(element.tailTip.y * 100)}
+              onChange={e => updateElement(element.id, {
+                tailTip: { ...element.tailTip!, y: (+e.target.value || 0) / 100 },
+              } as Partial<BubbleElement>)}
+              placeholder="Tail Y"
+              aria-label="Tail Y (% of bubble height)"
+              title="Tail tip Y (% of the bubble's height)"
+              style={{ width: '50%' }}
+            />
+          </div>
+        )}
       </div>
       <div className="composer-prop-group">
         <span className="composer-prop-label">Text align</span>
@@ -617,6 +660,7 @@ function BubbleProps({
           max={72}
           value={element.fontSize}
           onChange={e => updateElement(element.id, { fontSize: +e.target.value })}
+          aria-label={t.composer.fontSize}
         />
       </div>
       <div className="composer-prop-group">
@@ -626,6 +670,7 @@ function BubbleProps({
           className="composer-prop-color"
           value={element.backgroundColor}
           onChange={e => updateElement(element.id, { backgroundColor: e.target.value })}
+          aria-label={t.composer.bgColor}
         />
       </div>
       <div className="composer-prop-group">
@@ -635,6 +680,7 @@ function BubbleProps({
           className="composer-prop-color"
           value={element.borderColor}
           onChange={e => updateElement(element.id, { borderColor: e.target.value })}
+          aria-label={t.composer.borderColor}
         />
       </div>
     </>
@@ -664,6 +710,7 @@ function TextProps({
           max={120}
           value={element.fontSize}
           onChange={e => updateElement(element.id, { fontSize: +e.target.value })}
+          aria-label={t.composer.fontSize}
         />
       </div>
       <div className="composer-prop-group">
@@ -677,6 +724,7 @@ function TextProps({
           onChange={e => updateElement(element.id, {
             strokeWidth: Math.max(0, Math.min(20, +e.target.value || 0)),
           })}
+          aria-label={t.composer.strokeWidth || 'Outline'}
         />
       </div>
       <div className="composer-prop-group">
@@ -728,6 +776,7 @@ function TextProps({
           className="composer-prop-color"
           value={element.color}
           onChange={e => updateElement(element.id, { color: e.target.value })}
+          aria-label={t.composer.fontColor}
         />
       </div>
     </>

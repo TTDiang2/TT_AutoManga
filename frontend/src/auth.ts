@@ -11,6 +11,10 @@ export interface AuthStatus {
 /** Fired on window when an /api request comes back 401 (session gone). */
 export const AUTH_REQUIRED_EVENT = 'automanga:auth-required';
 
+/** Fired on window after a sign-in over the running app (the session-expired overlay):
+    work that failed while signed out (e.g. the Composer's autosave) retries on it. */
+export const AUTH_RESTORED_EVENT = 'automanga:auth-restored';
+
 export async function fetchAuthStatus(): Promise<AuthStatus> {
   const res = await fetch('/api/auth/status', { cache: 'no-store' });
   if (!res.ok) throw new Error(`auth status ${res.status}`);

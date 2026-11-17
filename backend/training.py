@@ -42,8 +42,18 @@ def _q(s: str) -> str:
 # Config rendering and log parsing (pure functions, unit-tested directly)
 # ---------------------------------------------------------------------------
 
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+
+
+def clean_text(text: str) -> str:
+    """Prompt text without control characters (newlines, tabs, escapes from
+    the character's appearance field become a single space)."""
+    return re.sub(r" {2,}", " ", _CONTROL_RE.sub(" ", str(text or ""))).strip()
+
+
 def render_config(*, name: str, trigger: str, folder_path: str, base_model: str,
                   steps: int, prompts: List[str], sampling: bool = False) -> str:
+    prompts = [clean_text(p) for p in prompts]
     values = {
         "name": name, "trigger": trigger, "folder_path": folder_path,
         "base_model": base_model, "steps": int(steps),
@@ -156,8 +166,11 @@ class Remote:
     def base_model(self) -> str:
         return self.absolute(self._base_model)
 
-    def job_dir(self, name: str) -> str:
-        return f"{self.home}/automanga-training/{name}"
+    def job_dir(self, name: str, job_id: Optional[str] = None) -> str:
+        """Per-job working dir (dataset, config, log, pidfile): a stopped job's
+        late steps can never touch the files of the job that replaced it."""
+        base = f"{self.home}/automanga-training/{name}"
+        return f"{base}/{job_id}" if job_id else base
 
     def output_file(self, name: str) -> str:
         # ai-toolkit: <training_folder>/<name>/<name>.safetensors (final save)
@@ -182,9 +195,9 @@ class Remote:
                        timeout=30, check=False).stdout.decode().strip()
         return out == "yes"
 
-    def push_dataset(self, files: List[Path], name: str) -> str:
+    def push_dataset(self, files: List[Path], name: str, job_id: Optional[str] = None) -> str:
         """Replace the job's dataset on the trainer with ``files``; returns its path."""
-        dest = self.job_dir(name) + "/dataset"
+        dest = self.job_dir(name, job_id) + "/dataset"
         self.run(f"rm -rf {_q(dest)} && mkdir -p {_q(dest)}", timeout=30)
         self.scp([str(f) for f in files], f"{self.host}:{dest}/")
         return dest
@@ -193,16 +206,23 @@ class Remote:
         self.run(f"mkdir -p {_q(str(Path(path).parent))} && cat > {_q(path)}",
                  input=text.encode("utf-8"), timeout=30)
 
+    @staticmethod
+    def pidfile(log: str) -> str:
+        return log + ".pid"
+
     def launch_command(self, config: str, log: str) -> str:
         inner = (f"{_q(self.python)} run.py {_q(config)} > {_q(log)} 2>&1; "
                  f"echo $? > {_q(log + '.exit.tmp')}; mv -f {_q(log + '.exit.tmp')} {_q(log + '.exit')}")
+        pid, tmp = self.pidfile(log), self.pidfile(log) + ".tmp"
         # ";" not "&&": the "&" must background only setsid. Backgrounding a
         # whole "a && b && setsid ..." list forks a subshell that keeps ssh's
         # stdout open, so ssh would not return until training ended. setsid
         # gives the job its own session (no SIGHUP when ssh goes away) and
-        # its stdio points away from the ssh channel.
-        return (f"cd {_q(self.toolkit_dir)} || exit 1; rm -f {_q(log + '.exit')}; "
-                f"setsid nohup /bin/sh -c {_q(inner)} > /dev/null 2>&1 < /dev/null & echo $!")
+        # its stdio points away from the ssh channel. The pid also goes to
+        # <log>.pid, so a server restart mid-launch can adopt the job.
+        return (f"cd {_q(self.toolkit_dir)} || exit 1; rm -f {_q(log + '.exit')} {_q(pid)}; "
+                f"setsid nohup /bin/sh -c {_q(inner)} > /dev/null 2>&1 < /dev/null & "
+                f"p=$!; echo $p > {_q(tmp)} && mv -f {_q(tmp)} {_q(pid)}; echo $p")
 
     def launch(self, config: str, log: str) -> int:
         out = self.run(self.launch_command(config, log), timeout=30).stdout.decode().strip()
@@ -210,6 +230,16 @@ class Remote:
             return int(out.splitlines()[-1])
         except (IndexError, ValueError):
             raise RemoteError(f"launch returned no pid: {out[-200:]!r}")
+
+    def read_pidfile(self, log: str) -> Optional[int]:
+        """The pid the launcher recorded next to ``log``; None when it never
+        got that far."""
+        out = self.run(f"cat {_q(self.pidfile(log))} 2>/dev/null; true",
+                       timeout=30).stdout.decode().strip()
+        try:
+            return int(out.splitlines()[-1])
+        except (IndexError, ValueError):
+            return None
 
     @staticmethod
     def _alive_test(pid: int, log: str) -> str:
@@ -243,9 +273,25 @@ class Remote:
     def stop(self, pid: int, log: str) -> None:
         self.run(self.stop_command(pid, log), timeout=30)
 
-    def pull(self, remote_path: str, local_path: Path) -> None:
+    def pull(self, remote_path: str, local_path: Path, overwrite: bool = True) -> None:
+        if not overwrite and local_path.exists():
+            raise RemoteError(f"{local_path} exists; refusing to overwrite it")
         local_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = local_path.with_name(local_path.name + ".part")
         tmp.unlink(missing_ok=True)
         self.scp([f"{self.host}:{remote_path}"], str(tmp))
+        if not overwrite and local_path.exists():
+            tmp.unlink(missing_ok=True)
+            raise RemoteError(f"{local_path} appeared meanwhile; refusing to overwrite it")
         tmp.replace(local_path)
+
+
+def free_lora_path(directory: Path, name: str) -> Path:
+    """``directory/<name>.safetensors``, or the first free ``<name>_2``,
+    ``<name>_3``… so a pull never replaces an existing LoRA."""
+    path = directory / f"{name}.safetensors"
+    n = 2
+    while path.exists() or path.with_name(path.name + ".part").exists():
+        path = directory / f"{name}_{n}.safetensors"
+        n += 1
+    return path

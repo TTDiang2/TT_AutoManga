@@ -38,16 +38,17 @@ def _too_many(retry: int) -> JSONResponse:
 
 async def _verify_limited(request: Request, password: str):
     """None when ``password`` is right, else the error response to return.
-    Failures are rate limited per client address and globally."""
+    Failures are rate limited per client address. The attempt is reserved
+    (counted as a failure) before the slow password check and undone on
+    success, so a parallel burst can't exceed the limit."""
     ip = auth.client_ip(request)
-    retry = auth.limiter.retry_after(ip)
+    retry = auth.limiter.reserve(ip)
     if retry:
         return _too_many(retry)
     ok = await asyncio.to_thread(auth.check_password, password)
     if ok:
         auth.limiter.reset(ip)
         return None
-    auth.limiter.record_failure(ip)
     await asyncio.sleep(auth.FAILURE_DELAY_S)
     return JSONResponse({"detail": "wrong password"}, status_code=401)
 

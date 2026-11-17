@@ -22,13 +22,52 @@ Parity notes (verified against pageRenderer.ts and the live editor's CSS):
 """
 import math
 import re
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 from PIL import Image, ImageDraw, ImageFilter
 from .fonts import FontChain, get_font_chain
 from .tails import tail_bounds, tail_geometry, wedge_edge
 
 EM_SHEAR = 0.2
-TIP_LIMIT = 8.0     # tailTip fractions are clamped to ±this many box sizes
+TIP_LIMIT = 2.0     # tailTip fractions are clamped to at most this many box sizes beyond the box
+TIP_MIN, TIP_MAX = -TIP_LIMIT, 1 + TIP_LIMIT     # the valid tailTip range (also the API's)
+MAX_LOCAL_PIXELS = 16_000_000   # cap of one bubble's local image (body + tail margins)
+
+
+class Pad(NamedTuple):
+    """Margins of a bubble image around its body: paste at (x - left, y - top)."""
+    left: int
+    top: int
+    right: int = 0
+    bottom: int = 0
+
+
+def clamp_tail_tip(tip):
+    """A tailTip clamped into [TIP_MIN, TIP_MAX]; None when it is not a
+    finite {x, y} (renderers ignore it then)."""
+    if not isinstance(tip, dict):
+        return None
+    try:
+        fx, fy = float(tip.get("x")), float(tip.get("y"))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(fx) and math.isfinite(fy)):
+        return None
+    return {"x": max(TIP_MIN, min(TIP_MAX, fx)), "y": max(TIP_MIN, min(TIP_MAX, fy))}
+
+
+def sanitize_pages(pages) -> None:
+    """In place: clamp every bubble's tailTip into range and drop invalid
+    ones (elements saved by the UI or older clients)."""
+    for page in pages or []:
+        if not isinstance(page, dict):
+            continue
+        for el in page.get("elements") or []:
+            if isinstance(el, dict) and el.get("tailTip") is not None:
+                tip = clamp_tail_tip(el["tailTip"])
+                if tip is None:
+                    el.pop("tailTip", None)
+                else:
+                    el["tailTip"] = tip
 _STARS = re.compile(r"\*([^*\n]+)\*")
 
 
@@ -184,27 +223,38 @@ def _paste(dst: Image.Image, src: Image.Image, x: int, y: int) -> None:
 
 
 def _tip_px(el: dict, ew: int, eh: int) -> Optional[Tuple[float, float]]:
-    tip = el.get("tailTip")
-    if not isinstance(tip, dict):
+    tip = clamp_tail_tip(el.get("tailTip"))
+    if tip is None:
         return None
-    try:
-        fx, fy = float(tip.get("x")), float(tip.get("y"))
-    except (TypeError, ValueError):
-        return None
-    if not (math.isfinite(fx) and math.isfinite(fy)):
-        return None
-    fx = max(-TIP_LIMIT, min(1 + TIP_LIMIT, fx))
-    fy = max(-TIP_LIMIT, min(1 + TIP_LIMIT, fy))
-    return fx * ew, fy * eh
+    return tip["x"] * ew, tip["y"] * eh
 
 
-def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Tuple[Image.Image, int]:
+def _cap_pads(ew: int, eh: int, pads: List[int]) -> List[int]:
+    """Shrink the margins (never the body) until the image fits
+    MAX_LOCAL_PIXELS; a tail cut off this way lies far off the bubble."""
+    def area(p):
+        return (ew + p[0] + p[2]) * (eh + p[1] + p[3])
+    if area(pads) <= MAX_LOCAL_PIXELS:
+        return pads
+    lo, hi = 0.0, 1.0
+    for _ in range(20):
+        mid = (lo + hi) / 2
+        if area([int(v * mid) for v in pads]) <= MAX_LOCAL_PIXELS:
+            lo = mid
+        else:
+            hi = mid
+    return [int(v * lo) for v in pads]
+
+
+def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Optional[Tuple[Image.Image, Pad]]:
     """Render one bubble in element-local pixels.
 
     Returns ``(img, pad)`` where ``img`` is an RGBA image of size
-    ``(ew + 2*pad, eh + 2*pad)`` with the bubble body at offset ``pad`` —
-    the extra margin absorbs tails that stick out of the bounding box.
-    The caller pastes at ``(x - pad, y - pad)``.
+    ``(pad.left + ew + pad.right, pad.top + eh + pad.bottom)`` with the
+    bubble body at ``(pad.left, pad.top)`` — the margins absorb tails that
+    stick out of the bounding box (each side only as much as it needs).
+    The caller pastes at ``(x - pad.left, y - pad.top)``. None for a bubble
+    too small to draw (under 1 px inside its outline).
 
     Text is auto-shrunk until it fits the bubble box and is clipped to the
     bubble shape, so long dialogue can never spill outside the balloon.
@@ -225,25 +275,31 @@ def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Tuple[Image.Image, 
     tail_size = min(ew, eh) * 0.12
     pad = int(math.ceil(tail_size * 1.2)) + 2 if bt != "narration" else 2
     inset = max(1, round(2 * k))
+    if ew - 2 * inset < 1 or eh - 2 * inset < 1:
+        return None
     # tail outline width = the body's (shout 3, whisper 1, others 2)
     stroke_w = max(1, round({"shout": 3, "whisper": 1}.get(bt, 2) * k))
 
-    # pointed tail: grow pad until the tip (plus stroke) fits the image
+    # pointed tail: grow each side's margin until the tip (plus stroke) fits
+    pads = [pad] * 4                      # left, top, right, bottom
     tail = None
     tip = _tip_px(el, ew, eh)
     if tip is not None:
         tail = tail_geometry(bt, ew, eh, tip, inset)
     if tail is not None:
         x0, y0, x1, y1 = tail_bounds(tail)
-        over = max(-x0, -y0, x1 - ew, y1 - eh, 0)
-        pad = max(pad, int(math.ceil(over)) + stroke_w + 2)
+        for i, over in enumerate((-x0, -y0, x1 - ew, y1 - eh)):
+            if over > 0:
+                pads[i] = max(pads[i], int(math.ceil(over)) + stroke_w + 2)
+        pads = _cap_pads(ew, eh, pads)
+    pl, pt, pr, pb = pads
 
-    img = Image.new("RGBA", (ew + 2 * pad, eh + 2 * pad), (0, 0, 0, 0))
+    img = Image.new("RGBA", (pl + ew + pr, pt + eh + pb), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    box = (pad + inset, pad + inset, pad + ew - inset, pad + eh - inset)
-    cx = pad + ew / 2
-    top = pad
-    bottom = pad + eh
+    box = (pl + inset, pt + inset, pl + ew - inset, pt + eh - inset)
+    cx = pl + ew / 2
+    top = pt
+    bottom = pt + eh
 
     shape_mask = Image.new("L", img.size, 0)
     md = ImageDraw.Draw(shape_mask)
@@ -277,7 +333,7 @@ def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Tuple[Image.Image, 
         md.ellipse(box, fill=255)
 
     if tail is not None:
-        _draw_pointed_tail(img, tail, pad, bg, border, stroke_w, shape_mask)
+        _draw_pointed_tail(img, tail, (pl, pt), bg, border, stroke_w, shape_mask)
     # Tail (pageRenderer parity: 'bottom' = above top edge, 'top' = below bottom).
     elif bt != "narration" and el.get("tailPosition") in ("bottom", "top"):
         t = tail_size
@@ -289,23 +345,24 @@ def draw_bubble(el: dict, ew: int, eh: int, scale: float) -> Tuple[Image.Image, 
         d.polygon(pts, fill=bg)
         _stroke_polyline(d, pts + [pts[0]], border, stroke_w)
 
-    _draw_bubble_text(d, el, ew, eh, pad, k, img, shape_mask)
-    return img, pad
+    _draw_bubble_text(d, el, ew, eh, (pl, pt), k, img, shape_mask)
+    return img, Pad(pl, pt, pr, pb)
 
 
-def _draw_pointed_tail(img: Image.Image, tail: dict, pad: int, bg, border,
+def _draw_pointed_tail(img: Image.Image, tail: dict, pad: Tuple[int, int], bg, border,
                        stroke_w: int, shape_mask: Image.Image) -> None:
     """Draw a tailTip tail over the already-drawn body with a seamless root:
     the tail fill covers the body's outline between the two root points,
     then the two tail edges are stroked — only outside the body's interior,
     so they meet the body outline without stubs inside the balloon."""
     d = ImageDraw.Draw(img)
+    ox, oy = pad
     if tail["kind"] == "circles":
         for x, y, r in tail["circles"]:
-            box = (pad + x - r, pad + y - r, pad + x + r, pad + y + r)
+            box = (ox + x - r, oy + y - r, ox + x + r, oy + y + r)
             d.ellipse(box, fill=bg, outline=border, width=stroke_w)
         return
-    edge = [(pad + x, pad + y) for x, y in wedge_edge(tail)]
+    edge = [(ox + x, oy + y) for x, y in wedge_edge(tail)]
     d.polygon(edge, fill=bg)
     lines = Image.new("RGBA", img.size, (0, 0, 0, 0))
     _stroke_polyline(ImageDraw.Draw(lines), edge, border, stroke_w)
@@ -450,11 +507,13 @@ def _fit_font_size(el: dict, ew: int, eh: int, pad_px: float,
                 min_col_ok = n // cols >= 5
         if (fits and min_col_ok) or at_floor:
             return styled.chain
-        fs = max(6.0, fs * 0.9)
+        # whole pixels (get_font rounds anyway), always at least 1 px smaller:
+        # a handful of distinct sizes per bubble, not a cache key per float
+        fs = float(max(6, min(int(round(fs * 0.9)), int(round(fs)) - 1)))
 
 
 def _draw_bubble_text(d: ImageDraw.ImageDraw, el: dict, ew: int, eh: int,
-                      pad: int, k: float, img: Image.Image,
+                      pad: Tuple[int, int], k: float, img: Image.Image,
                       shape_mask: Image.Image):
     bt = el.get("bubbleType", "speech")
     # pageRenderer.ts: only shout renders bold.
@@ -474,7 +533,7 @@ def _draw_bubble_text(d: ImageDraw.ImageDraw, el: dict, ew: int, eh: int,
                                 el.get("direction") == "vertical", align, em,
                                 box_align=bt == "narration")
     for cells, x, y, anchor in positions:
-        draw_cells(layer, pad + x, pad + y, cells, styled, anchor, color)
+        draw_cells(layer, pad[0] + x, pad[1] + y, cells, styled, anchor, color)
 
     clipped = Image.composite(layer, Image.new("RGBA", img.size, (0, 0, 0, 0)),
                               shape_mask)

@@ -36,6 +36,26 @@ describe('pinSeed', () => {
     expect(() => pinSeed('PAGE\nA rooftop.', { line: 2, seedLine: null }, 5)).toThrow(/not a PANEL line/);
   });
 
+  it('never rewrites a seed: line outside the panel (the base seed, another panel)', () => {
+    const text = ['title: X', 'seed: 1000', 'PAGE', 'PANEL', 'A rooftop.', 'PANEL', 'seed: 5', 'B'].join('\n');
+    // stale plan: seedLine points at the header's base seed
+    expect(pinSeed(text, { line: 4, seedLine: 2 }, 42).split('\n')).toEqual(
+      ['title: X', 'seed: 1000', 'PAGE', 'PANEL seed=42', 'A rooftop.', 'PANEL', 'seed: 5', 'B']);
+    // stale plan: seedLine points into the next panel
+    expect(pinSeed(text, { line: 4, seedLine: 7 }, 42).split('\n')[6]).toBe('seed: 5');
+    // a seed line past a PAGE break isn't this panel's either
+    expect(pinSeed('PANEL\nA\nPAGE\nseed: 3', { line: 1, seedLine: 4 }, 9)).toBe('PANEL seed=9\nA\nPAGE\nseed: 3');
+  });
+
+  it("finds the panel's own seed: line when the plan's line number moved", () => {
+    const text = 'PANEL w=2\nshot: wide\n  seed: 100\nA rooftop.\nPANEL\nseed: 7';
+    expect(pinSeed(text, { line: 1, seedLine: 2 }, 55)).toBe('PANEL w=2\nshot: wide\n  seed: 55\nA rooftop.\nPANEL\nseed: 7');
+  });
+
+  it('checks the PANEL line even when the seed line is right', () => {
+    expect(() => pinSeed('PAGE\nseed: 4', { line: 1, seedLine: 2 }, 5)).toThrow(/not a PANEL line/);
+  });
+
   it('does not touch a seed= in the description', () => {
     expect(pinSeed('PANEL w=2\nreseed=3', { line: 1, seedLine: null }, 4)).toBe('PANEL w=2 seed=4\nreseed=3');
   });

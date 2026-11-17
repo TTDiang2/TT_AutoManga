@@ -17,6 +17,7 @@ the same rule api/fonts.py exposes to the browser: title-bebas.ttf is family
 "title", default-letter-bold.ttf is family "default".
 """
 import os
+from collections import OrderedDict
 from pathlib import Path
 from typing import List, Optional
 from PIL import ImageFont
@@ -57,9 +58,44 @@ _SYMBOL_FALLBACKS = [
     "C:/Windows/Fonts/seguisym.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
-_cache: dict = {}
-_cmap_cache: dict = {}
-_chain_cache: dict = {}
+
+
+class _LRU:
+    """A mapping that keeps only its ``maxsize`` most recently used entries
+    (fonts and chains per size: auto-shrink and many families would
+    otherwise grow these without bound)."""
+
+    def __init__(self, maxsize: int):
+        self.maxsize = maxsize
+        self._d: OrderedDict = OrderedDict()
+
+    def __contains__(self, key) -> bool:
+        return key in self._d
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __getitem__(self, key):
+        value = self._d[key]
+        self._d.move_to_end(key)
+        return value
+
+    def get(self, key, default=None):
+        return self[key] if key in self._d else default
+
+    def __setitem__(self, key, value):
+        self._d[key] = value
+        self._d.move_to_end(key)
+        while len(self._d) > self.maxsize:
+            self._d.popitem(last=False)
+
+    def clear(self) -> None:
+        self._d.clear()
+
+
+_cache: dict = _LRU(256)          # (path, px) → font
+_cmap_cache: dict = {}            # per font file: bounded by the files on disk
+_chain_cache: dict = _LRU(96)     # (path, px, bold) → FontChain
 # (dir mtime, family, bold) → path: text auto-shrink calls get_font once per
 # shrink step, and resolving globs the font dir every time
 _find_cache: dict = {}

@@ -8,10 +8,13 @@ A session is the cookie ``am_session`` = ``b64url({"v","iat"}).b64url(hmac)``,
 signed with ``secret``. Bumping ``version`` (``logout-all``, password change)
 invalidates every issued cookie at once.
 
-Local callers — peer 127.0.0.1/::1 with no forwarding headers — never need a
-session: the MCP tools, agent_cli and the Comics converter call
-http://127.0.0.1:5180 directly. A request relayed by the reverse proxy
-(``settings.auth.trustedProxy``) is never local.
+Local callers — peer 127.0.0.1/::1 with no forwarding headers and a Host of
+localhost, 127.0.0.1 or [::1] — never need a session: the MCP tools,
+agent_cli and the Comics converter call http://127.0.0.1:5180 directly. A
+request relayed by the reverse proxy (``settings.auth.trustedProxy``) is
+never local. Any request whose Host is not in :func:`allowed_hosts` (the
+loopback names, this machine's addresses and ``settings.auth.allowedHosts``)
+is refused outright, so a DNS-rebound name can't reach the API.
 
 CLI (run on the server)::
 
@@ -28,6 +31,7 @@ import hmac
 import json
 import os
 import secrets
+import socket
 import threading
 import time
 from collections import deque
@@ -48,6 +52,7 @@ _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2 ** 14, 8, 1
 _SCRYPT_DKLEN = 32
 
 LOOPBACK = {"127.0.0.1", "::1"}
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}   # Host header names (port and [] stripped)
 FORWARD_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip")
 
 
@@ -213,9 +218,97 @@ def _from_proxy(request) -> bool:
     return bool(proxy) and peer_ip(request) == proxy
 
 
+def host_name(request) -> str:
+    """The Host header's hostname, lowercased, without port or IPv6
+    brackets; "" when missing or malformed."""
+    from urllib.parse import urlsplit
+    raw = (request.headers.get("host") or "").strip()
+    if not raw or any(c in raw for c in "/?#@\\ "):
+        return ""
+    try:
+        parts = urlsplit("//" + raw)
+        parts.port          # raises on a non-numeric port
+        return (parts.hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+_local_names: Optional[frozenset] = None
+
+
+def _detect_local_names() -> frozenset:
+    """This machine's host name and LAN addresses (what a browser on the LAN
+    puts in Host when it opens http://<this Mac>:5180)."""
+    names: set = set()
+    try:
+        hn = socket.gethostname().lower()
+        if hn:
+            names.add(hn)
+            short = hn.split(".")[0]
+            names.update({short, short + ".local"})
+        for info in socket.getaddrinfo(hn, None):
+            names.add(info[4][0].split("%")[0].lower())
+    except OSError:
+        pass
+    # the address of the default route (UDP connect sends no packet)
+    for family, probe in ((socket.AF_INET, ("192.0.2.1", 9)),
+                          (socket.AF_INET6, ("2001:db8::1", 9))):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as s:
+                s.connect(probe)
+                names.add(s.getsockname()[0].split("%")[0].lower())
+        except OSError:
+            pass
+    # every interface's address too (a VPN such as Tailscale is not the default route)
+    try:
+        import re
+        import subprocess
+        out = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=3).stdout
+        for m in re.finditer(r"\binet6?\s+(?:addr:)?([0-9a-fA-F:.]+)", out):
+            names.add(m.group(1).split("%")[0].lower())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    names.discard("0.0.0.0")
+    names.discard("::")
+    return frozenset(names)
+
+
+def local_names() -> frozenset:
+    """Cached :func:`_detect_local_names` (detected once per process)."""
+    global _local_names
+    if _local_names is None:
+        _local_names = _detect_local_names()
+    return _local_names
+
+
+def allowed_hosts() -> set:
+    """Host names this server answers to: loopback names, this machine's
+    names/addresses and ``settings.auth.allowedHosts`` (e.g. the public
+    name Caddy forwards with the original Host)."""
+    try:
+        extra = config.settings.auth.allowedHosts or []
+    except AttributeError:
+        extra = []
+    hosts = set(LOOPBACK_HOSTS) | set(local_names())
+    for h in extra:
+        h = str(h).strip().lower().strip("[]")
+        if h:
+            hosts.add(h)
+    return hosts
+
+
+def host_allowed(request) -> bool:
+    name = host_name(request)
+    return bool(name) and name in allowed_hosts()
+
+
 def is_local(request) -> bool:
-    """Loopback peer and nothing relayed: a process on this machine."""
+    """Loopback peer, a loopback Host and nothing relayed: a process on this
+    machine. (A non-loopback Host from a loopback peer is a DNS-rebound
+    page or an unconfigured local proxy: not local.)"""
     if peer_ip(request) not in LOOPBACK:
+        return False
+    if host_name(request) not in LOOPBACK_HOSTS:
         return False
     return not any(h in request.headers for h in FORWARD_HEADERS)
 
@@ -258,15 +351,24 @@ def clear_session_cookie(response, request) -> None:
 # ---------------------------------------------------------------- rate limit
 
 class LoginLimiter:
-    """Failed logins: ``per_ip`` per ``window`` per address, and ``global_max``
-    per ``global_window`` across all addresses."""
+    """Failed logins per client address: ``per_ip`` failures within
+    ``window`` lock the address out for ``window``; every further lockout
+    doubles, capped at ``max_lockout``. A successful login resets the
+    address. There is no global cap (one attacker could otherwise lock
+    everyone out).
+
+    :meth:`reserve` counts an attempt as a failure *before* the password is
+    checked, under the lock, so a parallel burst can't slip past the limit;
+    the caller resets the address on success."""
+
+    MAX_TRACKED = 10_000      # addresses kept before idle ones are dropped
 
     def __init__(self, per_ip: int = 5, window: float = 15 * 60,
-                 global_max: int = 30, global_window: float = 3600):
-        self.per_ip, self.window = per_ip, window
-        self.global_max, self.global_window = global_max, global_window
-        self._ip: dict[str, deque] = {}
-        self._global: deque = deque()
+                 max_lockout: float = 3600):
+        self.per_ip, self.window, self.max_lockout = per_ip, window, max_lockout
+        # ip → {"fails": deque of times, "strikes": lockouts so far,
+        #       "until": lockout end, "seen": last failure}
+        self._ip: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     @staticmethod
@@ -274,28 +376,66 @@ class LoginLimiter:
         while q and q[0] <= horizon:
             q.popleft()
 
+    def _state(self, ip: str, now: float) -> Optional[dict]:
+        st = self._ip.get(ip)
+        if st is None:
+            return None
+        self._prune(st["fails"], now - self.window)
+        # a long quiet spell (two max lockouts) forgives earlier lockouts
+        if st["until"] <= now and not st["fails"] \
+                and now - st["seen"] >= 2 * self.max_lockout:
+            self._ip.pop(ip, None)
+            return None
+        return st
+
+    def _wait(self, st: Optional[dict], now: float) -> int:
+        if st is None or st["until"] <= now:
+            return 0
+        return int(st["until"] - now) + 1
+
+    def _gc(self, now: float) -> None:
+        if len(self._ip) <= self.MAX_TRACKED:
+            return
+        for ip in list(self._ip):
+            st = self._ip[ip]
+            self._prune(st["fails"], now - self.window)
+            if st["until"] <= now and not st["fails"]:
+                del self._ip[ip]
+
+    def _fail(self, ip: str, now: float) -> None:
+        st = self._state(ip, now)
+        if st is None:
+            self._gc(now)
+            st = self._ip[ip] = {"fails": deque(), "strikes": 0,
+                                 "until": 0.0, "seen": now}
+        st["fails"].append(now)
+        st["seen"] = now
+        if len(st["fails"]) >= self.per_ip:
+            st["until"] = now + min(self.max_lockout,
+                                    self.window * (2 ** st["strikes"]))
+            st["strikes"] += 1
+            st["fails"].clear()
+
     def retry_after(self, ip: str, now: Optional[float] = None) -> int:
         """Seconds until ``ip`` may try again; 0 when allowed now."""
         now = now if now is not None else time.time()
         with self._lock:
-            wait = 0.0
-            q = self._ip.get(ip)
-            if q is not None:
-                self._prune(q, now - self.window)
-                if len(q) >= self.per_ip:
-                    wait = max(wait, q[0] + self.window - now)
-                if not q:
-                    self._ip.pop(ip, None)
-            self._prune(self._global, now - self.global_window)
-            if len(self._global) >= self.global_max:
-                wait = max(wait, self._global[0] + self.global_window - now)
-        return int(wait) + 1 if wait > 0 else 0
+            return self._wait(self._state(ip, now), now)
+
+    def reserve(self, ip: str, now: Optional[float] = None) -> int:
+        """Atomically: the lockout wait when ``ip`` is locked out (nothing
+        recorded), else 0 after recording this attempt as a failure."""
+        now = now if now is not None else time.time()
+        with self._lock:
+            wait = self._wait(self._state(ip, now), now)
+            if not wait:
+                self._fail(ip, now)
+            return wait
 
     def record_failure(self, ip: str, now: Optional[float] = None) -> None:
         now = now if now is not None else time.time()
         with self._lock:
-            self._ip.setdefault(ip, deque()).append(now)
-            self._global.append(now)
+            self._fail(ip, now)
 
     def reset(self, ip: str) -> None:
         with self._lock:
@@ -304,7 +444,6 @@ class LoginLimiter:
     def clear(self) -> None:
         with self._lock:
             self._ip.clear()
-            self._global.clear()
 
 
 limiter = LoginLimiter()

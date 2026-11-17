@@ -2,6 +2,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from urllib.parse import urlsplit
@@ -132,7 +134,29 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AutoManga API", version="1.0.0", lifespan=lifespan)
+# No public /docs, /redoc or /openapi.json: the schema is served at
+# /api/openapi.json, behind the login gate (local callers pass).
+app = FastAPI(title="AutoManga API", version="1.0.0", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+
+def _finite(value):
+    """Non-finite floats (NaN/Infinity echoed back as a validation error's
+    input) as strings: JSONResponse refuses to encode them."""
+    import math
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422,
+                        content={"detail": _finite(jsonable_encoder(exc.errors()))})
+
 
 # No CORS middleware: the backend serves the UI itself (same origin) and the
 # vite dev server proxies /api. Anything else — including a malicious page in
@@ -163,7 +187,12 @@ def _cross_origin(request: Request) -> bool:
 async def auth_gate(request: Request, call_next):
     """Login gate for /api (see backend/core/auth.py). The SPA shell and
     /assets are public; local callers (loopback, no forwarding headers) pass;
-    everyone else needs a valid am_session cookie."""
+    everyone else needs a valid am_session cookie. Every request (SPA
+    included) must carry an allowed Host: DNS rebinding guard."""
+    if not auth_core.host_allowed(request):
+        return JSONResponse({"detail": "unknown Host header; add it to "
+                                       "settings auth.allowedHosts"},
+                            status_code=400)
     path = request.url.path
     if not (path == "/api" or path.startswith("/api/")):
         return await call_next(request)
@@ -210,6 +239,12 @@ app.include_router(training_api.router)
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+async def openapi_schema():
+    """The machine-readable API schema (gated like the rest of /api)."""
+    return app.openapi()
 
 
 frontend_dir = BASE_DIR / "frontend" / "dist"
