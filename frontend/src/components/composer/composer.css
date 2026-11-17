@@ -243,7 +243,8 @@
   /* the page is artwork, not UI: its text stays dark in the dark theme, and
      unnamed text uses the "default" lettering font when data/fonts has one */
   color: #111111;
-  font-family: "default", 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* symbol fonts before the system UI fonts: ♪ etc. come from the same fonts the server renderer uses */
+  font-family: "default", 'Inter', "Arial Unicode MS", "Apple Symbols", "Segoe UI Symbol", -apple-system, BlinkMacSystemFont, sans-serif;
   box-shadow: var(--shadow-elevated);
   position: relative;
   transform-origin: top left;
@@ -524,6 +525,29 @@
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
   border-bottom: 10px solid #000;
+}
+
+/* pointed tail (tailTip): an overflow-visible SVG in element px, one layer
+   under the body (edges) and one over it (fill only: a seamless root) —
+   siblings of .composer-bubble-inner so shout's clip-path can't cut them */
+.composer-bubble-tailtip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.composer-tail-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  background: #F59E0B;
+  border: 1.5px solid white;
+  border-radius: 50%;
+  cursor: move;
+  z-index: 51;
 }
 
 .composer-bubble.tail-left .composer-bubble-tail {

@@ -988,6 +988,20 @@ def _validate_element_payload(el: Dict[str, Any], partial: bool = False) -> None
         if not isinstance(el["strokeColor"], str):
             raise HTTPException(status_code=400,
                                 detail="strokeColor must be a string")
+    # optional bubble lettering fields (null clears them)
+    if el.get("tailTip") is not None:
+        tip = el["tailTip"]
+        if not isinstance(tip, dict) or not all(
+                isinstance(tip.get(k), (int, float)) and not isinstance(tip.get(k), bool)
+                and -20 <= tip[k] <= 20 for k in ("x", "y")):
+            raise HTTPException(status_code=400,
+                                detail="tailTip needs numeric x/y (box fractions, -20..20)")
+    if el.get("textAlign") is not None \
+            and el["textAlign"] not in ("left", "center", "right", "justify"):
+        raise HTTPException(status_code=400,
+                            detail="textAlign must be left, center or right")
+    if el.get("markup") is not None and el["markup"] != "stars":
+        raise HTTPException(status_code=400, detail='markup must be "stars"')
     if "corners" in el and el["corners"] is not None:
         c = el["corners"]
         if not isinstance(c, dict) or set(c.keys()) != {"tl", "tr", "br", "bl"}:

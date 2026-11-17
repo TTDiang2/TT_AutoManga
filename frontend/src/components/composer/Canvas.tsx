@@ -4,6 +4,7 @@ import { FiPlus } from 'react-icons/fi';
 import { useComposerStore } from '../../store/composerStore';
 import { ImagePicker } from './ImagePicker';
 import { DEFAULT_CORNERS } from '../../types';
+import { tailGeometry, wedgePath } from './tailGeometry';
 import type {
   ComposerElement,
   BubbleElement,
@@ -25,11 +26,13 @@ type DragState = {
   origW: number;
   origH: number;
   origCorners?: QuadCorners;
-  mode: 'move' | 'resize' | 'corner' | 'image-move';
+  mode: 'move' | 'resize' | 'corner' | 'image-move' | 'tail';
   handle?: string;
   corner?: CornerKey;
   origOffsetX?: number;
   origOffsetY?: number;
+  origTip?: { x: number; y: number };
+  rotation?: number;
 };
 
 type CutState = { fromX: number; fromY: number; toX: number; toY: number };
@@ -228,6 +231,27 @@ export const Canvas = memo(function Canvas() {
     });
   }, [selectElement]);
 
+  // dragging a bubble's tail-tip handle moves tailTip (fractions of the box)
+  const handleTailMouseDown = useCallback((e: React.MouseEvent, elementId: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = findCurrentElement(elementId);
+    if (!el || el.locked || el.type !== 'bubble' || !el.tailTip) return;
+    selectElement(elementId);
+    setDragState({
+      elementId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: el.x,
+      origY: el.y,
+      origW: el.width,
+      origH: el.height,
+      mode: 'tail',
+      origTip: { ...el.tailTip },
+      rotation: el.rotation || 0,
+    });
+  }, [selectElement]);
+
   // Click-drag on the visible image inside a frame repositions the image within
   // the frame (clip-path hides overflow). The frame bbox/corners stay put.
   // Applies to both `image` (slot-filled) and `page-image` (breakout) types.
@@ -334,6 +358,21 @@ export const Canvas = memo(function Canvas() {
         const k = dragState.corner;
         c[k] = { x: clamp(c[k].x + dxBbox), y: clamp(c[k].y + dyBbox) };
         updateElement(dragState.elementId, { corners: c });
+      } else if (dragState.mode === 'tail' && dragState.origTip) {
+        // the tip lives in the unrotated box: undo the element's rotation on
+        // the drag (in page px, so the page's aspect doesn't skew it)
+        const pw = canvasEl.offsetWidth, ph = canvasEl.offsetHeight;
+        const dxPx = (deltaX / 100) * pw, dyPx = (deltaY / 100) * ph;
+        const a = (-(dragState.rotation ?? 0) * Math.PI) / 180;
+        const lx = dxPx * Math.cos(a) - dyPx * Math.sin(a);
+        const ly = dxPx * Math.sin(a) + dyPx * Math.cos(a);
+        const clamp = (v: number) => Math.max(-8, Math.min(9, v));
+        updateElement(dragState.elementId, {
+          tailTip: {
+            x: clamp(dragState.origTip.x + lx / ((dragState.origW / 100) * pw)),
+            y: clamp(dragState.origTip.y + ly / ((dragState.origH / 100) * ph)),
+          },
+        } as Partial<BubbleElement>);
       } else if (dragState.mode === 'image-move') {
         // Reposition the image inside its frame. Offset stored as % of bbox dimensions.
         const dxBbox = (deltaX / dragState.origW) * 100;
@@ -501,6 +540,9 @@ export const Canvas = memo(function Canvas() {
                 onMouseDown={handleElementMouseDown}
                 onResizeDown={handleResizeMouseDown}
                 onCornerDown={handleCornerMouseDown}
+                onTailDown={handleTailMouseDown}
+                pageWidth={currentPage.width}
+                pageHeight={currentPage.height}
                 onAddImageClick={handleAddImageClick}
                 onImageMouseDown={handleImageMouseDown}
                 onDoubleClick={handleDoubleClick}
@@ -556,6 +598,9 @@ interface ElementRendererProps {
   onMouseDown: (e: React.MouseEvent, id: string) => void;
   onResizeDown: (e: React.MouseEvent, id: string, handle: string) => void;
   onCornerDown: (e: React.MouseEvent, id: string, corner: CornerKey) => void;
+  onTailDown: (e: React.MouseEvent, id: string) => void;
+  pageWidth: number;
+  pageHeight: number;
   onAddImageClick: (id: string, kind: 'slot' | 'pageImage') => void;
   onImageMouseDown: (e: React.MouseEvent, id: string) => void;
   onDoubleClick: (e: React.MouseEvent, id: string) => void;
@@ -611,6 +656,9 @@ const ElementRenderer = memo(function ElementRenderer({
   onMouseDown,
   onResizeDown,
   onCornerDown,
+  onTailDown,
+  pageWidth,
+  pageHeight,
   onAddImageClick,
   onImageMouseDown,
   onDoubleClick,
@@ -676,6 +724,33 @@ const ElementRenderer = memo(function ElementRenderer({
 
     case 'bubble': {
       const bubble = el as BubbleElement;
+      const tip = bubble.tailTip;
+      // pointed tail: element-box px (the page is unzoomed inside the scaled canvas)
+      const bw = (el.width / 100) * pageWidth, bh = (el.height / 100) * pageHeight;
+      // .composer-bubble's 6px padding is where the CSS body starts
+      const tail = tip ? tailGeometry(bubble.bubbleType, bw, bh, [tip.x * bw, tip.y * bh], 6) : null;
+      const sw = bubble.bubbleType === 'shout' ? 3 : bubble.bubbleType === 'whisper' ? 1 : 2;
+      const fill = bubble.backgroundColor || (bubble.bubbleType === 'shout' ? '#FFF9C4' : '#ffffff');
+      const stroke = bubble.borderColor || '#000000';
+      const tailSvg = (layer: 'under' | 'over') => tail && (
+        <svg className={`composer-bubble-tailtip ${layer}`} width={bw} height={bh}>
+          {tail.kind === 'circles'
+            ? layer === 'over' && tail.circles.map(([cx, cy, r], i) => (
+              <circle key={i} cx={cx} cy={cy} r={r} fill={fill} stroke={stroke} strokeWidth={sw} />))
+            : layer === 'under'
+              // under the body: the edges at double width — the fill on top leaves the outer half
+              ? <path d={wedgePath(tail, true)} fill={fill} stroke={stroke} strokeWidth={sw * 2} strokeLinejoin="round" />
+              // over the body: fill only, covering the body's outline at the root (seamless)
+              : <path d={wedgePath(tail, true)} fill={fill} />}
+        </svg>
+      );
+      const align = bubble.textAlign && bubble.textAlign !== 'center' ? bubble.textAlign : undefined;
+      let label: React.ReactNode = bubble.text || '...';
+      if (bubble.markup === 'stars' && bubble.text) {
+        const parts = bubble.text.split(/(\*[^*\n]+\*)/g);
+        // split() with a capture group puts the *x* matches at odd indexes
+        label = parts.map((p, i) => (i % 2 ? <em key={i}>{p.slice(1, -1)}</em> : p));
+      }
       return (
         <div
           className={`composer-element composer-bubble ${bubble.bubbleType} ${bubble.direction === 'vertical' ? 'vertical' : ''} ${isSelected ? 'selected' : ''} ${el.locked ? 'locked' : ''}`}
@@ -692,7 +767,14 @@ const ElementRenderer = memo(function ElementRenderer({
           onMouseDown={(e) => onMouseDown(e, el.id)}
           onDoubleClick={(e) => onDoubleClick(e, el.id)}
         >
-          <div className="composer-bubble-inner">
+          {tailSvg('under')}
+          <div
+            className="composer-bubble-inner"
+            style={align ? {
+              textAlign: align,
+              justifyContent: align === 'left' ? 'flex-start' : 'flex-end',
+            } : undefined}
+          >
             {isEditing ? (
               <input
                 className="composer-bubble-input"
@@ -705,12 +787,21 @@ const ElementRenderer = memo(function ElementRenderer({
               />
             ) : (
               <>
-                <span>{bubble.text || '...'}</span>
-                <div className={`composer-bubble-tail ${bubble.tailPosition}`} />
+                <span style={bubble.markup || align ? { whiteSpace: 'pre-line' } : undefined}>{label}</span>
+                {!tip && <div className={`composer-bubble-tail ${bubble.tailPosition}`} />}
               </>
             )}
           </div>
+          {tailSvg('over')}
           {isSelected && !el.locked && !isEditing && <ResizeHandles id={el.id} onResizeDown={onResizeDown} />}
+          {isSelected && !el.locked && !isEditing && tip && (
+            <div
+              className="composer-tail-handle"
+              style={{ left: tip.x * bw, top: tip.y * bh }}
+              title="Drag to aim the tail"
+              onMouseDown={(e) => onTailDown(e, el.id)}
+            />
+          )}
         </div>
       );
     }

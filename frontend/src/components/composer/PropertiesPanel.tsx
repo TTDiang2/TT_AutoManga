@@ -556,6 +556,43 @@ function BubbleProps({
             </button>
           ))}
         </div>
+        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={!!element.tailTip}
+            disabled={element.bubbleType === 'narration'}
+            onChange={e => updateElement(element.id, {
+              tailTip: e.target.checked ? { x: 0.3, y: 1.6 } : undefined,
+            } as Partial<BubbleElement>)}
+          />
+          Point tail (drag the orange handle)
+        </label>
+      </div>
+      <div className="composer-prop-group">
+        <span className="composer-prop-label">Text align</span>
+        <div className="composer-prop-btn-group">
+          {(['left', 'center', 'right'] as const).map(a => (
+            <button
+              key={a}
+              className={`composer-prop-btn ${(element.textAlign ?? 'center') === a ? 'active' : ''}`}
+              onClick={() => updateElement(element.id, {
+                textAlign: a === 'center' ? undefined : a,
+              } as Partial<BubbleElement>)}
+            >
+              {a}
+            </button>
+          ))}
+        </div>
+        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={element.markup === 'stars'}
+            onChange={e => updateElement(element.id, {
+              markup: e.target.checked ? 'stars' : undefined,
+            } as Partial<BubbleElement>)}
+          />
+          *word* = emphasis
+        </label>
       </div>
       <div className="composer-prop-group">
         <span className="composer-prop-label">{t.composer.direction}</span>

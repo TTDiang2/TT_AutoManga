@@ -1,0 +1,202 @@
+{
+ "_comment": "Shared tail geometry fixture: backend/render/tails.py and frontend/src/components/composer/tailGeometry.ts must both reproduce 'expect' (tolerance 1e-4). Regenerate both sides together.",
+ "cases": [
+  {
+   "bubbleType": "speech",
+   "w": 300,
+   "h": 150,
+   "tip": [
+    150,
+    320
+   ],
+   "inset": 4,
+   "expect": {
+    "kind": "wedge",
+    "p1": [
+     179.949833,
+     140.131396
+    ],
+    "p2": [
+     120.050167,
+     140.131396
+    ],
+    "ctrl": [
+     150.0,
+     233.0
+    ],
+    "tip": [
+     150.0,
+     320.0
+    ]
+   }
+  },
+  {
+   "bubbleType": "speech",
+   "w": 300,
+   "h": 150,
+   "tip": [
+    -120,
+    -60
+   ],
+   "inset": 4,
+   "expect": {
+    "kind": "wedge",
+    "p1": [
+     35.150207,
+     38.464742
+    ],
+    "p2": [
+     78.089796,
+     18.155259
+    ],
+    "ctrl": [
+     -35.896959,
+     -17.948479
+    ],
+    "tip": [
+     -120.0,
+     -60.0
+    ]
+   }
+  },
+  {
+   "bubbleType": "shout",
+   "w": 240,
+   "h": 200,
+   "tip": [
+    400,
+    120
+   ],
+   "inset": 6,
+   "expect": {
+    "kind": "wedge",
+    "p1": [
+     201.348682,
+     90.985526
+    ],
+    "p2": [
+     198.256916,
+     120.414874
+    ],
+    "ctrl": [
+     316.78733,
+     114.056238
+    ],
+    "tip": [
+     400.0,
+     120.0
+    ]
+   }
+  },
+  {
+   "bubbleType": "thought",
+   "w": 260,
+   "h": 140,
+   "tip": [
+    60,
+    260
+   ],
+   "inset": 4,
+   "expect": {
+    "kind": "circles",
+    "circles": [
+     [
+      90.74982,
+      176.536202,
+      10.56
+     ],
+     [
+      75.37491,
+      218.268101,
+      7.26
+     ],
+     [
+      60.0,
+      260.0,
+      4.62
+     ]
+    ]
+   }
+  },
+  {
+   "bubbleType": "whisper",
+   "w": 200,
+   "h": 120,
+   "tip": [
+    210,
+    -90
+   ],
+   "inset": 2,
+   "expect": {
+    "kind": "wedge",
+    "p1": [
+     117.350676,
+     6.455786
+    ],
+    "p2": [
+     154.233332,
+     15.929657
+    ],
+    "ctrl": [
+     174.508505,
+     -41.602507
+    ],
+    "tip": [
+     210.0,
+     -90.0
+    ]
+   }
+  },
+  {
+   "bubbleType": "speech",
+   "w": 200,
+   "h": 100,
+   "tip": [
+    100,
+    50
+   ],
+   "inset": 4,
+   "expect": null
+  },
+  {
+   "bubbleType": "narration",
+   "w": 300,
+   "h": 100,
+   "tip": [
+    150,
+    300
+   ],
+   "inset": 4,
+   "expect": null
+  },
+  {
+   "bubbleType": "inner-voice",
+   "w": 180,
+   "h": 180,
+   "tip": [
+    -50,
+    90
+   ],
+   "inset": 3,
+   "expect": {
+    "kind": "wedge",
+    "p1": [
+     10.191107,
+     107.846819
+    ],
+    "p2": [
+     10.191107,
+     72.153181
+    ],
+    "ctrl": [
+     -23.5,
+     90.0
+    ],
+    "tip": [
+     -50.0,
+     90.0
+    ]
+   }
+  }
+ ]
+}

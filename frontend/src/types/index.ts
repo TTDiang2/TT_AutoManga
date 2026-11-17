@@ -303,6 +303,12 @@ export interface BubbleElement extends ComposerElementBase {
   backgroundColor: string;
   borderColor: string;
   tailPosition: TailPosition;
+  /** Pointed tail aimed at this point: fractions of the element box, unrotated, may be <0 or >1
+   *  (an off-panel speaker). Overrides tailPosition. Geometry: composer/tailGeometry.ts. */
+  tailTip?: { x: number; y: number };
+  textAlign?: 'left' | 'center' | 'right';
+  /** 'stars': `*word*` is set as emphasis. Opt-in, so existing texts like "*sigh*" keep their stars. */
+  markup?: 'stars';
 }
 
 export interface ComposerTemplate {

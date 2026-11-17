@@ -14,7 +14,7 @@ import math
 from typing import Any, Callable, Optional, Tuple
 from PIL import Image, ImageChops, ImageDraw
 from . import bubbles
-from .fonts import get_font
+from .fonts import get_font_chain
 
 Resolver = Callable[[str], Optional[Image.Image]]
 
@@ -190,7 +190,6 @@ def _draw_image(el, ew, eh, scale, resolve):
 
 def _draw_text(el, ew, eh, scale):
     out = Image.new("RGBA", (ew, eh), (0, 0, 0, 0))
-    d = ImageDraw.Draw(out)
     color = _hex(el.get("color") or "#000000")
     content = el.get("content") or ""
     vertical = el.get("direction") == "vertical"
@@ -199,41 +198,42 @@ def _draw_text(el, ew, eh, scale):
     if sw > 0:
         stroke = {"stroke_width": max(1, int(round(sw * scale))),
                   "stroke_fill": _hex(el.get("strokeColor") or "#000000")}
+    bold = (el.get("fontWeight") or "").lower() == "bold"
 
     # auto-shrink: never let a text element overflow its box. The stroke
     # halo (sw*scale px total, sw/2 per side) eats into the usable box.
+    # Measured and drawn run by run through the font chain (glyph fallback).
     fs_req = (el.get("fontSize") or 14) * scale
     stroke_px = max(1, int(round(sw * scale))) if sw > 0 else 0
     box_w, box_h = ew - stroke_px, eh - stroke_px
     fs = fs_req
     while fs > fs_req * 0.55 and fs > 6:
-        font = get_font(fs, el.get("fontFamily"),
-                        bold=(el.get("fontWeight") or "").lower() == "bold")
+        chain = get_font_chain(fs, el.get("fontFamily"), bold=bold)
         if vertical:
             # measure the REAL balanced-column block, not a one-column model —
             # when the 55% floor is hit the drawn block can span several columns
             from .vtext import layout_vertical
-            _, exts = layout_vertical(content, ew, eh, 0.0, fs, font)
+            _, exts = layout_vertical(content, ew, eh, 0.0, fs, chain)
             if not exts:
                 break
             needed_w = max(x1 for _, x1, _, _ in exts) - min(x0 for x0, _, _, _ in exts)
             needed_h = max(y1 for *_, y1 in exts) - min(y0 for *_, y0, _ in exts)
         else:
             lines = content.split("\n")
-            needed_w = max((font.getlength(l) for l in lines), default=0)
+            needed_w = max((chain.getlength(l) for l in lines), default=0)
             needed_h = len(lines) * fs * 1.4
         if needed_w <= box_w and needed_h <= box_h:
             break
         fs = max(6.0, fs * 0.9)
-    font = get_font(fs, el.get("fontFamily"),
-                    bold=(el.get("fontWeight") or "").lower() == "bold")
+    chain = get_font_chain(fs, el.get("fontFamily"), bold=bold)
+    styled = bubbles.Styled(chain)
 
     line_h = fs * 1.4
     if vertical:
         from .vtext import layout_vertical
-        positions, _ = layout_vertical(content, ew, eh, 0.0, fs, font)
+        positions, _ = layout_vertical(content, ew, eh, 0.0, fs, chain)
         for ch, x, y in positions:
-            d.text((x, y), ch, font=font, fill=color, anchor="mm", **stroke)
+            bubbles.draw_cells(out, x, y, [(ch, False)], styled, "m", color, **stroke)
     else:
         lines = content.split("\n")
         total = len(lines) * line_h
@@ -241,11 +241,12 @@ def _draw_text(el, ew, eh, scale):
         align = el.get("textAlign") or "left"
         if align not in ("left", "center", "right"):
             align = "left"   # unknown values (e.g. "justify") render as left
-        ax = {"left": "lm", "center": "mm", "right": "rm"}[align]
+        ax = {"left": "l", "center": "m", "right": "r"}[align]
         x = {"left": 0, "center": ew / 2, "right": ew}[align]
         for i, line in enumerate(lines):
-            d.text((x, y0 + i * line_h + line_h / 2), line, font=font,
-                   fill=color, anchor=ax, **stroke)
+            bubbles.draw_cells(out, x, y0 + i * line_h + line_h / 2,
+                               [(c, False) for c in line], styled, ax, color,
+                               **stroke)
     return out
 
 
