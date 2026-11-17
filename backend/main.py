@@ -16,6 +16,7 @@ from .api import storyboard, prompt, assets, project, export, settings, layouts,
 from .api import auth as auth_api
 from .api import auth_google as auth_google_api
 from .api import training as training_api
+from .api import collections as collections_api
 from .core import auth as auth_core
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
@@ -259,6 +260,7 @@ app.include_router(agent.router)
 app.include_router(comics.router)
 app.include_router(fonts.router)
 app.include_router(training_api.router)
+app.include_router(collections_api.router)
 
 
 @app.get("/api/health")
