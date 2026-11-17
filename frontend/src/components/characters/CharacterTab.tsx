@@ -3,6 +3,7 @@ import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 're
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { Character, CharacterLora } from '../../types';
+import { TrainingPanel } from './TrainingPanel';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -32,6 +33,10 @@ export function CharacterTab() {
   // the LoRA form: name '' = none; trigger '' falls back to the LoRA's own
   const [loraForm, setLoraForm] = useState({ name: '', weight: DEFAULT_LORA_WEIGHT, trigger: '' });
   const [swarmLoras, setSwarmLoras] = useState<SwarmLora[]>([]);
+  // the sheet as an IP-Adapter reference on solo panels: 0 = off;
+  // ipadapter null = not probed yet (GET /api/assets/swarmui/features)
+  const [refWeight, setRefWeight] = useState(0);
+  const [ipadapter, setIpadapter] = useState<boolean | null>(null);
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<CharacterTemplateMeta[]>([]);
@@ -107,11 +112,17 @@ export function CharacterTab() {
       .then(r => r.json())
       .then(data => setSwarmLoras(Array.isArray(data?.loras) ? data.loras : []))
       .catch(() => setSwarmLoras([]));
+    fetch('/api/assets/swarmui/features')
+      .then(checked)
+      .then(r => r.json())
+      .then(data => setIpadapter(!!data?.ipadapter))
+      .catch(() => setIpadapter(false));
   }, [isEditing]);
 
   const startEdit = (char: Character) => {
     setEditForm({ name: char.name, description: char.description, appearance: char.appearance || '' });
     setLoraForm({ name: char.lora?.name || '', weight: char.lora?.weight ?? DEFAULT_LORA_WEIGHT, trigger: char.lora?.trigger || '' });
+    setRefWeight(char.refWeight || 0);
     setIsEditing(true);
   };
 
@@ -156,6 +167,7 @@ export function CharacterTab() {
       patchChar(selectedCharId, {
         ...editForm,
         lora,
+        refWeight: refWeight > 0 ? refWeight : null,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -401,6 +413,30 @@ export function CharacterTab() {
                 )}
                 <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.loraHint}</p>
               </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-ref-weight">{t.characters.refWeight}</label>
+                <div className="flex gap-sm items-center">
+                  <input
+                    id="char-ref-weight"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={refWeight}
+                    onChange={e => setRefWeight(Number(e.target.value))}
+                    disabled={!ipadapter || !selectedChar?.image}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: '12px', width: '32px', textAlign: 'right' }}>
+                    {refWeight > 0 ? refWeight.toFixed(2) : t.characters.refOff}
+                  </span>
+                </div>
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  {ipadapter === false ? t.characters.refUnavailable
+                    : !selectedChar?.image ? t.characters.refNoSheet
+                    : t.characters.refHint}
+                </p>
+              </div>
               <div className="flex gap-sm">
                 <button className="btn btn-primary" onClick={handleSave}>{t.characters.save}</button>
                 <button className="btn btn-secondary" onClick={handleSaveAsTemplate}>
@@ -500,9 +536,17 @@ export function CharacterTab() {
                     </div>
                   )}
 
+                  {!!selectedChar.refWeight && selectedChar.image && (
+                    <div style={{ marginTop: '16px' }}>
+                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.refWeight}</h4>
+                      <p style={{ fontSize: '14px' }}>{selectedChar.refWeight}</p>
+                    </div>
+                  )}
+
                   {!selectedChar.description && !selectedChar.appearance && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>No description or appearance details yet.</p>
                   )}
+                  <TrainingPanel character={selectedChar} />
                 </div>
               </div>
             </div>

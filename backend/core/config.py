@@ -72,6 +72,16 @@ class SwarmUIConfig(BaseModel):
     currentHeight: int = 768
     currentSamplerName: str = "Euler"
     promptSuffix: str = ""
+    # SwarmUI "Use IP-Adapter" preset for character-sheet references (a
+    # character's refWeight > 0); the PLUS model follows a whole-figure sheet
+    # (outfit, hair) better than the FACE / FaceID ones
+    ipadapterPreset: str = "PLUS (high strength)"
+    # tuned on arthemyComics (seed-matched A/B): applied over the whole run
+    # at "standard" the reference burns colours and drags the composition
+    # toward the sheet; "prompt is more important" and stopping at 70% of the
+    # steps keep the panel's scene and inking and still carry face/outfit
+    ipadapterWeightType: str = "prompt is more important"
+    ipadapterEnd: float = 0.7
 
 
 class DefaultSettings(BaseModel):
@@ -87,11 +97,27 @@ class AuthConfig(BaseModel):
     trustedProxy: str = "192.168.1.11"
 
 
+class TrainingConfig(BaseModel):
+    # The LoRA trainer (ai-toolkit on the Razer), driven over ssh/scp with
+    # key auth; see docs/TRAINING.md. ~ in paths is the trainer's $HOME.
+    host: str = "pless84@192.168.1.31"
+    os: str = "linux"                     # only linux is implemented
+    toolkitDir: str = "~/ai-toolkit"
+    python: str = "venv/bin/python"       # relative to toolkitDir
+    baseModel: str = "/home/pless84/models/arthemyComics_v80.safetensors"
+    loraFolder: str = "Comics"            # under SwarmUI Models/Lora on this Mac
+    # ai-toolkit's preview samples (step 0 and every 500). Off by default:
+    # on the 8 GB RTX 3070 the 832x1216 VAE decode next to the low_vram
+    # model runs out of CUDA memory and kills the job.
+    sampling: bool = False
+
+
 class AppSettings(BaseModel):
     api: APIConfig = APIConfig()
     swarmui: SwarmUIConfig = SwarmUIConfig()
     defaults: DefaultSettings = DefaultSettings()
     auth: AuthConfig = AuthConfig()
+    training: TrainingConfig = TrainingConfig()
     language: str = "en"
 
 

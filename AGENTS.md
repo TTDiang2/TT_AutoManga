@@ -322,6 +322,36 @@ to `/api/agent/generate` (with `inject_characters`) and to
 `{"loras":[{name, trigger, architecture}]}` (trigger from the model's
 `trigger_phrase` metadata, else the name convention).
 
+**Character-sheet references (IP-Adapter)**: a library character with a sheet
+(`image`) and `refWeight` (0-1; missing/null/0 = off — an explicit opt-in,
+PATCH rejects anything else with 422, 0 is stored as null) guides its **solo**
+panels through SwarmUI's IP-Adapter: generation sends the sheet as
+`promptimages` (`|`-joined data URLs) with `useipadapter` = the preset from
+`settings.swarmui.ipadapterPreset` (default `PLUS (high strength)`; FaceID is
+not used), `ipadapterweight` = refWeight, `ipadapterweighttype` =
+`settings.swarmui.ipadapterWeightType` (default "prompt is more important") and
+`ipadapterend` = `settings.swarmui.ipadapterEnd` (default 0.7). Those defaults
+come from a seed-matched A/B on arthemyComics: "standard" over every step
+burnt colours and pulled the pose toward the sheet; prompt-first weighting
+released at 70% keeps the scene and inking and still carries face, hair and
+outfit details (0.5 is a good refWeight). Panels listing several people
+never get one (a single reference blends faces). A project entry
+(`settings.characters[]`) may override `refWeight`/`image`; sheets are read
+only from data URLs or `/api/assets/file/<id>`. `swarm_client.generate_image`
+takes `prompt_images` / `ipadapter` / `ipadapter_weight` /
+`ipadapter_weight_type` / `ipadapter_end` and sends nothing IP-Adapter unless both images and a
+preset are given; `promptimages` is redacted in the payload log. Applied by
+`/api/agent/generate` (recorded in `injected` as
+`{"kind":"reference","name","weight","preset"}`, and as `ipadapter` in the PNG
+metadata) and `/api/assets/swarmui/generate`.
+`GET /api/assets/swarmui/features` → `{"ipadapter": bool, "presets": [...],
+"preset": "<configured>"}` (a running backend with SwarmUI's `ipadapter`
+feature; presets from `/API/ListT2IParams` `useipadapter`, cached 60 s); the
+Characters tab's "Guide panels with sheet" slider is disabled when it is
+false. SwarmUI downloads the IP-Adapter model and CLIP-Vision encoders
+(~6.6 GB) on the first such generation; after that a referenced panel costs
+about 12% more time than a plain one (62 s vs 55 s at 1024², 28 steps).
+
 **Consistency & continuity tools**: fixed seeds make style-reproducible runs;
 `init_image` (+`init_creativity` 0-1) runs img2img against an asset or data
 URL — feed the previous panel (low creativity ~0.4-0.6) or a character sheet
@@ -430,6 +460,35 @@ which paints with comic.js and rebuilds the project here. Names are
 Pick a variant: `variants` run → set the seed in the script (`seed: N` line if
 the panel has one, else `PANEL … seed=N`) → `PUT` the script → `repaint`
 without force.
+
+### 9c. LoRA training (Characters tab "Train LoRA", `/api/training`)
+
+Character LoRAs are trained on the Razer (ai-toolkit, the sf_* SDXL recipe)
+over ssh/scp; setup and troubleshooting: `docs/TRAINING.md`. Settings live in
+`data/settings.json` → `training {host, os, toolkitDir, python, baseModel,
+loraFolder, sampling}` (edit the file; `GET /api/training/settings` shows them).
+
+- Datasets: `data/training/<slug>/img_NNN.png` + `img_NNN.txt` (the trigger
+  word only) + `meta.json`. `GET/POST /api/training/datasets`
+  (`{slug, trigger, characterId}`; `?character_id=` filters),
+  `GET /api/training/datasets/{slug}`, `POST …/upload` (multipart `files`),
+  `POST …/import {projectId, panelIds?}` (project panels),
+  `DELETE …/image/img_003.png`, `POST …/generate {count, characterId?}`
+  (background, LoRA-free, the character's appearance over a
+  pose/angle/expression/shot grid, seeds 1000 + i·7919; status in the
+  dataset's `generation`), `POST …/generate/stop`.
+- Jobs: one at a time, ≥ 15 images. `POST /api/training/jobs {slug, name?,
+  characterId?, steps (1500), resume?}` → poll `GET /api/training/jobs/current?since=N`
+  (`phase` pushing → launching → running → finishing → done | failed |
+  stopped, `step`/`steps` from the tqdm bar, `lines`/`next`/`partial` log,
+  `events`) → `POST /api/training/jobs/current/stop`. On success the LoRA is
+  at `~/SwarmUI/Models/Lora/<loraFolder>/<name>.safetensors`, SwarmUI's list
+  is refreshed and the character gets `lora {name:"Comics/<name>", weight:0.8,
+  trigger}`; in a script: `lora NAME: Comics/<name> 0.8 <trigger>`.
+- Restart-proof: the job is in `data/training_job.json` and runs detached on
+  the trainer; a restarted server resumes polling it. Interrupted before the
+  launch → `failed`, start again. A name whose `output/<name>` already has
+  checkpoints is refused unless `resume: true` (ai-toolkit would continue it).
 
 ## 10. Making a comic a stranger can READ (craft rules)
 

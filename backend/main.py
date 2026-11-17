@@ -12,6 +12,7 @@ import time
 
 from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
 from .api import auth as auth_api
+from .api import training as training_api
 from .core import auth as auth_core
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
@@ -203,6 +204,7 @@ app.include_router(render.router)
 app.include_router(agent.router)
 app.include_router(comics.router)
 app.include_router(fonts.router)
+app.include_router(training_api.router)
 
 
 @app.get("/api/health")
