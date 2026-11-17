@@ -37,8 +37,9 @@ content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
 
 `/api/*` is behind one password (`backend/core/auth.py`, middleware
 `auth_gate` in `backend/main.py`). **Local callers are exempt**: a request
-whose TCP peer is `127.0.0.1`/`::1` and that carries no `X-Forwarded-For`,
-`Forwarded` or `X-Real-IP` header never needs a session. That covers the
+whose TCP peer is `127.0.0.1`/`::1`, whose `Host` is `localhost`, `127.0.0.1`
+or `[::1]` (any port) and that carries no `X-Forwarded-For`, `Forwarded` or
+`X-Real-IP` header never needs a session. That covers the
 MCP tools, `agent_cli`, and the Comics converter (`automanga.js`, spawned by
 `/api/comics` with `AUTOMANGA_URL=http://127.0.0.1:<port>`). Keep calling
 `http://127.0.0.1:5180` directly, and don't add forwarding headers.
@@ -46,6 +47,18 @@ Everyone else needs the `am_session` cookie, which is what browsers get through
 the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
 `192.168.1.11`, which is never treated as local).
 
+- Host allowlist (DNS rebinding guard): every request, SPA included, whose
+  `Host` is not `localhost`/`127.0.0.1`/`[::1]`, one of this machine's own
+  names or LAN addresses (detected at startup) or a name in
+  `data/settings.json` → `auth.allowedHosts` (default `[]`) gets 400. Before
+  exposing a public name through Caddy (which forwards the original Host),
+  add it there, e.g. `"allowedHosts": ["manga.madebypless.dk"]`.
+- A local reverse proxy (e.g. `vite` dev server on :5173 proxying `/api`):
+  without `xfwd: true` it sends no `X-Forwarded-For`, so its requests count
+  as local only because `changeOrigin` rewrites Host to `localhost:5180`.
+  Anything else it relays (a LAN browser on a `vite --host` server) is then
+  treated as local too: set `xfwd: true` on the proxy when it serves other
+  machines.
 - Set or change the password on the server:
   `.venv/bin/python -m backend.core.auth set-password`. Add `--stdin` to read
   it from the first line of stdin. `logout-all` signs every device out, and
@@ -54,8 +67,11 @@ the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
   version. Changing the password or running `logout-all` bumps the version.
 - Endpoints:
   - `GET /api/auth/status` returns `{configured, authenticated, local}`.
-  - `POST /api/auth/login {password}` logs in. It allows 5 failures per
-    15 min per IP (then 429 with `Retry-After`) and 30 per hour in total.
+  - `POST /api/auth/login {password}` logs in. 5 failures within 15 min
+    lock that IP out (429 with `Retry-After`) for 15 min, each further
+    lockout doubling up to 1 h; a successful login resets the IP. No global
+    cap. Each attempt is counted before the password check, so parallel
+    bursts are limited too.
   - `POST /api/auth/logout` signs this device out.
   - `POST /api/auth/logout-all` and
     `POST /api/auth/password {current, new}` need a session or a local
@@ -65,7 +81,9 @@ the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
   - remote while no password is set: 503;
   - a POST/PUT/PATCH/DELETE whose `Origin` host differs from `Host`: 403,
     local callers included (CSRF).
-  - Always public: the SPA shell, `/assets` and `/api/health`.
+  - Always public: the SPA shell, `/assets` and `/api/health`. There is no
+    `/docs`, `/redoc` or `/openapi.json`; the schema is
+    `GET /api/openapi.json`, behind the gate.
 - `AUTOMANGA_DATA_DIR=<dir>` relocates `data/` (settings, projects, assets,
   auth) for a throwaway second instance.
 
@@ -103,7 +121,10 @@ the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
   - `tailTip: {x, y}` — a pointed tail aimed at that point, in fractions of
     the bubble's own box (unrotated; may be <0 or >1, e.g. `{x: 0.3, y: 1.8}`
     = below the bubble, left of centre). Overrides `tailPosition`; thought
-    bubbles get three circles; narration has no tail. Validated to -20..20.
+    bubbles get three circles; narration has no tail. Validated to -2..3
+    (at most 2 box sizes beyond the box); pages saved through
+    `/api/projects/save` or `PUT …/composer-pages` are clamped into that
+    range, and the renderer clamps too.
     One geometry in `backend/render/tails.py` and
     `frontend/src/components/composer/tailGeometry.ts`, both checked against
     `backend/tests/fixtures/tail_cases.json`.
@@ -140,7 +161,8 @@ Images are stored as files (`data/assets/<id>.png`) and referenced by URL
 (`panel.image`, `element.src`, `element.originalSrc`). Legacy data URLs are
 silently converted on save.
 
-Machine-readable schema of the endpoints: `GET http://127.0.0.1:5180/openapi.json`.
+Machine-readable schema of the endpoints: `GET http://127.0.0.1:5180/api/openapi.json`
+(behind the login gate; local callers pass).
 
 ## 4. Golden path (copy & adapt)
 
@@ -484,10 +506,19 @@ loraFolder, sampling}` (edit the file; `GET /api/training/settings` shows them).
   `events`) → `POST /api/training/jobs/current/stop`. On success the LoRA is
   at `~/SwarmUI/Models/Lora/<loraFolder>/<name>.safetensors`, SwarmUI's list
   is refreshed and the character gets `lora {name:"Comics/<name>", weight:0.8,
-  trigger}`; in a script: `lora NAME: Comics/<name> 0.8 <trigger>`.
+  trigger}`; in a script: `lora NAME: Comics/<name> 0.8 <trigger>`. An
+  existing file is never overwritten: the pull goes to `<name>_2` (`_3`, …)
+  and the character's lora uses that name (see the job's `lora`). A job
+  whose collection failed (`failed`, `collectable: true`) is retried with
+  `POST /api/training/jobs/current/collect`.
+- Limits: 25 MB per image, 200 images per dataset (413 / 400); undecodable
+  images or bad base64 → 400.
 - Restart-proof: the job is in `data/training_job.json` and runs detached on
-  the trainer; a restarted server resumes polling it. Interrupted before the
-  launch → `failed`, start again. A name whose `output/<name>` already has
+  the trainer; a restarted server resumes polling it. Interrupted while
+  pushing → `failed`, start again; while launching, the job is adopted from
+  the pid the launcher wrote to `<log>.pid` (or `failed` if it never
+  started). Each job has its own remote dir
+  `~/automanga-training/<name>/<job id>/`. A name whose `output/<name>` already has
   checkpoints is refused unless `resume: true` (ai-toolkit would continue it).
 
 ## 10. Making a comic a stranger can READ (craft rules)

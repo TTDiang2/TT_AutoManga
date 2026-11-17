@@ -52,8 +52,11 @@ def test_tail_tip_ink_at_projected_tip_and_pad_grows():
     ew, eh = 200, 100
     plain, pad0 = bubbles.draw_bubble(_bubble(), ew, eh, 1.0)
     img, pad = bubbles.draw_bubble(_bubble(tailTip={"x": 0.25, "y": 2.0}), ew, eh, 1.0)
-    assert pad > pad0 and pad >= eh   # tip is a full box height below the bubble
-    tx, ty = pad + 0.25 * ew, pad + 2.0 * eh
+    assert pad.bottom > pad0.bottom and pad.bottom >= eh   # tip is a full box height below
+    # only the side the tail sticks out of grows
+    assert (pad.left, pad.top, pad.right) == (pad0.left, pad0.top, pad0.right)
+    assert img.size == (pad.left + ew + pad.right, pad.top + eh + pad.bottom)
+    tx, ty = pad.left + 0.25 * ew, pad.top + 2.0 * eh
     bbox = _dark(img)
     assert bbox is not None
     # the lowest ink is the tip, within a few px of where it was projected
@@ -72,13 +75,14 @@ def test_thought_tail_is_circles_toward_tip():
     img, pad = bubbles.draw_bubble(_bubble(bubbleType="thought",
                                            tailTip={"x": 1.5, "y": 1.5}), 200, 100, 1.0)
     bbox = _dark(img)
-    assert bbox[2] > pad + 200 + 10 and bbox[3] > pad + 100 + 10
+    assert bbox[2] > pad.left + 200 + 10 and bbox[3] > pad.top + 100 + 10
 
 
 def test_left_aligned_ink_starts_at_the_left():
     text = "A LONGER FIRST LINE\nSHORT"
     el = dict(bubbleType="narration", text=text)
-    center, pad = bubbles.draw_bubble(_bubble(**el), 400, 120, 1.0)
+    center, p = bubbles.draw_bubble(_bubble(**el), 400, 120, 1.0)
+    pad = p.left            # narration: the same margin on every side
     left, _ = bubbles.draw_bubble(_bubble(textAlign="left", **el), 400, 120, 1.0)
     # look inside the box only (skip the 2px frame)
     inner = (pad + 6, pad + 6, pad + 394, pad + 114)
@@ -135,7 +139,75 @@ def test_validation_accepts_new_bubble_keys():
 @pytest.mark.parametrize("bad", [
     {"tailTip": {"x": 1}}, {"tailTip": {"x": "1", "y": 0}}, {"tailTip": [0, 1]},
     {"tailTip": {"x": 0, "y": math.inf}}, {"textAlign": "middle"}, {"markup": "html"},
+    {"tailTip": {"x": 0, "y": 3.5}}, {"tailTip": {"x": -2.5, "y": 0}}, {"tailTip": {"x": 0, "y": 20}},
 ])
 def test_validation_rejects_bad_bubble_keys(bad):
     with pytest.raises(HTTPException):
         _validate_element_payload(bad, partial=True)
+
+
+def test_far_tail_tip_is_clamped_and_bounded():
+    """A huge tailTip is clamped to TIP_LIMIT box sizes beyond the box, and
+    only that side's margin grows; the local image stays under the cap."""
+    ew, eh = 200, 100
+    far, pf = bubbles.draw_bubble(_bubble(tailTip={"x": 0.5, "y": 1e6}), ew, eh, 1.0)
+    edge, pe = bubbles.draw_bubble(_bubble(tailTip={"x": 0.5, "y": bubbles.TIP_MAX}), ew, eh, 1.0)
+    assert far.tobytes() == edge.tobytes() and pf == pe
+    assert pf.bottom <= (bubbles.TIP_MAX - 1) * eh + 10 and pf.top < 30
+    big, pb = bubbles.draw_bubble(_bubble(tailTip={"x": -2, "y": 3}), 3000, 3000, 1.0)
+    assert big.width * big.height <= bubbles.MAX_LOCAL_PIXELS
+
+
+@pytest.mark.parametrize("size", [(0, 0), (1, 1), (3, 40), (40, 2), (4, 4)])
+def test_tiny_bubbles_draw_nothing(size):
+    assert bubbles.draw_bubble(_bubble(tailTip={"x": 0.5, "y": 2}), *size, 1.0) is None
+    assert bubbles.draw_bubble(_bubble(bubbleType="shout"), *size, 1.0) is None
+
+
+def test_tiny_bubble_on_a_page_renders():
+    from backend.render.renderer import render_page
+    page = {"width": 300, "height": 300, "elements": [
+        {"id": "b", "type": "bubble", "x": 10, "y": 10, "width": 0.5, "height": 0.5,
+         "rotation": 0, "zIndex": 1, "visible": True, **_bubble(tailTip={"x": 0.2, "y": 3})}]}
+    render_page(page, 1.0)
+
+
+def test_saved_pages_get_tail_tips_clamped(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    from backend.storage import manager as mgr
+    monkeypatch.setattr(mgr, "PROJECTS_DIR", tmp_path)
+    c = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
+    page = {"id": "pg", "elements": [
+        {"id": "b", "type": "bubble", "tailTip": {"x": 50, "y": -40}},
+        {"id": "c", "type": "bubble", "tailTip": {"x": "nan", "y": 1}}]}
+    r = c.post("/api/projects/save", json={"id": "p1", "name": "p", "composerPages": [page]})
+    assert r.status_code == 200, r.text
+    els = r.json()["project"]["composerPages"][0]["elements"]
+    assert els[0]["tailTip"] == {"x": bubbles.TIP_MAX, "y": bubbles.TIP_MIN}
+    assert "tailTip" not in els[1]
+    r = c.put("/api/projects/p1/composer-pages", json={"pages": [page]})
+    assert r.status_code == 200, r.text
+    stored = mgr.storage.load_project("p1")["composerPages"][0]["elements"]
+    assert stored[0]["tailTip"] == {"x": bubbles.TIP_MAX, "y": bubbles.TIP_MIN}
+
+
+def test_font_caches_are_bounded_and_shrink_in_whole_pixels(monkeypatch):
+    from backend.render import fonts
+    monkeypatch.setattr(fonts, "_cache", fonts._LRU(8))
+    monkeypatch.setattr(fonts, "_chain_cache", fonts._LRU(4))
+    for px in range(6, 60):
+        fonts.get_font_chain(px + 0.37)
+    assert len(fonts._cache) <= 8 and len(fonts._chain_cache) <= 4
+    a = fonts.get_font_chain(30)
+    assert fonts.get_font_chain(30.2) is a            # same whole-pixel key
+    sizes = []
+    real = bubbles._styled
+
+    def spy(fs, bold):
+        sizes.append(fs)
+        return real(fs, bold)
+    monkeypatch.setattr(bubbles, "_styled", spy)
+    bubbles.draw_bubble(_bubble(text="A VERY LONG LINE " * 30, fontSize=40), 200, 100, 1.0)
+    assert all(float(s).is_integer() for s in sizes[1:])
+    assert sizes[1:] == sorted(sizes[1:], reverse=True)

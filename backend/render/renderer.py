@@ -71,19 +71,19 @@ def _render_element(el, W, H, scale, resolve):
     t = el.get("type")
     if t in ("image", "page-image"):
         local = _draw_image(el, ew, eh, scale, resolve)
-        pad = 0
+        pad = (0, 0)
     elif t == "text":
         local = _draw_text(el, ew, eh, scale)
-        pad = 0
+        pad = (0, 0)
     elif t == "bubble":
         result = bubbles.draw_bubble(el, ew, eh, scale)
-        local, pad = result if result else (None, 0)
+        local, pad = result if result else (None, (0, 0))
     else:
         return None  # image-slot renders nothing
     if local is None:
         return None
 
-    px, py = int(round(X)) - pad, int(round(Y)) - pad
+    px, py = int(round(X)) - pad[0], int(round(Y)) - pad[1]
     rot = el.get("rotation") or 0
     if not rot:
         return local, px, py
@@ -224,7 +224,8 @@ def _draw_text(el, ew, eh, scale):
             needed_h = len(lines) * fs * 1.4
         if needed_w <= box_w and needed_h <= box_h:
             break
-        fs = max(6.0, fs * 0.9)
+        # whole pixels, at least 1 px smaller per step (bounded font caches)
+        fs = float(max(6, min(int(round(fs * 0.9)), int(round(fs)) - 1)))
     chain = get_font_chain(fs, el.get("fontFamily"), bold=bold)
     styled = bubbles.Styled(chain)
 

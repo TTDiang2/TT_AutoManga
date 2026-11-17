@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -117,6 +118,18 @@ async def upload_image(project_id: str, panel_id: str, file: UploadFile = File(.
 @router.post("/swarmui/generate")
 async def generate_with_swarmui(req: GenerateImageRequest):
     swarmsettings = settings.swarmui
+    override = None
+    if req.swarmui_address:
+        # one-shot override: http(s) on loopback / the LAN only (no SSRF to
+        # arbitrary hosts); the configured address itself is always fine
+        from ..core.swarmui_client import _normalize_address, check_override_address
+        if _normalize_address(req.swarmui_address) == swarm_client.address:
+            override = swarm_client.address
+        else:
+            try:
+                override = await asyncio.to_thread(check_override_address, req.swarmui_address)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
 
     loras = None
     if swarmsettings.currentLoras:
@@ -157,7 +170,7 @@ async def generate_with_swarmui(req: GenerateImageRequest):
             seed=req.seed,
             remove_background=req.remove_background,
             # one-shot override: never rewrites the shared client's address
-            address=req.swarmui_address or None,
+            address=override,
             **ref_kwargs,
         )
         

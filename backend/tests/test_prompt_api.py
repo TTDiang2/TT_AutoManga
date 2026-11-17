@@ -27,7 +27,7 @@ from backend.main import app  # noqa: E402
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
 
 # ---------- Bug #2 (a): route must emit a log line on every request ----------
@@ -36,7 +36,7 @@ def test_enhance_logs_incoming_request(caplog):
     """Every /api/prompt/enhance call must log an INFO line. Today it logs
     nothing, so the user has no idea whether the request reached the backend."""
     caplog.set_level(logging.INFO, logger="backend.api.prompt")
-    tc = TestClient(app, client=("127.0.0.1", 50000))
+    tc = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     with patch(
         "backend.core.openai_client.OpenAIClient.enhance_prompt",
         new=AsyncMock(return_value={"enhanced_prompt": "ok", "mode": "turbo"}),
@@ -65,7 +65,7 @@ def test_enhance_logs_when_llm_fails(caplog):
     context to diagnose. Today it just raises HTTPException(500) and the
     server log is silent unless the user enables uvicorn logging manually."""
     caplog.set_level(logging.ERROR, logger="backend.api.prompt")
-    tc = TestClient(app, client=("127.0.0.1", 50000))
+    tc = TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
     with patch(
         "backend.core.openai_client.OpenAIClient.enhance_prompt",
         new=AsyncMock(side_effect=RuntimeError("API Error 401: bad key")),

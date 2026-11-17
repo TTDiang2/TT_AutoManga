@@ -31,15 +31,15 @@ def configured(isolated_auth):
 
 
 def remote():
-    return TestClient(app, client=("203.0.113.7", 40000))
+    return TestClient(app, base_url="http://127.0.0.1", client=("203.0.113.7", 40000))
 
 
 def local():
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
 
 def via_proxy(ip="198.51.100.9", proto="https"):
-    c = TestClient(app, client=(PROXY, 41000))
+    c = TestClient(app, base_url="http://127.0.0.1", client=(PROXY, 41000))
     c.headers.update({"X-Forwarded-For": f"10.6.6.6, {ip}",
                       "X-Forwarded-Proto": proto})
     return c
@@ -143,8 +143,54 @@ def test_loopback_with_forwarding_header_is_not_local(configured, hdr):
     assert r.status_code == 401
 
 
+def test_loopback_peer_with_foreign_host_is_refused(configured):
+    """DNS rebinding: a page on evil.example resolved to 127.0.0.1 sends
+    Host: evil.example. It gets 400, even for the SPA shell."""
+    for path in ("/api/settings/", "/", "/api/health"):
+        r = local().get(path, headers={"Host": "evil.example:5180"})
+        assert r.status_code == 400, path
+    for host in ("localhost:5180", "127.0.0.1", "[::1]:5180"):
+        r = local().get("/api/settings/", headers={"Host": host})
+        assert r.status_code == 200, host
+    assert local().get("/api/settings/", headers={"Host": "bad host"}).status_code == 400
+
+
+def test_lan_host_is_allowed_but_never_local(configured, monkeypatch):
+    monkeypatch.setattr(auth, "_local_names", frozenset({"192.168.1.177", "mac.internal"}))
+    # a loopback peer with the LAN address as Host is not a local caller
+    r = local().get("/api/settings/", headers={"Host": "192.168.1.177:5180"})
+    assert r.status_code == 401
+    assert local().get("/api/auth/status", headers={"Host": "mac.internal:5180"}).json()["local"] is False
+    r = remote().get("/api/settings/", headers={"Host": "192.168.1.177:5180"})
+    assert r.status_code == 401
+
+
+def test_allowed_hosts_setting(configured, monkeypatch):
+    via = via_proxy()
+    via.headers["Host"] = "manga.example.dk"
+    assert via.get("/api/auth/status").status_code == 400
+    monkeypatch.setattr(config.settings.auth, "allowedHosts", ["Manga.Example.dk"])
+    assert via.get("/api/auth/status").status_code == 200
+    assert via.get("/api/settings/").status_code == 401
+
+
+def test_local_names_detected():
+    names = auth._detect_local_names()
+    assert "0.0.0.0" not in names
+    assert all(n == n.lower() for n in names)
+
+
+def test_api_docs_are_gated(configured):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        r = remote().get(path)
+        assert "openapi" not in r.text.lower()[:200], path
+    assert remote().get("/api/openapi.json").status_code == 401
+    r = local().get("/api/openapi.json")
+    assert r.status_code == 200 and "/api/auth/login" in r.json()["paths"]
+
+
 def test_proxy_is_never_local(configured):
-    c = TestClient(app, client=(PROXY, 41000))
+    c = TestClient(app, base_url="http://127.0.0.1", client=(PROXY, 41000))
     assert c.get("/api/settings/").status_code == 401
 
 
@@ -156,7 +202,7 @@ def test_sixth_failure_is_429(configured):
     assert r.status_code == 429
     assert int(r.headers["Retry-After"]) > 0
     # a different address is not affected
-    other = TestClient(app, client=("203.0.113.8", 40000))
+    other = TestClient(app, base_url="http://127.0.0.1", client=("203.0.113.8", 40000))
     assert other.post("/api/auth/login", json={"password": PW}).status_code == 200
 
 
@@ -169,12 +215,60 @@ def test_rate_limit_keys_on_proxy_xff(configured):
         "/api/auth/login", json={"password": PW}).status_code == 200
 
 
-def test_global_cap():
-    lim = auth.LoginLimiter(global_max=3)
-    for i in range(3):
+def test_no_global_cap_and_backoff_doubles():
+    lim = auth.LoginLimiter(per_ip=5, window=900, max_lockout=3600)
+    # many addresses failing never lock out a fresh one
+    for i in range(100):
         lim.record_failure(f"10.0.0.{i}", now=1000)
-    assert lim.retry_after("10.9.9.9", now=1001) > 0
-    assert lim.retry_after("10.9.9.9", now=1000 + 3601) == 0
+    assert lim.retry_after("10.9.9.9", now=1001) == 0
+    ip, t = "10.1.1.1", 2000.0
+    waits = []
+    for _ in range(4):
+        for _ in range(5):
+            assert lim.reserve(ip, now=t) == 0
+        wait = lim.reserve(ip, now=t)
+        waits.append(wait)
+        assert lim.retry_after(ip, now=t + wait - 2) > 0
+        t += wait
+        assert lim.retry_after(ip, now=t) == 0
+    assert waits == [901, 1801, 3601, 3601]     # 15 min, 30 min, then capped at 1 h
+    lim.reset(ip)                               # a successful login
+    for _ in range(4):
+        assert lim.reserve(ip, now=t) == 0
+    assert lim.retry_after(ip, now=t) == 0
+
+
+def test_success_resets_the_address(configured):
+    c = remote()
+    for _ in range(4):
+        assert c.post("/api/auth/login", json={"password": "x"}).status_code == 401
+    assert c.post("/api/auth/login", json={"password": PW}).status_code == 200
+    for _ in range(4):
+        assert c.post("/api/auth/login", json={"password": "x"}).status_code == 401
+
+
+def test_parallel_burst_is_limited(configured, monkeypatch):
+    """Attempts are reserved before the (slow) password check: a burst of
+    parallel requests gets 5 checks, not 20."""
+    import threading
+    checked = []
+
+    def slow_wrong(pw):
+        checked.append(pw)
+        time.sleep(0.3)
+        return False
+    monkeypatch.setattr(auth, "check_password", slow_wrong)
+    codes, c = [], remote()
+
+    def attempt():
+        codes.append(c.post("/api/auth/login", json={"password": "x"}).status_code)
+    threads = [threading.Thread(target=attempt) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(codes) == [401] * 5 + [429] * 15
+    assert len(checked) == 5
 
 
 def test_client_ip_ignores_xff_from_untrusted_peer():
@@ -204,7 +298,7 @@ def test_cross_origin_post_403(configured):
 
 def test_same_origin_post_allowed(configured):
     c = local()
-    r = c.post("/api/auth/logout", headers={"Origin": "http://testserver"})
+    r = c.post("/api/auth/logout", headers={"Origin": "http://127.0.0.1"})
     assert r.status_code == 200
     # the vite dev server (localhost:5173 → :5180) from this machine
     r = c.post("/api/auth/logout", headers={"Origin": "http://localhost:5173"})
@@ -242,7 +336,7 @@ def test_rolling_refresh(configured):
 
 
 def test_change_password_bumps_version(configured):
-    a, b = remote(), TestClient(app, client=("203.0.113.9", 40000))
+    a, b = remote(), TestClient(app, base_url="http://127.0.0.1", client=("203.0.113.9", 40000))
     a.post("/api/auth/login", json={"password": PW})
     b.post("/api/auth/login", json={"password": PW})
     r = a.post("/api/auth/password", json={"current": "wrong", "new": "another pass"})

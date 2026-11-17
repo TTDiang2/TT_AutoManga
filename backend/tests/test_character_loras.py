@@ -68,7 +68,7 @@ def client(tmp_path, monkeypatch, library):
                         AsyncMock(side_effect=fake_generate))
 
     from backend.main import app
-    return TestClient(app, client=("127.0.0.1", 50000)), captured
+    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)), captured
 
 
 def _project(c):
@@ -212,3 +212,59 @@ def test_swarmui_loras_endpoint(client, monkeypatch):
     assert r.json()["loras"] == [
         {"name": "SecondFloor/sf_nova", "trigger": "sfnova", "architecture": "sdxl/lora"},
         {"name": "SecondFloor/sf_you_f1", "trigger": "sfyouf1", "architecture": "sdxl/lora"}]
+
+
+@pytest.mark.parametrize("lora", [
+    {"name": "../etc/x"}, {"name": "a/../b"}, {"name": "/abs"}, {"name": "a//b"},
+    {"name": "x<lora:y:1>"}, {"name": "ok", "trigger": "<lora:evil:2>"},
+    {"name": "ok", "trigger": "a:b"}, {"name": "ok", "weight": 2.5}, {"name": "ok", "weight": -0.1},
+])
+def test_patch_character_lora_rejects_bad_values(client, lora):
+    c, _ = client
+    assert c.patch("/api/characters/char_jun", json={"lora": lora}).status_code == 422
+
+
+@pytest.mark.parametrize("raw", ['{"lora": {"name": "ok", "weight": NaN}}',
+                                 '{"lora": {"name": "ok", "weight": Infinity}}',
+                                 '{"refWeight": NaN}', '{"refWeight": Infinity}'])
+def test_patch_character_rejects_nan_and_infinity(client, raw):
+    c, _ = client
+    r = c.patch("/api/characters/char_jun", content=raw, headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+    r = c.post("/api/characters/add", content=raw.replace("{", '{"id": "z", "name": "Z", ', 1),
+               headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+
+
+def test_lora_names_with_dots_and_spaces_pass(client, library):
+    c, _ = client
+    r = c.patch("/api/characters/char_jun", json={"lora": {"name": "Second Floor/sf_jun.v2", "weight": 2}})
+    assert r.status_code == 200
+    assert json.loads(library.read_text())[2]["lora"]["name"] == "Second Floor/sf_jun.v2"
+
+
+def test_character_writes_share_one_lock(client, library):
+    """The training worker's _set_character_lora and the API handlers do
+    read-modify-write under the same lock: no update is lost."""
+    import threading
+    import backend.api.training as tapi
+    c, _ = client
+    extra = [{"id": f"c{i}", "name": f"C{i}", "description": "", "sourcePanelIds": []} for i in range(8)]
+    library.write_text(json.dumps(json.loads(library.read_text()) + extra))
+
+    def worker(i):
+        if i % 2:
+            assert tapi._set_character_lora(f"c{i}", {"name": f"Comics/c{i}", "weight": 0.8})
+        else:
+            assert c.patch(f"/api/characters/c{i}", json={"refWeight": 0.5}).status_code == 200
+    ts = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    got = {x["id"]: x for x in json.loads(library.read_text())}
+    for i in range(8):
+        if i % 2:
+            assert got[f"c{i}"]["lora"]["name"] == f"Comics/c{i}"
+        else:
+            assert got[f"c{i}"]["refWeight"] == 0.5

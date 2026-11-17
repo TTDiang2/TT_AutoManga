@@ -33,7 +33,7 @@ console.log(JSON.stringify({ ok: true, argv, text, panels: [] }));
 @pytest.fixture
 def client():
     # loopback peer, so these keep passing behind the login gate
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
 
 @pytest.fixture
@@ -169,3 +169,31 @@ def test_plan_missing_script_and_bad_name(client, repo):
 def test_plan_allowed_while_running(client, repo, monkeypatch):
     monkeypatch.setattr(cm, "_running_run", lambda: {"script": "ok", "pid": 1})
     assert client.post("/api/comics/scripts/ok/plan", json={}).json()["ok"] is True
+
+
+def test_is_our_process_does_not_cache_a_failed_ps(monkeypatch):
+    monkeypatch.setattr(cm, "_verified", {})
+    run = {"pid": 999999, "id": "r1", "log": "/x/run.log"}
+
+    def boom(*a, **kw):
+        raise OSError("ps missing")
+    monkeypatch.setattr(cm.subprocess, "run", boom)
+    assert cm._is_our_process(run) is True
+    assert cm._verified == {}
+    monkeypatch.setattr(cm.subprocess, "run",
+                        lambda *a, **kw: type("P", (), {"stdout": "/bin/sh other.log"})())
+    assert cm._is_our_process(run) is False
+    assert cm._verified == {(999999, "r1"): False}
+
+
+def test_stop_run_survives_a_foreign_pid(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(cm, "RUN_FILE", tmp_path / "comics_run.json")
+    run = {"id": "r1", "pid": 999999, "log": str(tmp_path / "run.log")}
+    monkeypatch.setattr(cm, "_running_run", lambda: dict(run))
+    monkeypatch.setattr(cm, "_snapshot", lambda r, since=0: {"id": r["id"], "stopped": r.get("stopped")})
+
+    def denied(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+    monkeypatch.setattr(cm.os, "killpg", denied)
+    r = client.post("/api/comics/runs/current/stop")
+    assert r.status_code == 200 and r.json()["run"]["stopped"] is True

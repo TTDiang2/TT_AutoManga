@@ -332,9 +332,9 @@ def _is_our_process(run: Dict[str, Any]) -> bool:
         try:
             out = subprocess.run(["ps", "-o", "command=", "-p", str(key[0])],
                                  capture_output=True, text=True, timeout=5).stdout
-            _verified[key] = run["log"] in out
         except Exception:
-            _verified[key] = True   # can't tell: don't declare a live run dead
+            return True   # can't tell: don't declare a live run dead (ask again next time)
+        _verified[key] = run["log"] in out
     return _verified[key]
 
 
@@ -507,6 +507,6 @@ async def stop_run():
     # process group (start_new_session), so one signal stops all of it
     try:
         os.killpg(int(run["pid"]), signal.SIGTERM)
-    except ProcessLookupError:
-        pass
+    except (ProcessLookupError, PermissionError):
+        pass   # already gone, or the pid now belongs to someone else
     return {"run": _snapshot(run)}

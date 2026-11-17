@@ -57,11 +57,16 @@ sample prompts, and `disable_sampling` (from `sampling`).
 ## On the trainer
 
 ```
-~/automanga-training/<name>/dataset/     img_NNN.png + .txt (pushed)
-~/automanga-training/<name>/config.yaml  rendered config
-~/automanga-training/<name>/train.log    stdout+stderr; train.log.exit = exit code
-~/ai-toolkit/output/<name>/              checkpoints; <name>.safetensors = final
+~/automanga-training/<name>/<job>/dataset/     img_NNN.png + .txt (pushed)
+~/automanga-training/<name>/<job>/config.yaml  rendered config
+~/automanga-training/<name>/<job>/train.log    stdout+stderr; train.log.exit = exit code,
+                                               train.log.pid = the launched pid
+~/ai-toolkit/output/<name>/                    checkpoints; <name>.safetensors = final
 ```
+
+`<job>` is the job id, so a stopped job's late steps never touch the next
+job's files. A server restart while a job is launching reads `train.log.pid`
+and adopts the running trainer (or stops it, if a stop was pressed).
 
 Remove both directories to retrain a name from scratch.
 
@@ -74,6 +79,13 @@ training**. 1500 steps take about 25 minutes on the RTX 3070 Laptop
 (≈1.05 it/s; a 100-step run took 2 min 20 s including caching). When done the
 LoRA is in SwarmUI as `Comics/<name>` and set on the character; copy the
 `lora NAME: Comics/<name> 0.8 <trigger>` line into a `.comic` script.
+
+The pull never overwrites a LoRA already in `Models/Lora/<loraFolder>/`: a
+second `am_nova` lands as `am_nova_2.safetensors` and the character gets
+`Comics/am_nova_2`. If collecting fails (scp error, disk full) the job is
+`failed` with `collectable: true`; fix the cause and
+`POST /api/training/jobs/current/collect` retries pull, refresh and the
+character's lora.
 
 ## Troubleshooting
 

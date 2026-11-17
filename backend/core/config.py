@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from typing import List
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,11 @@ class AuthConfig(BaseModel):
     # believe. Requests it relays are never treated as local. Edit
     # data/settings.json to change; empty disables proxy trust.
     trustedProxy: str = "192.168.1.11"
+    # Extra Host header names the server answers to (besides localhost,
+    # 127.0.0.1, [::1] and this machine's own names/LAN addresses, which are
+    # detected at startup). Anything else gets 400 (DNS rebinding guard).
+    # Add the public name here before proxying it, e.g. "manga.madebypless.dk".
+    allowedHosts: List[str] = []
 
 
 class TrainingConfig(BaseModel):

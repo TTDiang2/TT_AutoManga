@@ -67,6 +67,9 @@ elif "cat >" in cmd:
     open(os.path.join(state, "written.yaml"), "w").write(sys.stdin.read())
 elif "setsid nohup" in cmd:
     print("4242")
+elif cmd.startswith("cat ") and ".pid" in cmd:
+    if os.path.exists(os.path.join(state, "pidfile")):
+        print(open(os.path.join(state, "pidfile")).read())
 elif "AMSTAT" in cmd:
     sys.stdout.buffer.write(open(os.path.join(state, "poll"), "rb").read())
 '''
@@ -113,7 +116,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(env):
-    return TestClient(app, client=("127.0.0.1", 50000))
+    return TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000))
 
 
 def _calls(env):
@@ -193,10 +196,14 @@ def test_remote_linux_commands(env):
     assert r.base_model == "/home/razer/models/base.safetensors"
     assert r.output_file("am_x") == "/home/razer/ai-toolkit/output/am_x/am_x.safetensors"
     launch = r.launch_command("/j/config.yaml", "/j/train.log")
-    assert launch.startswith("cd /home/razer/ai-toolkit || exit 1; rm -f /j/train.log.exit; setsid nohup /bin/sh -c ")
+    assert launch.startswith("cd /home/razer/ai-toolkit || exit 1; rm -f /j/train.log.exit /j/train.log.pid; "
+                             "setsid nohup /bin/sh -c ")
     assert "venv/bin/python run.py /j/config.yaml > /j/train.log 2>&1" in launch
     assert "mv -f /j/train.log.exit.tmp /j/train.log.exit" in launch
-    assert launch.endswith("> /dev/null 2>&1 < /dev/null & echo $!")
+    assert "rm -f /j/train.log.exit /j/train.log.pid;" in launch
+    assert "> /dev/null 2>&1 < /dev/null & p=$!; echo $p > /j/train.log.pid.tmp && " \
+           "mv -f /j/train.log.pid.tmp /j/train.log.pid; echo $p" in launch
+    assert r.job_dir("am_x", "j9") == "/home/razer/automanga-training/am_x/j9"
     poll = r.poll_command(4242, "/j/train.log", 100)
     assert "/proc/4242/cmdline" in poll and "grep -qF /j/train.log" in poll
     assert "tail -c +101 /j/train.log" in poll
@@ -268,7 +275,7 @@ def test_generate_uses_appearance_grid_and_seed_steps(env, monkeypatch):
         return {"success": True, "image": "data:image/png;base64," + base64.b64encode(_png_bytes()).decode()}
 
     monkeypatch.setattr(swarm_client, "generate_image", fake_generate)
-    with TestClient(app, client=("127.0.0.1", 50000)) as c:
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as c:
         _dataset(c, n=0)
         r = c.post("/api/training/datasets/nova/generate", json={"count": 4})
         assert r.status_code == 200, r.text
@@ -307,10 +314,12 @@ def test_job_pipeline_end_to_end(client, env):
     assert job["remote"]["output"] == "/home/razer/ai-toolkit/output/am_nova/am_nova.safetensors"
     calls = _calls(env)
     scp_push = [c for c in calls if c.startswith("scp\t") and "pless@razer:" in c][0]
-    assert scp_push.endswith("pless@razer:/home/razer/automanga-training/am_nova/dataset/")
+    jd = f"/home/razer/automanga-training/am_nova/{job['id']}"     # per-job remote dir
+    assert scp_push.endswith(f"pless@razer:{jd}/dataset/")
+    assert job["remote"]["log"] == f"{jd}/train.log" and job["remote"]["pidfile"] == f"{jd}/train.log.pid"
     assert scp_push.count(".png") == 15 and scp_push.count(".txt") == 15
     cfg = (env.remote / "written.yaml").read_text()
-    assert 'folder_path: "/home/razer/automanga-training/am_nova/dataset"' in cfg
+    assert f'folder_path: "{jd}/dataset"' in cfg
     assert "steps: 100" in cfg and 'trigger_word: "amnova"' in cfg
     assert 'name_or_path: "/home/razer/models/base.safetensors"' in cfg
     # another start while one runs
@@ -437,4 +446,126 @@ def test_launch_command_returns_at_once_and_detaches(tmp_path, monkeypatch):
     assert not Path(log + ".exit").exists()
     assert _wait(lambda: Path(log + ".exit").exists(), timeout=10)
     assert Path(log + ".exit").read_text().strip() == "0"
+    assert Path(log + ".pid").read_text().strip() == proc.stdout.decode().strip()
     assert Path(log).read_text() == "trained run.py\n"
+
+
+# ---------------------------------------------------------------------------
+# review fixes: locking, races, restart adoption, overwrite, caps
+# ---------------------------------------------------------------------------
+
+def test_render_config_strips_control_characters():
+    text = tr.render_config(name="n", trigger="t", folder_path="/f", base_model="/b", steps=10,
+                            prompts=["t, red\njacket\x1b[31m\u2028x", "p"])
+    assert '"t, red jacket [31m x"' in text
+    assert tr.clean_text("a\tb\r\n  c") == "a b c"
+
+
+def test_restart_during_launching_adopts_the_trainer(client, env):
+    _persist(env, phase="launching", pid=None)
+    (env.remote / "pidfile").write_text("5151\n")
+    (env.remote / "poll").write_bytes(b"AMSTAT none 1\n")
+    job = client.get("/api/training/jobs/current").json()["job"]
+    assert job["phase"] == "running" and job["pid"] == 5151
+    assert any("adopted" in e for e in job["events"])
+    assert any(c.startswith("ssh") and "train.log.pid" in c for c in _calls(env))
+
+
+def test_restart_during_launching_without_pidfile_fails(client, env):
+    _persist(env, phase="launching", pid=None)
+    job = client.get("/api/training/jobs/current").json()["job"]
+    assert job["phase"] == "failed" and "restart" in job["error"]
+
+
+def test_stopped_while_launching_after_restart_kills_the_trainer(client, env):
+    _persist(env, phase="stopped", pid=None, stopRequested=True)
+    (env.remote / "pidfile").write_text("5151\n")
+    client.get("/api/training/jobs/current")
+    assert any("kill -TERM -- -5151" in c for c in _calls(env))
+    assert client.get("/api/training/jobs/current").json()["job"]["phase"] == "stopped"
+
+
+def test_stop_during_launch_stops_the_launched_process(client, env, monkeypatch):
+    _dataset(client, n=15)
+    real_launch = tr.Remote.launch
+
+    def launch_then_stop(self, cfg, log):
+        assert tapi.stop_job()["job"]["phase"] == "stopped"    # pressed while ssh runs
+        return real_launch(self, cfg, log)
+    monkeypatch.setattr(tr.Remote, "launch", launch_then_stop)
+    client.post("/api/training/jobs", json={"slug": "nova"})
+    _wait_worker()
+    job = client.get("/api/training/jobs/current").json()["job"]
+    assert job["phase"] == "stopped" and job["pid"] == 4242
+    assert any("kill -TERM -- -4242" in c for c in _calls(env))
+
+
+def test_superseded_job_does_no_remote_steps(env):
+    _persist(env, phase="stopped", stopRequested=True)
+    tapi._prepare_and_launch("j1")
+    tapi._prepare_and_launch("not-the-current-job")
+    assert not any("setsid" in c or c.startswith("scp") for c in _calls(env))
+
+
+def test_job_lock_is_free_during_ssh(client, env, monkeypatch):
+    import threading
+    _persist(env, phase="running")
+    seen = []
+
+    def poll(self, pid, log, offset):
+        out = []
+        t = threading.Thread(target=lambda: out.append(tapi._lock.acquire(timeout=1)
+                                                       and (tapi._lock.release() or True)))
+        t.start()
+        t.join()
+        seen.append(out[0])
+        return None, True, b""
+    monkeypatch.setattr(tr.Remote, "poll", poll)
+    client.get("/api/training/jobs/current")
+    assert seen == [True]
+
+
+def test_pull_never_overwrites_an_existing_lora(client, env):
+    existing = env.tmp / "Lora" / "Comics" / "am_nova.safetensors"
+    existing.parent.mkdir(parents=True)
+    existing.write_bytes(b"OLD")
+    _persist(env, phase="finishing")
+    client.get("/api/training/jobs/current")
+    _wait_worker()
+    job = client.get("/api/training/jobs/current").json()["job"]
+    assert job["phase"] == "done", job
+    assert existing.read_bytes() == b"OLD"
+    assert (existing.parent / "am_nova_2.safetensors").read_bytes() == b"LORA" * 100
+    assert job["lora"]["name"] == "Comics/am_nova_2"
+    assert json.loads(env.chars.read_text())[0]["lora"]["name"] == "Comics/am_nova_2"
+
+
+def test_collect_retries_a_failed_finish(client, env):
+    (env.remote / "lora.safetensors").unlink()          # the pull fails
+    _persist(env, phase="finishing")
+    client.get("/api/training/jobs/current")
+    _wait_worker()
+    job = client.get("/api/training/jobs/current").json()["job"]
+    assert job["phase"] == "failed" and "collect" in job["error"] and job["collectable"]
+    (env.remote / "lora.safetensors").write_bytes(b"LORA")
+    r = client.post("/api/training/jobs/current/collect")
+    assert r.status_code == 200, r.text
+    _wait_worker()
+    job = client.get("/api/training/jobs/current").json()["job"]
+    assert job["phase"] == "done" and job["lora"]["name"] == "Comics/am_nova"
+    assert client.post("/api/training/jobs/current/collect").status_code == 409
+
+
+def test_upload_caps_and_bad_base64(client, env, monkeypatch):
+    _dataset(client, n=2)
+    monkeypatch.setattr(tapi, "MAX_UPLOAD_BYTES", 100)
+    files = [("files", ("big.png", _png_bytes(size=(200, 200)) + b"x" * 200, "image/png"))]
+    assert client.post("/api/training/datasets/nova/upload", files=files).status_code == 413
+    monkeypatch.setattr(tapi, "MAX_UPLOAD_BYTES", 25 << 20)
+    monkeypatch.setattr(tapi, "MAX_DATASET_IMAGES", 3)
+    files = [("files", (f"{i}.png", _png_bytes(), "image/png")) for i in range(2)]
+    assert client.post("/api/training/datasets/nova/upload", files=files).status_code == 400
+    assert client.get("/api/training/datasets/nova").json()["count"] == 2
+    with pytest.raises(Exception) as ei:
+        tapi._panel_bytes("data:image/png;base64,abc")      # bad padding
+    assert getattr(ei.value, "status_code", None) == 400
