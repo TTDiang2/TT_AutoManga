@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import List
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,27 @@ class AuthConfig(BaseModel):
     # detected at startup). Anything else gets 400 (DNS rebinding guard).
     # Add the public name here before proxying it, e.g. "manga.madebypless.dk".
     allowedHosts: List[str] = []
+    # "Sign in with Google" (backend/api/auth_google.py; docs/GOOGLE_LOGIN.md).
+    # The https URL browsers use, e.g. "https://manga.example.com" (no path):
+    # Google redirects to <publicUrl>/api/auth/google/callback, and the
+    # button only shows on that host. Empty disables Google sign-in. The
+    # client id/secret are in data/auth.json, never here.
+    publicUrl: str = ""
+    # Google accounts allowed to sign in (exact, lowercased addresses).
+    googleAllowedEmails: List[str] = []
+    # False: only Google sign-in for remote browsers (local callers and the
+    # CLI are unaffected, so the owner can't lock themselves out).
+    passwordLogin: bool = True
+
+    @field_validator("googleAllowedEmails")
+    @classmethod
+    def _lower_emails(cls, v: List[str]) -> List[str]:
+        out: List[str] = []
+        for e in v:
+            e = str(e).strip().lower()
+            if e and e not in out:
+                out.append(e)
+        return out
 
 
 class TrainingConfig(BaseModel):

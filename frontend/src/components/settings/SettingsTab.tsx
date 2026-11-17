@@ -3,8 +3,8 @@ import { FiSave, FiRefreshCw, FiCheck, FiEye, FiEyeOff, FiX } from 'react-icons/
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { AppSettings } from '../../types';
-import { changePassword, fetchAuthStatus, logout, logoutAll } from '../../auth';
-import type { AuthStatus } from '../../auth';
+import { changePassword, fetchAuthStatus, fetchGoogleConfig, logout, logoutAll, setAllowedEmails, setPasswordLogin } from '../../auth';
+import type { AuthStatus, GoogleConfig } from '../../auth';
 import { SET_PASSWORD_CMD } from '../auth/LoginScreen';
 import { IpAdapterSection, TrainingSection } from './ReferenceTrainingSettings';
 import type { IpAdapterSettings, TrainingSettings } from './ReferenceTrainingSettings';
@@ -978,7 +978,11 @@ function AccessSection() {
       <p className="text-sm text-secondary mb-md">{a.accessDesc}</p>
 
       {status.local && <p className="access-note">{a.localNote}</p>}
-      {!status.local && status.authenticated && <p className="access-note">{a.remoteNote}</p>}
+      {!status.local && status.authenticated && (
+        <p className="access-note">{status.email ? fill(a.signedInAs, { email: status.email }) : a.remoteNote}</p>
+      )}
+
+      <GoogleAccess onChange={refresh} />
 
       {!status.configured ? (
         <div className="form-group">
@@ -1059,7 +1063,138 @@ function AccessSection() {
         .access-msg { font-size: 13px; margin-top: var(--space-md); }
         .access-msg--ok { color: var(--success); }
         .access-msg--err { color: var(--error); }
+        .access-google { border-top: 1px solid var(--border-default); padding-top: var(--space-md); margin-bottom: var(--space-md); }
+        .access-google h5 { font-size: 14px; font-weight: 600; margin: 0 0 var(--space-xs); }
+        .access-emails { list-style: none; padding: 0; margin: 0 0 var(--space-sm); display: flex; flex-direction: column; gap: var(--space-xs); }
+        .access-emails li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm);
+          font-size: 13px; padding: var(--space-xs) var(--space-sm); border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm); background: var(--bg-tertiary); overflow-wrap: anywhere; }
+        .access-email-add { display: flex; gap: var(--space-sm); }
+        .access-email-add .input { flex: 1; min-width: 0; }
+        .access-toggle-row { display: flex; align-items: center; gap: var(--space-sm); margin-top: var(--space-md); }
       `}</style>
+    </div>
+  );
+}
+
+const SET_GOOGLE_CMD = '.venv/bin/python -m backend.core.auth set-google';
+const SET_PUBLIC_URL_CMD = '.venv/bin/python -m backend.core.auth set-public-url https://<public host>';
+const EMAIL_RE = /^[^@\s<>()[\],;:"]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
+/** Settings → Access → Sign in with Google: allowed accounts and the
+    password-login switch (backend/api/auth_google.py; docs/GOOGLE_LOGIN.md). */
+function GoogleAccess({ onChange }: { onChange: () => void }) {
+  const { t } = useTranslation();
+  const a = t.auth;
+  const [cfg, setCfg] = useState<GoogleConfig | null>(null);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = () => { fetchGoogleConfig().then(setCfg).catch(() => setCfg(null)); };
+  useEffect(load, []);
+
+  if (!cfg) return null;
+
+  const saveEmails = async (emails: string[]) => {
+    setBusy(true);
+    const r = await setAllowedEmails(emails);
+    setBusy(false);
+    if (r.ok) {
+      setMsg({ ok: true, text: a.saved });
+      setDraft('');
+      load();
+      onChange();
+    } else setMsg({ ok: false, text: r.detail || a.error });
+  };
+
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = draft.trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) { setMsg({ ok: false, text: a.invalidEmail }); return; }
+    if (cfg.allowedEmails.includes(email)) { setDraft(''); return; }
+    saveEmails([...cfg.allowedEmails, email]);
+  };
+
+  const togglePassword = async (enabled: boolean) => {
+    setBusy(true);
+    const r = await setPasswordLogin(enabled);
+    setBusy(false);
+    if (r.ok) { setMsg({ ok: true, text: a.saved }); load(); onChange(); }
+    else setMsg({ ok: false, text: r.detail || a.error });
+  };
+
+  return (
+    <div className="access-google">
+      <h5>{a.googleTitle}</h5>
+      {!cfg.configured ? (
+        <div className="form-group">
+          <p className="text-sm text-secondary mb-sm">{a.googleNotConfigured}</p>
+          <code className="access-code">{SET_GOOGLE_CMD}</code>
+        </div>
+      ) : !cfg.publicUrl ? (
+        <div className="form-group">
+          <p className="text-sm text-secondary mb-sm">{a.googleNoPublicUrl}</p>
+          <code className="access-code">{SET_PUBLIC_URL_CMD}</code>
+        </div>
+      ) : (
+        <>
+          <p className="text-sm text-secondary mb-sm">{fill(a.googleDesc, { url: cfg.publicUrl })}</p>
+          <div className="form-group">
+            <label>{a.redirectUri}</label>
+            <code className="access-code">{cfg.redirectUri}</code>
+          </div>
+        </>
+      )}
+
+      {(cfg.configured || cfg.allowedEmails.length > 0) && (
+        <div className="form-group">
+          <label htmlFor="access-email">{a.allowedEmails}</label>
+          {cfg.allowedEmails.length === 0
+            ? <p className="text-sm text-secondary mb-sm">{a.noEmails}</p>
+            : (
+              <ul className="access-emails">
+                {cfg.allowedEmails.map((email) => (
+                  <li key={email}>
+                    <span>{email}</span>
+                    <button type="button" className="btn btn-ghost btn-icon" disabled={busy}
+                            title={fill(a.removeEmail, { email })} aria-label={fill(a.removeEmail, { email })}
+                            onClick={() => saveEmails(cfg.allowedEmails.filter((x) => x !== email))}>
+                      <FiX size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          <form className="access-email-add" onSubmit={add}>
+            <input id="access-email" className="input" type="email" autoComplete="off"
+                   placeholder={a.emailPlaceholder} value={draft}
+                   onChange={(e) => setDraft(e.target.value)} />
+            <button type="submit" className="btn btn-secondary" disabled={busy || !draft.trim()}>
+              {a.addEmail}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {cfg.password && (
+        <div className="access-toggle-row">
+          <label className="toggle-switch">
+            <input type="checkbox" checked={cfg.passwordLogin} disabled={busy}
+                   aria-label={a.passwordLoginToggle}
+                   onChange={(e) => togglePassword(e.target.checked)} />
+            <span className="toggle-slider"></span>
+          </label>
+          <span className="text-sm">{a.passwordLoginToggle}</span>
+        </div>
+      )}
+      {cfg.password && <p className="text-sm text-secondary">{a.passwordLoginHint}</p>}
+
+      {msg && (
+        <p className={`access-msg ${msg.ok ? 'access-msg--ok' : 'access-msg--err'}`} role="status">
+          {msg.text}
+        </p>
+      )}
     </div>
   );
 }

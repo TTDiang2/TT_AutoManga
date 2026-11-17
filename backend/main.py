@@ -14,6 +14,7 @@ import time
 
 from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
 from .api import auth as auth_api
+from .api import auth_google as auth_google_api
 from .api import training as training_api
 from .core import auth as auth_core
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
@@ -227,18 +228,21 @@ async def auth_gate(request: Request, call_next):
     if data is None:
         return JSONResponse({"detail": "login is not configured on this server"},
                             status_code=503)
-    claims = auth_core.read_token(request.cookies.get(auth_core.COOKIE_NAME), data)
+    # a Google session (claims["email"]) ends once its address is no longer allowed
+    claims = auth_core.check_session(request.cookies.get(auth_core.COOKIE_NAME), data)
     if claims is None:
         return JSONResponse({"detail": "authentication required"},
                             status_code=401)
     response = await call_next(request)
     if auth_core.needs_refresh(claims) and \
             auth_core.COOKIE_NAME not in response.headers.get("set-cookie", ""):
-        auth_core.set_session_cookie(response, request, data)  # rolling refresh
+        auth_core.set_session_cookie(response, request, data,   # rolling refresh
+                                     email=claims.get("email"))
     return response
 
 
 app.include_router(auth_api.router)
+app.include_router(auth_google_api.router)
 app.include_router(storyboard.router)
 app.include_router(prompt.router)
 app.include_router(assets.router)

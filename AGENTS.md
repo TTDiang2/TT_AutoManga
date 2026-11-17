@@ -35,7 +35,8 @@ content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
 
 ### Access (login gate)
 
-`/api/*` is behind one password (`backend/core/auth.py`, middleware
+`/api/*` is behind one password and/or "Sign in with Google"
+(`backend/core/auth.py`, `backend/api/auth_google.py`, middleware
 `auth_gate` in `backend/main.py`). **Local callers are exempt**: a request
 whose TCP peer is `127.0.0.1`/`::1`, whose `Host` is `localhost`, `127.0.0.1`
 or `[::1]` (any port) and that carries no `X-Forwarded-For`, `Forwarded` or
@@ -62,11 +63,51 @@ the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
 - Set or change the password on the server:
   `.venv/bin/python -m backend.core.auth set-password`. Add `--stdin` to read
   it from the first line of stdin. `logout-all` signs every device out, and
-  `status` shows whether a password is set. The password lives in
+  `status` shows what is configured (never a secret). The password lives in
   `data/auth.json` (chmod 600) as a scrypt hash, a 32-byte secret and a
   version. Changing the password or running `logout-all` bumps the version.
+- Sign in with Google (OpenID Connect; setup: `docs/GOOGLE_LOGIN.md`):
+  - The OAuth client id and secret live only in `data/auth.json`
+    (`set-google`, `--stdin` reads "id\nsecret"; `clear-google`), never in
+    settings.json, and no API returns them.
+  - `settings.auth.publicUrl` (default `""` = off) is the https URL browsers
+    use; the redirect URI is always `<publicUrl>/api/auth/google/callback`
+    (never derived from Host). `set-public-url <url>` sets it and adds its
+    host to `allowedHosts`.
+  - `settings.auth.googleAllowedEmails` (exact, lowercased; `allow-email` /
+    `deny-email`, or Settings → Access). Removing an address ends its
+    sessions at once.
+  - `settings.auth.passwordLogin` (default `true`). `false`: remote
+    `POST /api/auth/login` gets 403 `password login is disabled`. Local
+    callers and the CLI still work, so the owner can't be locked out.
+  - The CLI settings commands edit `data/settings.json` on disk; restart the
+    server afterwards (it holds settings in memory).
+  - `GET /api/auth/google/start?next=/path` (public) 302s to Google with
+    PKCE S256, state, nonce and `prompt=select_account`. On any Host other
+    than publicUrl's it 302s to publicUrl's start first. state, nonce,
+    verifier and next ride in a signed HttpOnly `am_oauth` cookie
+    (Path `/api/auth/google`, 10 min), not server memory.
+  - `GET /api/auth/google/callback` (public) checks state, exchanges the
+    code (client_secret_post + code_verifier), checks the ID token's claims
+    (iss, aud/azp, exp, nonce, email_verified, allowlist; no signature check,
+    since the token comes straight from Google over TLS), then sets
+    `am_session` with `email` and 302s to `next`. `next` must be a relative
+    `/path` (not `//`, no `\`), else `/`. On failure it 302s to
+    `/?login_error=denied|not_allowed|invalid|misconfigured|rate`. Failures
+    count against the login rate limiter.
 - Endpoints:
-  - `GET /api/auth/status` returns `{configured, authenticated, local}`.
+  - `GET /api/auth/status` returns `{configured, authenticated, local,
+    passwordLogin, google, googleUrl, email}`. `passwordLogin`: the password
+    form works for this caller. `google`: the Google button works on this
+    page (client stored, publicUrl set, and this Host is publicUrl's).
+    `googleUrl`: publicUrl, when Google is set up but this is another host
+    (e.g. the LAN IP). `email`: the session's Google account, if any.
+  - `GET /api/auth/google` (gated) returns `{configured, publicUrl,
+    redirectUri, allowedEmails, passwordLogin, password}`.
+  - `PUT /api/auth/google/allowed {emails: [...]}` (gated): 400 on an
+    invalid address, 409 when emptying the list while password login is off.
+  - `PUT /api/auth/password-login {enabled}` (gated): turning it off gets 409
+    unless a Google client, publicUrl and at least one allowed email exist.
   - `POST /api/auth/login {password}` logs in. 5 failures within 15 min
     lock that IP out (429 with `Retry-After`) for 15 min, each further
     lockout doubling up to 1 h; a successful login resets the IP. No global

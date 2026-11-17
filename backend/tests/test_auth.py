@@ -18,7 +18,9 @@ PW = "correct horse battery"
 def isolated_auth(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "AUTH_FILE", tmp_path / "auth.json")
     monkeypatch.setattr(auth, "FAILURE_DELAY_S", 0)
-    monkeypatch.setattr(config.settings.auth, "trustedProxy", PROXY)
+    # the in-memory settings may come from the real data/settings.json:
+    # pin every auth setting these tests depend on (nothing is saved)
+    monkeypatch.setattr(config.settings, "auth", config.AuthConfig(trustedProxy=PROXY))
     auth.limiter.clear()
     yield tmp_path / "auth.json"
     auth.limiter.clear()
@@ -106,7 +108,9 @@ def test_remote_401_then_200_after_login(configured):
     assert r.status_code == 401
     assert r.json()["detail"] == "authentication required"
     st = c.get("/api/auth/status").json()
-    assert st == {"configured": True, "authenticated": False, "local": False}
+    assert st == {"configured": True, "authenticated": False, "local": False,
+                  "passwordLogin": True, "google": False, "googleUrl": None,
+                  "email": None}
     assert c.post("/api/auth/login", json={"password": "nope"}).status_code == 401
     r = c.post("/api/auth/login", json={"password": PW})
     assert r.status_code == 200
