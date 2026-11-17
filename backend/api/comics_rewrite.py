@@ -17,6 +17,7 @@ Offsets are UTF-16 code units (JavaScript string indices), so a textarea's
 selectionStart/End can be sent as they are.
 """
 import asyncio
+import difflib
 import logging
 import re
 import time
@@ -74,7 +75,8 @@ HARD RULES:
 ACTION_PROMPTS = {
     "tighten_dialogue": (
         "Tighten the dialogue: rewrite only the speech lines (NAME: text) and the CAPTION and TEXT lines, shorter and "
-        "punchier, keeping their meaning, speakers, modifiers and order. Leave every other line exactly as it is."),
+        "punchier, keeping their meaning, speakers, modifiers and order. Leave every other line exactly as it is, "
+        "and never drop one: the SFX lines, cast:, place:, shot: and the description lines all come back unchanged."),
     "enrich_description": (
         "Enrich the panel descriptions: rewrite only the description lines (the lines that are not settings, cast, "
         "place, shot or lettering) with concrete visual detail: camera framing, poses, expressions, lighting, what is "
@@ -354,6 +356,65 @@ def _structure_error(original: str, suggestion: str) -> Optional[str]:
     return msg
 
 
+# What a line of a .comic block is, as comic.js lib/script.js reads it: "NAME (mods): text" with an upper-case name
+# (CAPTION/SFX/TEXT or a speaker), a known key line, a // comment, a marker, else description prose.
+_TEXT_LINE_RE = re.compile(r"^([A-Z][A-Z0-9_'.-]*(?: [A-Z][A-Z0-9_'.-]*)?)\s*(?:\([^)]*\))?\s*:\s*\S")
+_KEY_LINE_RE = re.compile(r"^([a-z_]+)\s*:", re.I)
+_LINE_KEYS = {"place", "cast", "seats", "shot", "seed", "neg", "prompt", "model", "regions", "pairfix", "face",
+              "creativity", "init", "lora", "ref", "rating", "layout", "layout_uncut"}
+# the line kinds each action may rewrite; every other line must come back unchanged and in order (// comments
+# never reach the comic, so either may edit them, e.g. drop a "// TODO" it has filled in)
+EDITABLE = {"tighten_dialogue": {"speech", "caption", "text", "comment"},
+            "enrich_description": {"description", "comment"}}
+
+
+def _line_kind(line: str) -> str:
+    t = line.strip()
+    if not t:
+        return "blank"
+    if t.startswith("//"):
+        return "comment"
+    if _MARKER_RE.match(t):
+        return "marker"
+    m = _TEXT_LINE_RE.match(t)
+    if m:
+        return {"CAPTION": "caption", "SFX": "sfx", "TEXT": "text"}.get(m.group(1), "speech")
+    m = _KEY_LINE_RE.match(t)
+    if m and m.group(1).lower() in _LINE_KEYS:
+        return "key"
+    return "description"
+
+
+def _kept_lines(block: str, editable: set) -> List[str]:
+    out = []
+    for l in block.replace("\r\n", "\n").split("\n"):
+        kind = _line_kind(l)
+        if kind != "blank" and kind not in editable:
+            out.append(" ".join(l.split()))
+    return out
+
+
+def _kept_lines_error(original: str, suggestion: str, action: str) -> Optional[str]:
+    """None when every line the action may not rewrite (for tighten_dialogue: all but speech, CAPTION and TEXT;
+    for enrich_description: all but description prose) is in the suggestion unchanged and in the same order."""
+    editable = EDITABLE.get(action)
+    if editable is None:
+        return None
+    want, got = _kept_lines(original, editable), _kept_lines(suggestion, editable)
+    if want == got:
+        return None
+    what = "dialogue" if action == "tighten_dialogue" else "descriptions"
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=want, b=got, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        if tag == "delete":
+            return f"the model removed \"{want[i1]}\" (only {what} may change)"
+        if tag == "insert":
+            return f"the model added \"{got[j1]}\" (only {what} may change)"
+        return f"the model changed \"{want[i1]}\" to \"{got[j1]}\" (only {what} may change)"
+    return None
+
+
 def _fix_todo(suggestion: str, original: str, remove: bool) -> str:
     """draft_uncut: the uncut markers keep their todo (the owner reviews the draft), or lose it on request."""
     orig = [l for l in original.split("\n") if _MARKER_RE.match(l)]
@@ -392,54 +453,103 @@ def _plan_status(plan: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# The endpoint
+# One rewrite (the endpoint below and the batch jobs of comics_rewrite_batch)
 # ---------------------------------------------------------------------------
 
-@router.post("/scripts/{name}/rewrite")
-async def rewrite_block(name: str, req: RewriteRequest):
-    path = cm._script_path(name)
-    if req.action not in ACTIONS:
+class Refused(HTTPException):
+    """The minor pre-check refused the block: the model never saw it."""
+
+    def __init__(self, why: str, line: Optional[int] = None):
+        super().__init__(status_code=400, detail=f"Not sent to the model: {why}")
+        self.line = line
+
+
+class Block:
+    """A validated block of a script text: str offsets, its lines and how it is guarded."""
+    __slots__ = ("start16", "end16", "start", "end", "original", "lo", "hi", "uncut_block", "all_uncut")
+
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+class Script:
+    """A script text parsed once for any number of blocks."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.lines = text.split("\n")
+        self.first_page, self.pages, self.panels = _structure(self.lines)
+        self.mature = _header_rating(self.lines, self.first_page) == "mature"
+        self.len16 = _u16_len(text)
+
+    def block(self, start16: int, end16: int, action: str) -> Block:
+        """The block [start16, end16) (UTF-16 offsets); 400 when it is out of range, empty, or not uncut for
+        draft_uncut."""
+        if not (0 <= start16 <= end16 <= self.len16):
+            raise HTTPException(status_code=400, detail="the block must satisfy 0 <= start <= end <= the text's length")
+        start, end = _u16_index(self.text, start16), _u16_index(self.text, end16)
+        original = self.text[start:end]
+        if not original.strip():
+            raise HTTPException(status_code=400, detail="the block is empty")
+        lo, hi = _block_lines(self.text, start, end)
+        uncut_block = any(_line_uncut(i, self.pages, self.panels) for i in range(lo, hi + 1))
+        all_uncut = all(_line_uncut(i, self.pages, self.panels) for i in range(lo, hi + 1))
+        if action == "draft_uncut" and not all_uncut:
+            raise HTTPException(status_code=400,
+                                detail="Draft uncut scene works only inside a PAGE uncut / PANEL uncut block")
+        return Block(start16=start16, end16=end16, start=start, end=end, original=original, lo=lo, hi=hi,
+                     uncut_block=uncut_block, all_uncut=all_uncut)
+
+    def guarded(self, b: Block, action: str) -> bool:
+        return action == "draft_uncut" or b.uncut_block or self.mature
+
+
+def check_action(action: str, instruction: Optional[str]) -> Optional[str]:
+    """The instruction, stripped (None when empty); 400 for an unknown action or a custom one without one."""
+    if action not in ACTIONS:
         raise HTTPException(status_code=400, detail=f"action must be one of {list(ACTIONS)}")
-    instruction = (req.instruction or "").strip() or None
-    if req.action == "custom" and not instruction:
+    instruction = (instruction or "").strip() or None
+    if action == "custom" and not instruction:
         raise HTTPException(status_code=400, detail="a custom rewrite needs an instruction")
-    text = req.text
-    if not (0 <= req.start <= req.end <= _u16_len(text)):
-        raise HTTPException(status_code=400, detail="the block must satisfy 0 <= start <= end <= the text's length")
-    start, end = _u16_index(text, req.start), _u16_index(text, req.end)
-    original = text[start:end]
-    if not original.strip():
-        raise HTTPException(status_code=400, detail="the block is empty")
+    return instruction
 
-    lines = text.split("\n")
-    first_page, pages, panels = _structure(lines)
-    lo, hi = _block_lines(text, start, end)
-    uncut_block = any(_line_uncut(i, pages, panels) for i in range(lo, hi + 1))
-    all_uncut = all(_line_uncut(i, pages, panels) for i in range(lo, hi + 1))
-    if req.action == "draft_uncut" and not all_uncut:
-        raise HTTPException(status_code=400,
-                            detail="Draft uncut scene works only inside a PAGE uncut / PANEL uncut block")
-    mature = _header_rating(lines, first_page) == "mature"
-    guarded = req.action == "draft_uncut" or uncut_block or mature
 
-    # concurrent rewrites are allowed (LM Studio queues them): a cancelled request keeps running on the
-    # server until the model answers, and must not block the retry
-    if guarded:
-        # BEFORE the model sees anything: every character on the block's panels must be a known adult
-        refused = await asyncio.to_thread(_minor_check, path, text, lo, hi)
-        if refused:
-            raise HTTPException(status_code=400, detail=f"Not sent to the model: {refused[0]}")
-
-    llm = OpenAIClient.for_request(model=(req.model or "").strip() or None, temperature=TEMPERATURE)
+def make_llm(model: Optional[str]) -> OpenAIClient:
+    """The configured LLM for one request (model overrides the stored one); 400 when none is configured."""
+    llm = OpenAIClient.for_request(model=(model or "").strip() or None, temperature=TEMPERATURE)
     llm.update_config(max_tokens=MAX_TOKENS)
     if not llm.endpoint or not llm.model:
         raise HTTPException(status_code=400, detail="no LLM configured: set the endpoint and model in Settings")
-    messages = _build_messages(lines, first_page, lo, hi, original, req.action, instruction, uncut_block)
+    return llm
+
+
+async def precheck(path, script: Script, b: Block, action: str) -> None:
+    """Minor protection BEFORE the model sees anything: every character on a guarded block's panels must be a
+    known adult, else Refused."""
+    if script.guarded(b, action):
+        refused = await asyncio.to_thread(_minor_check, path, script.text, b.lo, b.hi)
+        if refused:
+            raise Refused(refused[0], refused[1])
+
+
+async def rewrite(path, script: Script, b: Block, action: str, instruction: Optional[str], llm: OpenAIClient,
+                  remove_todo: bool = False, checked: bool = False) -> Dict[str, Any]:
+    """Rewrite one block: the minor pre-check (unless `checked`), the model, the answer cleaned to a drop-in
+    replacement, and its checks. {suggestion, original, plan, model, durationMs}; raises Refused (400), 400 and
+    502 (the LLM failed, or answered nothing)."""
+    if not checked:
+        await precheck(path, script, b, action)
+    text, original = script.text, b.original
+    messages = _build_messages(script.lines, script.first_page, b.lo, b.hi, original, action, instruction,
+                               b.uncut_block)
     t0 = time.monotonic()
     try:
         result = await llm.chat_completion(messages, temperature=TEMPERATURE, system_prompt=SYSTEM_PROMPT)
         answer = result["choices"][0]["message"]["content"] or ""
     except HTTPException:
+        raise
+    except asyncio.CancelledError:
         raise
     except Exception as e:   # transport errors, non-200s, odd bodies
         logger.warning("comics rewrite: LLM failed: %s", e)
@@ -447,24 +557,43 @@ async def rewrite_block(name: str, req: RewriteRequest):
     duration = int((time.monotonic() - t0) * 1000)
 
     suggestion = _clean(answer, original)
-    if req.action == "draft_uncut":
-        suggestion = _fix_todo(suggestion, original, req.remove_todo)
+    if action == "draft_uncut":
+        suggestion = _fix_todo(suggestion, original, remove_todo)
     if not suggestion.strip():
         raise HTTPException(status_code=502, detail="the LLM returned an empty answer")
 
-    new_text = text[:start] + suggestion + text[end:]
+    new_text = text[:b.start] + suggestion + text[b.end:]
     new_lines = new_text.split("\n")
     plan = await asyncio.to_thread(cm._run_plan, path, new_text, False, _has_uncut(new_lines))
     status = _plan_status(plan)
-    if req.action in STRUCTURE_KEPT:
+    if action in STRUCTURE_KEPT:
         # a duplicated or dropped panel is valid script, so the plan can't catch it: compare the markers
-        broken = _structure_error(original, suggestion)
+        # and a dropped SFX, cast or description line is valid too: compare the lines the action must not touch
+        broken = _structure_error(original, suggestion) or _kept_lines_error(original, suggestion, action)
         if broken:
-            status = {"ok": False, "error": broken, "line": lo + 1}
-    if status["ok"] and guarded:
-        n_lo, n_hi = _block_lines(new_text, start, start + len(suggestion))
+            status = {"ok": False, "error": broken, "line": b.lo + 1}
+    if status["ok"] and script.guarded(b, action):
+        n_lo, n_hi = _block_lines(new_text, b.start, b.start + len(suggestion))
         refused = await asyncio.to_thread(_minor_check, path, new_text, n_lo, n_hi)
         if refused:
             status = {"ok": False, "error": f"minor protection: {refused[0]}", "line": refused[1]}
     return {"suggestion": suggestion, "original": original, "plan": status, "model": llm.model,
-            "durationMs": duration, "start": req.start, "end": req.end, "action": req.action}
+            "durationMs": duration}
+
+
+# ---------------------------------------------------------------------------
+# The endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/scripts/{name}/rewrite")
+async def rewrite_block(name: str, req: RewriteRequest):
+    path = cm._script_path(name)
+    instruction = check_action(req.action, req.instruction)
+    script = Script(req.text)
+    b = script.block(req.start, req.end, req.action)
+    # concurrent rewrites are allowed (LM Studio queues them): a cancelled request keeps running on the
+    # server until the model answers, and must not block the retry
+    await precheck(path, script, b, req.action)
+    llm = make_llm(req.model)
+    out = await rewrite(path, script, b, req.action, instruction, llm, req.remove_todo, checked=True)
+    return {**out, "start": req.start, "end": req.end, "action": req.action}

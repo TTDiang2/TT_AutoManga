@@ -289,7 +289,7 @@ def test_crlf_text_keeps_crlf(client, repo, llm):
 def test_plan_failure_is_flagged(client, repo, llm):
     start, end = _span(SCRIPT, 9, 14)
     llm.answer = "PANEL\ncast: BROKEN\nKim."
-    r = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "enrich_description"})
+    r = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "custom", "instruction": "x"})
     assert r.status_code == 200
     d = r.json()
     assert d["suggestion"].startswith("PANEL\ncast: BROKEN")
@@ -402,7 +402,7 @@ def test_duplicated_panels_fail_the_structure_check(client, repo, llm):
                                   '"PANEL" became "PANEL h=1.2"')
     # same markers, other whitespace: fine
     llm.answer = _REWRITTEN.replace("PANEL", "PANEL  ", 1)
-    assert _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "enrich_description"}).json()["plan"]["ok"]
+    assert _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "tighten_dialogue"}).json()["plan"]["ok"]
 
 
 def test_custom_and_draft_uncut_may_change_the_structure(client, repo, llm):
@@ -425,3 +425,37 @@ def test_clean_unit():
     assert rw._clean("<<<SCRIPT_HEADER>>>\nPANEL\nKIM: Yo.", orig) == "PANEL\nKIM: Yo.\n\n"
     assert rw._structure_error("PAGE 2\nlayout: 1\nPANEL\n", "PAGE 2\nPANEL\nPANEL\n").startswith(
         "the model changed the panel structure (expected 1 panel, got 2)")
+
+
+def test_each_action_keeps_the_lines_it_may_not_touch(client, repo, llm):
+    sfx = SCRIPT.replace("Kim sits in a booth.\n", "Kim sits in a booth.\nSFX (tr): KRZZT\n")
+    start, end = _span(sfx, 9, 16)
+    # tighten_dialogue dropped the SFX line: valid script, so only this check catches it
+    llm.answer = _REWRITTEN
+    d = _post(client, {"text": sfx, "start": start, "end": end, "action": "tighten_dialogue"}).json()
+    assert d["plan"] == {"ok": False, "line": 9,
+                         "error": 'the model removed "SFX (tr): KRZZT" (only dialogue may change)'}
+    # dialogue rewritten, SFX kept: fine
+    llm.answer = _REWRITTEN.replace("booth.\n", "booth.\nSFX (tr): KRZZT\n")
+    assert _post(client, {"text": sfx, "start": start, "end": end, "action": "tighten_dialogue"}).json()["plan"]["ok"]
+    # tighten_dialogue may not rewrite the description or the cast
+    llm.answer = _REWRITTEN.replace("booth.\n", "booth, tired.\nSFX (tr): KRZZT\n")
+    assert _post(client, {"text": sfx, "start": start, "end": end, "action": "tighten_dialogue"}).json()["plan"]["error"] == (
+        'the model changed "Kim sits in a booth." to "Kim sits in a booth, tired." (only dialogue may change)')
+    # enrich_description may only change the prose: the speech line must stay
+    llm.answer = _REWRITTEN.replace("booth.\n", "booth, neon light on the window.\nSFX (tr): KRZZT\n")
+    d = _post(client, {"text": sfx, "start": start, "end": end, "action": "enrich_description"}).json()
+    assert d["plan"]["error"] == ('the model changed "KIM: I have been waiting here for a really long time, you know." '
+                                  'to "KIM: I waited. Forever." (only descriptions may change)')
+    llm.answer = ("PANEL\nplace: diner, evening\ncast: kim(casual)\nshot: medium\nKim sits in a booth.\n"
+                  "Neon light spills over the window.\nSFX (tr): KRZZT\n"
+                  "KIM: I have been waiting here for a really long time, you know.")
+    assert _post(client, {"text": sfx, "start": start, "end": end, "action": "enrich_description"}).json()["plan"]["ok"]
+
+
+def test_line_kinds():
+    k = rw._line_kind
+    assert [k(l) for l in ["PANEL", "cast: kim", "Shot: wide", "KIM (whisper): hi", "CAPTION: Later.", "SFX: BANG",
+                           "TEXT (left): on my way", "// note", "", "Kim waits: still.", "MR. LEE: Hi"]] == [
+        "marker", "key", "key", "speech", "caption", "sfx", "text", "comment", "blank", "description", "speech"]
+    assert rw._kept_lines_error("PANEL\nKIM: a\n", "PANEL\nKIM: b\n", "custom") is None

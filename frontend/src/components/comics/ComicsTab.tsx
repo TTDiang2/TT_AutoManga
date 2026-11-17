@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal, FiZap } from 'react-icons/fi';
+import { FiBookOpen, FiCheck, FiCopy, FiCpu, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal, FiZap } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
 import { AiRewrite, type AiTarget } from './AiRewrite';
 import { OutlinePanel } from './OutlinePanel';
+import { BatchDialog, type BatchStartBody } from './BatchDialog';
+import { BatchReview } from './BatchReview';
+import { applyAccepted, finished, mergeBatch, type Batch, type BatchResult } from './batchApply';
+import { toApply, useBatchReview } from './batchDecisions';
 import { parseOutline, targetAt, targetLabel, type OutlineEntry, type OutlineKind, type OutlineWords } from './outline';
 import { useComicsDrafts, openedDraft } from './scriptDrafts';
 import { fill, useTranslation } from '../../hooks/useTranslation';
@@ -73,7 +77,10 @@ interface UncutSlot { line: number; kind: 'page' | 'panel'; id: string; cast?: s
 
 type Plan = { ok: true; panels: PlanPanel[]; edition?: 'uncut'; slots?: UncutSlot[] } | { ok: false; error: string; line: number | null };
 
-type View = 'script' | 'log' | 'pages' | 'panels';
+type View = 'script' | 'log' | 'pages' | 'panels' | 'batch';
+
+const BATCH_URL = '/api/comics/rewrite-batch/current';
+const BATCH_POLL_MS = 2000;
 
 const NEW_SCRIPT = `// A new comic. Format: see the Comics repo README.
 title: Untitled
@@ -197,7 +204,7 @@ export function ComicsTab() {
   const text = draft?.text ?? '';
   const savedText = draft?.savedText ?? '';
   const setText = (value: string) => { if (selected) setDraft(selected, { text: value }); };
-  const [view, setView] = useState<View>('script');
+  const [viewState, setView] = useState<View>('script');
   const [face, setFace] = useState(false);
   // the uncut edition: runs, the plan, the pages and the panels are its own (out/<name>-uncut/)
   const [uncut, setUncut] = useState(false);
@@ -230,6 +237,42 @@ export function ComicsTab() {
       .catch(() => setLlm(null));
   }, []);
   const llmReady = !!(llm?.endpoint && llm.model);
+
+  // Batch AI rewrite: the job lives on the server (one at a time, survives reloads); read once on open, followed
+  // every 2 s while it runs. The owner's Accept/Reject choices are in useBatchReview.
+  const [batch, setBatch] = useState<Batch | null>(null);
+  const batchRef = useRef<Batch | null>(null);
+  useEffect(() => { batchRef.current = batch; }, [batch]);
+  const [batchDialog, setBatchDialog] = useState(false);
+  // the batch view needs this script's batch (it may be cleared, or be another script's)
+  const view: View = viewState === 'batch' && !(batch && batch.script === selected) ? 'script' : viewState;
+  const [batchNotice, setBatchNotice] = useState<string | null>(null);
+  const batchDecisions = useBatchReview(s => (batch ? s.decisions[batch.id] : undefined));
+  const batchApplied = useBatchReview(s => (batch ? s.applied[batch.id] : undefined));
+  useEffect(() => {
+    fetch(BATCH_URL).then(r => (r.ok ? r.json() : null)).then(d => { if (d) setBatch(d.batch ?? null); }).catch(() => {});
+  }, []);
+  const batchRunning = batch?.status === 'running';
+  const batchId = batch?.id;
+  useEffect(() => {
+    if (!batchRunning) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      const cur = batchRef.current;
+      if (!cur || cancelled) return;
+      try {
+        const { batch: next } = await json<{ batch: Batch | null }>(await fetch(`${BATCH_URL}?since=${cur.seq}`));
+        if (cancelled) return;
+        const merged = mergeBatch(cur, next);
+        setBatch(merged);
+        if (!merged || merged.id !== cur.id || merged.status !== 'running') return;
+      } catch { /* the server restarts now and then; keep polling */ }
+      if (!cancelled) timer = setTimeout(poll, BATCH_POLL_MS);
+    };
+    timer = setTimeout(poll, BATCH_POLL_MS);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [batchRunning, batchId]);
 
   // the outline: parsed from the editor text 200 ms after the last keystroke, the caret's entry 150 ms after it moves
   const [outlineText, setOutlineText] = useState(text);
@@ -474,6 +517,7 @@ export function ComicsTab() {
   const onOutlinePick = useCallback((_kind: OutlineKind, e: OutlineEntry) => handlers.current.selectRange(e.startOffset, e.endOffset), []);
   const onOutlineAi = useCallback((kind: OutlineKind, e: OutlineEntry) => handlers.current.aiOn(kind, e), []);
   const onAiLock = useCallback((locked: boolean) => setAiLocked(locked), []);
+  const onOutlineBatch = useCallback(() => setBatchDialog(true), []);
 
   /** The shortcut's block at the caret, in the live text. */
   const aiAtCaret = (kind: 'panel' | 'scene') => {
@@ -563,6 +607,55 @@ export function ComicsTab() {
     } catch (e) { setError((e as Error).message); }
   };
 
+  const startBatch = async (body: BatchStartBody) => {
+    if (!selected) return;
+    let b: Batch;
+    try {
+      b = await json<Batch>(await fetch(`/api/comics/scripts/${selected}/rewrite-batch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      }));
+    } catch (e) {
+      // another device may have started one: show it
+      fetch(BATCH_URL).then(r => (r.ok ? r.json() : null)).then(d => { if (d) setBatch(d.batch ?? null); }).catch(() => {});
+      throw e;
+    }
+    setBatch({ ...b, partial: false });
+    setBatchDialog(false);
+    setBatchNotice(null);
+    setView('batch');
+  };
+
+  const stopBatch = async () => {
+    try { await json(await fetch(`${BATCH_URL}/stop`, { method: 'POST' })); }
+    catch (e) { setError((e as Error).message); }
+  };
+
+  const clearBatch = async () => {
+    const id = batch?.id;
+    try {
+      await json(await fetch(BATCH_URL, { method: 'DELETE' }));
+      if (id) useBatchReview.getState().forget(id);
+      setBatch(null);
+      setView('script');
+    } catch (e) { setError((e as Error).message); }
+  };
+
+  /** "Apply N accepted to editor": into the editor text (unsaved), bottom-up; blocks whose text changed meanwhile are
+      skipped and named. */
+  const applyBatch = (results: BatchResult[]) => {
+    if (!batch || !selected) return;
+    const report = applyAccepted(text, results);
+    if (report.applied.length) {
+      setText(report.text);
+      useBatchReview.getState().markApplied(batch.id, report.applied);
+    }
+    const reasons = { missing: c.batchSkipMissing, ambiguous: c.batchSkipAmbiguous, overlap: c.batchSkipOverlap, 'no-suggestion': c.batchSkipNone };
+    const skipped = report.skipped.map(s => `${s.label || `#${s.index + 1}`} (${reasons[s.reason]})`).join('; ');
+    setBatchNotice([fill(c.batchApplied, { n: report.applied.length }),
+      report.skipped.length ? fill(c.batchSkipped, { n: report.skipped.length, list: skipped }) : ''].filter(Boolean).join(' '));
+    setView('script');
+  };
+
   if (listError) {
     return (
       <div className="empty-state">
@@ -586,6 +679,11 @@ export function ComicsTab() {
   const scriptBusy = Boolean(running && runIsHere);
   // variant files carry no mtime in older comic.js --plan output: the last run's end busts the cache
   const variantStamp = Math.floor(run?.ended ?? run?.started ?? 0);
+  const batchHere = batch && batch.script === selected ? batch : null;
+  const batchBlocked = !llmReady ? c.aiNoLlm
+    : batchRunning && batch ? (batch.script === selected ? c.batchRunningHere : fill(c.batchRunningOther, { script: batch.script }))
+      : null;
+  const batchUnapplied = batch && !batchRunning ? toApply(batch.results, batchDecisions, batchApplied).length : 0;
 
   return (
     <div className="comics-tab">
@@ -662,6 +760,7 @@ export function ComicsTab() {
             </div>
 
             {error && <div className="comics-error" onClick={() => setError(null)}>{error}</div>}
+            {batchNotice && <div className="comics-note" role="status" onClick={() => setBatchNotice(null)}>{batchNotice}</div>}
             {running && !runIsHere && run && (
               <div className="comics-note">Converting <b>{run.script}</b>; one run at a time.</div>
             )}
@@ -710,6 +809,11 @@ export function ComicsTab() {
               <button className={view === 'panels' ? 'active' : ''} onClick={() => setView('panels')}>
                 <FiGrid size={13} /> Panels{stale ? ` (${stale} stale)` : ''}
               </button>
+              {batchHere && (
+                <button className={view === 'batch' ? 'active' : ''} onClick={() => setView('batch')} title={c.batchTabHint}>
+                  <FiCpu size={13} /> {fill(c.batchTab, { a: finished(batchHere), b: batchHere.total })}{batchHere.status === 'running' ? ' …' : ''}
+                </button>
+              )}
               {view === 'script' && (
                 <>
                   <button className="comics-save" onClick={openAi} disabled={!llmReady || !!ai}
@@ -729,7 +833,7 @@ export function ComicsTab() {
                 <OutlinePanel outline={outline} caret={caretPos} open={outlineOpen} onToggle={toggleOutline}
                   mode={outlineMode} onMode={pickMode} words={words}
                   aiBlocked={!llmReady ? c.aiNoLlm : aiLocked ? c.aiLocked : null}
-                  onPick={onOutlinePick} onAi={onOutlineAi} />
+                  onPick={onOutlinePick} onAi={onOutlineAi} onBatch={onOutlineBatch} batchBlocked={batchBlocked} />
                 <div className="comics-editor-wrap">
                   <textarea
                     ref={editorRef}
@@ -760,6 +864,13 @@ export function ComicsTab() {
                   )}
                 </div>
               </div>
+            )}
+            {batchDialog && (
+              <BatchDialog text={text} words={words} model={llm?.model ?? ''} blocked={batchBlocked}
+                replaces={batchUnapplied} onStart={startBatch} onClose={() => setBatchDialog(false)} />
+            )}
+            {view === 'batch' && batchHere && (
+              <BatchReview batch={batchHere} editorText={text} onApply={applyBatch} onStop={stopBatch} onClear={clearBatch} />
             )}
             {view === 'log' && runIsHere && run && (
               <pre className="comics-log" ref={logRef}>{run.lines.join('\n')}</pre>

@@ -658,13 +658,47 @@ which paints with comic.js and rebuilds the project here. Names are
   block; a failing suggestion is still returned, flagged.
   `tighten_dialogue` and `enrich_description` must keep the block's
   PAGE/PANEL marker lines (count, order, arguments), else `plan.ok` is false
-  with "the model changed the panel structure (expected N panels, got M)".
+  with "the model changed the panel structure (expected N panels, got M)";
+  and every line the action may not rewrite must come back unchanged and in
+  order (blank lines ignored, whitespace normalised): `tighten_dialogue` may
+  change only speech, `CAPTION` and `TEXT` lines, `enrich_description` only
+  description prose, both `//` comments. Otherwise `plan.ok` is false with
+  e.g. `the model removed "SFX (tr): KRZZT" (only dialogue may change)`.
   The prompt gives the header and context first, then the block between
   `<<<BLOCK>>>` and `<<<END>>>`, then the task; the answer is read between
   those markers when present and cut at any echoed prompt section
   (`<<<CONTEXT_AFTER>>>`, ...), trailing blank lines trimmed to the block's. LLM failures → 502
   with a hint (endpoint must end in `/v1`; model crashed in LM Studio).
   Concurrent calls are allowed.
+- Batch AI rewrite (`backend/api/comics_rewrite_batch.py`, the Outline panel's
+  "Batch AI…" and the "AI batch" view): `POST /api/comics/scripts/{name}/rewrite-batch
+  {text, blocks: [{start, end, label, kind}], action, instruction?, model?, remove_todo?}`
+  → 202 with the job. The client sends the block list (its outline of the same
+  `text`: scenes, pages or panels, `kind` scene|page|panel|selection); blocks
+  must be sorted, non-overlapping, non-empty and within the text (UTF-16
+  offsets), ≤ 500, and `draft_uncut` needs every block uncut (400 otherwise).
+  Each block is rewritten exactly like the single rewrite above, against the
+  same snapshot `text`, one block and one LLM call at a time, in order, in a
+  background thread; the minor pre-check runs per block and a refused block
+  (`refused`) never reaches the model; a failing block doesn't stop the rest,
+  but 3 blocks in a row that can't reach the LLM fail the job. One batch at a
+  time on the server: 409 names the running one's script. `GET
+  /api/comics/rewrite-batch/current?since=<seq>` → `{batch: {id, script,
+  action, instruction, kind, model, status running|done|stopped|failed, error,
+  total, done, failed, refused, snapshotHash, seq, startedAt, endedAt,
+  results: [{index, label, kind, start, end, status
+  pending|running|done|failed|refused, original, suggestion, plan {ok, error,
+  line}, error, durationMs, seq}], partial}}` (with `since`, only results
+  changed after that seq); `POST …/current/stop` (the block in flight goes
+  back to pending); `DELETE …/current` clears a finished batch (409 while it
+  runs). Nothing is written to the script: the UI applies accepted
+  suggestions to its editor (bottom-up; when the text drifted from the
+  snapshot, each block is found again by its `original`, near its offsets
+  then anywhere unique, else skipped). `snapshotHash` is FNV-1a 32 over the
+  text's UTF-16 units, `"<length>:<hex>"`. Restart-proof: the job (snapshot
+  text included) is in `data/rewrite_batch.json`, written atomically on every
+  change; at startup a running job's running block goes back to pending and
+  the batch carries on.
 - Images: `GET /api/comics/scripts/{name}/file/page_01.png` (or `draft_01`),
   `/panel/p01-02.png` (`p01-02.prev.png` = the one it replaced),
   `/variant/p01-02_seed4301.png`.

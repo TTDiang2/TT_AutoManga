@@ -295,7 +295,8 @@
 
 .comics-outline-toggle,
 .comics-outline-tabs button,
-.comics-outline-ai {
+.comics-outline-ai,
+.comics-outline-batch {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -320,7 +321,13 @@
 
 .comics-outline-toggle:hover,
 .comics-outline-tabs button:hover,
-.comics-outline-ai:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-tertiary); }
+.comics-outline-ai:hover:not(:disabled),
+.comics-outline-batch:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-tertiary); }
+
+/* "Batch AI…": its own row under the tabs */
+.comics-outline-batch { width: 100%; justify-content: center; border-color: var(--border-default); }
+.comics-outline-batch svg { color: var(--accent-primary); }
+.comics-outline-batch:disabled { opacity: 0.5; cursor: default; }
 
 .comics-outline-list {
   position: relative;
