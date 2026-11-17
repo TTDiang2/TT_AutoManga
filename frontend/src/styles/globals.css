@@ -103,6 +103,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* AuthGate's wrapper around the app (made inert under the sign-in overlay) */
+.app-root {
+  height: 100%;
+}
+
 .app-container {
   display: flex;
   height: 100vh;

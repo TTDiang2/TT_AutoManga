@@ -1278,3 +1278,18 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
 
   closeImagePicker: () => set({ imagePickerRequest: null }),
 }));
+
+/** Edits that only live in memory: a project's pages since the last save, or any edit
+    of a composition that has no project yet. */
+export function hasUnsavedPages(s: Pick<ComposerStore, 'projectId' | 'pages' | '_savedPages' | '_past'>): boolean {
+  return s.projectId ? s.pages.length > 0 && s.pages !== s._savedPages : s._past.length > 0;
+}
+
+// the store outlives the Composer tab (App unmounts inactive tabs), so the guard lives here
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (e) => {
+    if (!hasUnsavedPages(useComposerStore.getState())) return;
+    e.preventDefault();
+    e.returnValue = '';   // older browsers want it set to show the prompt
+  });
+}

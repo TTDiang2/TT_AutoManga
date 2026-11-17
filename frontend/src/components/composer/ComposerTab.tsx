@@ -6,12 +6,14 @@ import {
   FiCopy, FiTrash2, FiSave, FiBook, FiX, FiPlusSquare, FiTrash,
   FiImage, FiZap, FiLayout, FiScissors,
 } from 'react-icons/fi';
-import { useComposerStore, TEMPLATES } from '../../store/composerStore';
+import { useComposerStore, TEMPLATES, hasUnsavedPages } from '../../store/composerStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import { Canvas } from './Canvas';
 import { PropertiesPanel } from './PropertiesPanel';
 import { renderPageToImage } from './pageRenderer';
+import { isTextEntry } from './textEntry';
+import { AUTH_RESTORED_EVENT } from '../../auth';
 import './composer.css';
 import type { BubbleType, ComposerPage } from '../../types';
 
@@ -160,6 +162,9 @@ const PageThumb = memo(function PageThumb({
   );
 });
 
+/** Autosave retries after a failure: 5 s, 15 s, then every 60 s (and at once after a sign-in). */
+const RETRY_DELAYS = [5000, 15000, 60000];
+
 const CONFLICT_MSG = "This project's pages were changed elsewhere (e.g. by a Comics import). "
   + 'Reload to see them — your unsaved changes here will be lost.';
 
@@ -178,6 +183,7 @@ export function ComposerTab() {
     currentProjectId,
     currentProjectName,
     saveConflict,
+    savedPages,
   } = useComposerStore(useShallow(s => ({
     pages: s.pages,
     currentPageId: s.currentPageId,
@@ -188,6 +194,7 @@ export function ComposerTab() {
     currentProjectId: s.projectId,
     currentProjectName: s.projectName,
     saveConflict: s.saveConflict,
+    savedPages: s._savedPages,
   })));
   const {
     addPage,
@@ -237,6 +244,8 @@ export function ComposerTab() {
     const { pages: current, addPage: add } = useComposerStore.getState();
     if (current.length === 0 && !useProjectStore.getState().composerProjectId) {
       add('manga-4');
+      // the starter page isn't an edit: nothing to undo, nothing unsaved (hasUnsavedPages)
+      useComposerStore.setState({ _past: [], _future: [], _lastCommitKey: null });
     }
   }, []);
 
@@ -246,15 +255,11 @@ export function ComposerTab() {
   }, [loadUserTemplates]);
 
   // Delete / Backspace removes the selected element. Ignored while an element
-  // is being edited inline, while focus is in any text-entry control, and for
+  // is being edited inline, while focus is in any form control, and for
   // locked elements.
   useEffect(() => {
-    const isTextEntry = (node: Element | null) => {
-      if (!node) return false;
-      const tag = node.tagName;
-      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-        || (node as HTMLElement).isContentEditable;
-    };
+    const isFormControl = (node: Element | null) =>
+      !!node && (node.tagName === 'INPUT' || node.tagName === 'SELECT' || isTextEntry(node));
     const handler = (e: KeyboardEvent) => {
       // Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z (or Ctrl+Y) redoes; text fields keep their own undo
       if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
@@ -268,7 +273,7 @@ export function ComposerTab() {
       const state = useComposerStore.getState();
       const id = state.selectedElementId;
       if (!id || state.editingElementId) return;
-      if (isTextEntry(e.target as Element | null) || isTextEntry(document.activeElement)) return;
+      if (isFormControl(e.target as Element | null) || isFormControl(document.activeElement)) return;
       const el = state.pages.find(p => p.id === state.currentPageId)?.elements.find(x => x.id === id);
       if (!el || el.locked) return;
       e.preventDefault();
@@ -286,6 +291,8 @@ export function ComposerTab() {
   const [sfxPresets, setSfxPresets] = useState<Array<{ word: string; lang?: string; meaning: string; meaningZh?: string }>>([]);
   const [showSfxMenu, setShowSfxMenu] = useState(false);
   const [paginating, setPaginating] = useState(false);
+  // consecutive failed saves of the current pages (0 = fine); drives the retry backoff
+  const [saveFailures, setSaveFailures] = useState(0);
   const sfxRef = useRef<HTMLDivElement | null>(null);
   const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -423,34 +430,78 @@ export function ComposerTab() {
   const saveNow = async () => {
     flash(t.composer.saving || 'Saving…', true);
     const result = await savePages({ force: true });
-    if (result === 'saved') flash(t.composer.savedSuccess || 'Saved!');
-    else if (result === 'error') flash(t.composer.saveFailed || 'Save failed');
+    if (result === 'saved') { setSaveFailures(0); flash(t.composer.savedSuccess || 'Saved!'); }
+    else if (result === 'error') { setSaveFailures(n => n + 1); flash(t.composer.saveFailed || 'Save failed'); }
     else flash('');
   };
 
   // autosave: only the pages, against the base they were loaded from; the
-  // `pages` reference changes on every edit (immutable updates)
+  // `pages` reference changes on every edit (immutable updates). A failed
+  // save is retried with backoff (RETRY_DELAYS) until one goes through.
   useEffect(() => {
     if (!currentProjectId || saveConflict || pages.length === 0) return;
     if (pages === useComposerStore.getState()._savedPages) return;
+    const delay = saveFailures === 0 ? 2000 : RETRY_DELAYS[Math.min(saveFailures, RETRY_DELAYS.length) - 1];
     const id = setTimeout(() => {
       savePages().then(result => {
-        if (result === 'error') flash(t.composer.autoSaveFailed || 'Autosave failed — retrying on the next change');
+        if (result === 'error') setSaveFailures(n => n + 1);
+        else if (result === 'saved') setSaveFailures(0);
       });
-    }, 2000);
+    }, delay);
     return () => clearTimeout(id);
-  }, [pages, currentProjectId, saveConflict, savePages, flash, t]);
+  }, [pages, currentProjectId, saveConflict, savePages, saveFailures]);
 
+  // a save that failed because the session ended: retry as soon as the user signs in again
+  useEffect(() => {
+    const onRestored = () => {
+      if (!hasUnsavedPages(useComposerStore.getState())) return;
+      savePages().then(result => {
+        if (result === 'error') setSaveFailures(n => n + 1);
+        else if (result === 'saved') setSaveFailures(0);
+      });
+    };
+    window.addEventListener(AUTH_RESTORED_EVENT, onRestored);
+    return () => window.removeEventListener(AUTH_RESTORED_EVENT, onRestored);
+  }, [savePages]);
+
+  // another tab asked to open a project here: save (or confirm dropping) the
+  // pages being edited first, since loading replaces them
   useEffect(() => {
     if (!composerProjectId) return;
-    setLoadError('');
-    loadProject(composerProjectId)
-      .catch(err => {
+    let cancelled = false;
+    (async () => {
+      // past the effect itself: a StrictMode re-run cancels this one before it asks anything
+      await Promise.resolve();
+      if (cancelled) return;
+      setLoadError('');
+      const s = useComposerStore.getState();
+      if (hasUnsavedPages(s)) {
+        const result = s.projectId ? await savePages() : 'unsaved';
+        if (cancelled) return;
+        if (result !== 'saved' && result !== 'skipped') {
+          const why = result === 'conflict'
+            ? 'Your Composer changes could not be saved: the pages were changed elsewhere.'
+            : result === 'error'
+              ? 'Your Composer changes could not be saved (the server did not accept them).'
+              : 'The composition open in the Composer has not been saved as a project.';
+          if (!window.confirm(`${why}\n\nOpen the other project anyway and discard them?`)) {
+            if (result === 'error') setSaveFailures(n => n + 1);
+            setComposerProjectId(null);
+            return;
+          }
+        }
+      }
+      try {
+        await loadProject(composerProjectId);
+        if (!cancelled) setSaveFailures(0);
+      } catch (err) {
         console.error('composer: project load failed:', err);
-        setLoadError(`Could not load the project (${err instanceof Error ? err.message : 'network error'}).`);
-      })
-      .finally(() => setComposerProjectId(null));
-  }, [composerProjectId, loadProject, setComposerProjectId]);
+        if (!cancelled) setLoadError(`Could not load the project (${err instanceof Error ? err.message : 'network error'}).`);
+      }
+      if (!cancelled) setComposerProjectId(null);
+    })();
+    return () => { cancelled = true; };
+  }, [composerProjectId, loadProject, savePages, setComposerProjectId]);
 
   const reloadProject = () => {
     if (!currentProjectId) return;
@@ -827,6 +878,11 @@ export function ComposerTab() {
             </div>
           </div>
 
+          {saveFailures > 0 && !saveConflict && pages !== savedPages && (
+            <span className="composer-save-failed" role="status" title={t.composer.autoSaveFailedHint}>
+              {t.composer.autoSaveFailed || 'Not saved — the last save failed; retrying'}
+            </span>
+          )}
           {saveMsg ? (
             <span style={{ fontSize: 12, color: 'var(--accent-primary)', marginRight: 8 }}>
               {saveMsg}

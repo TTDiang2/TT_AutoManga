@@ -24,10 +24,13 @@
   margin-bottom: var(--space-sm);
 }
 
-.btn-icon {
+/* .btn.btn-icon: globals' .btn padding (declared later, same specificity) squeezed the icon out */
+.btn.btn-icon {
   width: 32px;
   height: 32px;
   padding: 0;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .comics-new {

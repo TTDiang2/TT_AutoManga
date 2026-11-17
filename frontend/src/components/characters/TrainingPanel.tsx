@@ -3,6 +3,7 @@ import { FiCopy, FiPlay, FiSquare, FiTrash2, FiUpload, FiImage, FiDownload } fro
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Character } from '../../types';
+import { clampInt } from './clampInt';
 
 // Train LoRA (Phase 7): a dataset per character in data/training/<slug>/,
 // trained on the Razer by backend/api/training.py. One job at a time.
@@ -23,6 +24,7 @@ interface Job {
   name: string;
   slug: string;
   trigger: string;
+  characterId?: string | null;   // the character the server sets the LoRA on when the job is done
   phase: 'pushing' | 'launching' | 'running' | 'finishing' | 'done' | 'failed' | 'stopped';
   step: number;
   steps: number;
@@ -37,6 +39,8 @@ interface Job {
 }
 
 const MIN_IMAGES = 15;
+const GEN_RANGE = [1, 64, 24] as const;          // min, max, default
+const STEPS_RANGE = [10, 10000, 1500] as const;
 
 function slugFor(name: string) {
   return 'am_' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'char');
@@ -55,11 +59,13 @@ export function TrainingPanel({ character }: { character: Character }) {
   const tt = t.training;
   const currentProject = useProjectStore(s => s.currentProject);
   const updateCharacter = useProjectStore(s => s.updateCharacter);
+  const setCharacters = useProjectStore(s => s.setCharacters);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [form, setForm] = useState({ slug: slugFor(character.name), trigger: triggerFor(character.name) });
-  const [genCount, setGenCount] = useState(24);
-  const [steps, setSteps] = useState(1500);
+  // number boxes keep their text while typing; clampInt applies on blur and on submit
+  const [genCount, setGenCount] = useState(String(GEN_RANGE[2]));
+  const [steps, setSteps] = useState(String(STEPS_RANGE[2]));
   const [job, setJob] = useState<Job | null>(null);
   const [lines, setLines] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +73,10 @@ export function TrainingPanel({ character }: { character: Character }) {
   const nextRef = useRef(0);
   const jobIdRef = useRef<string | null>(null);
   const phaseRef = useRef<string | null>(null);
+  const pollingRef = useRef(false);                 // a job poll is in flight
+  const againRef = useRef(false);                   // poll again once it lands
+  const slugRef = useRef<string | null>(null);      // this panel's dataset, for pollJob
+  useEffect(() => { slugRef.current = dataset?.slug ?? null; }, [dataset?.slug]);
 
   const report = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
@@ -86,34 +96,71 @@ export function TrainingPanel({ character }: { character: Character }) {
   // started from a promise callback: the loaders only set state after their fetches resolve
   useEffect(() => { void Promise.resolve().then(() => loadDataset()); }, [loadDataset]);
 
-  // poll the job (and a running generation) while something runs
-  const pollJob = useCallback(async () => {
+  // the server's character list (the trainer set a LoRA on some other character)
+  const refreshCharacters = useCallback(async () => {
     try {
-      const data = await jsonOrThrow(await fetch(`/api/training/jobs/current?since=${nextRef.current}`));
+      const data = await jsonOrThrow(await fetch('/api/characters/'));
+      if (Array.isArray(data)) setCharacters(data);
+    } catch (e) { report(e); }
+  }, [setCharacters]);
+
+  // poll the job; one request at a time, so `since` never repeats (no duplicate log lines).
+  // A call while one is in flight runs once more after it (start/stop want a fresh read).
+  const pollOnce = useCallback(async () => {
+    try {
+      const since = nextRef.current;
+      const data = await jsonOrThrow(await fetch(`/api/training/jobs/current?since=${since}`));
       const j: Job | null = data.job;
       if (!j) { setJob(null); return; }
-      if (j.id !== jobIdRef.current) { jobIdRef.current = j.id; nextRef.current = 0; setLines(j.lines); }
-      else setLines(prev => [...prev, ...j.lines].slice(-300));
+      if (j.id !== jobIdRef.current) {
+        jobIdRef.current = j.id;
+        nextRef.current = 0;
+        // a new job read from an older job's offset: read its log again from the start
+        if (since !== 0) { setLines([]); againRef.current = true; return; }
+        setLines(j.lines);
+      } else setLines(prev => [...prev, ...j.lines].slice(-300));
       nextRef.current = j.next;
       if (phaseRef.current && phaseRef.current !== 'done' && j.phase === 'done' && j.lora) {
-        updateCharacter(character.id, { lora: j.lora });   // the server set it already
+        // the server set it already, on the job's character (older jobs: the dataset's)
+        const mine = j.characterId ? j.characterId === character.id : j.slug === slugRef.current;
+        if (mine) updateCharacter(character.id, { lora: j.lora });
+        else void refreshCharacters();
       }
       phaseRef.current = j.phase;
       setJob(j);
     } catch (e) { report(e); }
-  }, [character.id, updateCharacter]);
+  }, [character.id, updateCharacter, refreshCharacters]);
+
+  const pollJob = useCallback(async () => {
+    if (pollingRef.current) { againRef.current = true; return; }
+    pollingRef.current = true;
+    try {
+      do {
+        againRef.current = false;
+        await pollOnce();
+      } while (againRef.current);
+    } finally { pollingRef.current = false; }
+  }, [pollOnce]);
 
   useEffect(() => { void Promise.resolve().then(pollJob); }, [pollJob]);
   const generating = !!dataset?.generation?.running;
   const jobRunning = !!job?.running;
+  const slug = dataset?.slug;
+  // while something runs: a setTimeout chain, so a slow response never overlaps the next poll
   useEffect(() => {
     if (!jobRunning && !generating) return;
-    const timer = setInterval(() => {
-      if (jobRunning) pollJob();
-      if (generating && dataset) loadDataset(dataset.slug);
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [jobRunning, generating, pollJob, loadDataset, dataset]);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      await Promise.all([
+        jobRunning ? pollJob() : null,
+        generating && slug ? loadDataset(slug) : null,
+      ]);
+      if (!cancelled) timer = setTimeout(tick, 3000);
+    };
+    timer = setTimeout(tick, 3000);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [jobRunning, generating, pollJob, loadDataset, slug]);
 
   const create = async () => {
     setError(null);
@@ -151,7 +198,8 @@ export function TrainingPanel({ character }: { character: Character }) {
   };
   const generate = async () => {
     if (!dataset) return;
-    const d = await post(`/api/training/datasets/${dataset.slug}/generate`, { count: genCount, characterId: character.id });
+    setGenCount(String(clampInt(genCount, ...GEN_RANGE)));
+    const d = await post(`/api/training/datasets/${dataset.slug}/generate`, { count: clampInt(genCount, ...GEN_RANGE), characterId: character.id });
     if (d) setDataset(d);
   };
   const stopGenerate = async () => {
@@ -166,7 +214,9 @@ export function TrainingPanel({ character }: { character: Character }) {
   };
   const start = async () => {
     if (!dataset) return;
-    const d = await post('/api/training/jobs', { slug: dataset.slug, characterId: character.id, steps });
+    const n = clampInt(steps, ...STEPS_RANGE);
+    setSteps(String(n));
+    const d = await post('/api/training/jobs', { slug: dataset.slug, characterId: character.id, steps: n });
     if (d?.job) { jobIdRef.current = null; nextRef.current = 0; pollJob(); }
   };
   const stop = async () => { if (await post('/api/training/jobs/current/stop')) pollJob(); };
@@ -222,8 +272,10 @@ export function TrainingPanel({ character }: { character: Character }) {
               </>
             ) : (
               <span title={tt.generateHint} style={{ display: 'inline-flex', gap: '4px' }}>
-                <input className="input" type="number" min={1} max={64} value={genCount} style={{ width: '64px' }}
-                  onChange={e => setGenCount(Math.max(1, Math.min(64, Number(e.target.value) || 1)))} />
+                <input className="input" type="number" min={GEN_RANGE[0]} max={GEN_RANGE[1]} value={genCount} style={{ width: '64px' }}
+                  aria-label={tt.generate}
+                  onChange={e => setGenCount(e.target.value)}
+                  onBlur={() => setGenCount(String(clampInt(genCount, ...GEN_RANGE)))} />
                 <button className="btn btn-secondary" onClick={generate}><FiImage size={14} /> {tt.generate}</button>
               </span>
             )}
@@ -247,8 +299,9 @@ export function TrainingPanel({ character }: { character: Character }) {
 
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <label style={{ fontSize: '12px' }}>{tt.steps}{' '}
-              <input className="input" type="number" min={10} max={10000} step={100} value={steps} style={{ width: '80px' }}
-                onChange={e => setSteps(Math.max(10, Math.min(10000, Number(e.target.value) || 1500)))} />
+              <input className="input" type="number" min={STEPS_RANGE[0]} max={STEPS_RANGE[1]} step={100} value={steps} style={{ width: '80px' }}
+                onChange={e => setSteps(e.target.value)}
+                onBlur={() => setSteps(String(clampInt(steps, ...STEPS_RANGE)))} />
             </label>
             {ownJob?.running ? (
               <button className="btn btn-secondary" onClick={stop} style={{ color: 'var(--error)' }}><FiSquare size={14} /> {tt.stop}</button>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import App from '../../App.tsx'
 import { LoginScreen } from './LoginScreen'
-import { AUTH_REQUIRED_EVENT, fetchAuthStatus } from '../../auth'
+import { AUTH_REQUIRED_EVENT, AUTH_RESTORED_EVENT, fetchAuthStatus } from '../../auth'
 
 type Phase = 'checking' | 'login' | 'unconfigured' | 'app'
 
@@ -33,8 +33,16 @@ export function AuthGate() {
   }
   return (
     <>
-      <App />
-      {expired && <LoginScreen overlay onSuccess={() => setExpired(false)} />}
+      {/* inert while the sign-in overlay is up: no focus or clicks reach the app behind it */}
+      <div className="app-root" inert={expired}>
+        <App />
+      </div>
+      {expired && (
+        <LoginScreen overlay onSuccess={() => {
+          setExpired(false)
+          window.dispatchEvent(new CustomEvent(AUTH_RESTORED_EVENT))
+        }} />
+      )}
     </>
   )
 }

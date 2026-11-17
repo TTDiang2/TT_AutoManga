@@ -72,7 +72,8 @@ export function LoginScreen({ onSuccess, unconfigured = false, overlay = false }
   const isNotice = !waiting && error === t.sessionExpired;
 
   return (
-    <div className={`login-screen${overlay ? ' login-screen--overlay' : ''}`}>
+    <div className={`login-screen${overlay ? ' login-screen--overlay' : ''}`}
+         {...(overlay ? { role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'login-title' } : {})}>
       <form className="login-card" onSubmit={submit} aria-labelledby="login-title">
         <div className="login-icon" aria-hidden="true"><FiLock size={20} /></div>
         <h1 id="login-title" className="login-title">AutoManga</h1>
