@@ -228,14 +228,21 @@ const TEMPLATES: ComposerTemplate[] = [
 
 export { TEMPLATES };
 
-interface HistoryEntry {
-  pages: ComposerPage[];
-}
+/** Max undo steps kept. Entries share structure with the live pages
+ *  (pages/elements are replaced immutably), so each step is cheap. */
+const HISTORY_LIMIT = 50;
+/** Continuous edits (slider drags, typing) on the same key within this
+ *  window coalesce into a single undo step. */
+const COALESCE_MS = 500;
+
+export type ComposerSaveResult = 'saved' | 'conflict' | 'error' | 'skipped';
 
 interface ComposerStore {
   pages: ComposerPage[];
   currentPageId: string | null;
   selectedElementId: string | null;
+  /** Text/bubble element whose content is being edited inline (if any). */
+  editingElementId: string | null;
   activeTool: 'select' | 'text' | 'bubble' | 'crop' | 'split';
   activeBubbleType: BubbleType;
   zoom: number;
@@ -243,8 +250,25 @@ interface ComposerStore {
   /** User-saved templates loaded from backend (`/api/composer/templates/`). */
   userTemplates: SavedTemplate[];
 
-  _history: HistoryEntry[];
-  _historyIndex: number;
+  /** Snapshots of `pages` before each change (oldest first). */
+  _past: ComposerPage[][];
+  /** Snapshots undone and available for redo (most recent last). */
+  _future: ComposerPage[][];
+  _lastCommitKey: string | null;
+  _lastCommitAt: number;
+
+  /**
+   * Project the composer is editing. Lives in the store (not component
+   * state) so it survives tab switches; set whenever a project's pages load.
+   */
+  projectId: string | null;
+  projectName: string | null;
+  /** Server hash of the project's composerPages the local copy is based on. */
+  pagesBase: string | null;
+  /** The pages reference last known to be persisted (autosave skips it). */
+  _savedPages: ComposerPage[] | null;
+  /** Set when the server rejected a save because pages changed elsewhere. */
+  saveConflict: boolean;
 
   addPage: (templateId?: string) => void;
   removePage: (pageId: string) => void;
@@ -259,6 +283,7 @@ interface ComposerStore {
   updateElement: (elementId: string, updates: Partial<ComposerElement>) => void;
   removeElement: (elementId: string) => void;
   selectElement: (elementId: string | null) => void;
+  setEditingElement: (elementId: string | null) => void;
   convertSlotToImage: (elementId: string, src: string) => void;
 
   /** Add a new blank image-slot at canvas center, selecting it. */
@@ -309,8 +334,37 @@ interface ComposerStore {
 
   undo: () => void;
   redo: () => void;
+  /** Replace all pages and reset undo history + selection. */
   setPages: (pages: ComposerPage[]) => void;
+  /**
+   * Record the current pages as an undo step before a change. With a `key`
+   * (e.g. `prop:<elementId>:<field>`), repeated calls within COALESCE_MS
+   * collapse into one step so a slider drag / typing burst undoes at once.
+   */
+  commit: (key?: string) => void;
+  /** Alias of `commit()` kept for existing callers. */
   _pushHistory: () => void;
+
+  /**
+   * Load a project's pages into the composer: sets identity + base, adds a
+   * blank page if the project has none, resets history and selection.
+   */
+  loadProjectPages: (project: { id: string; name?: string | null; composerPages?: ComposerPage[] | null },
+                     pagesBase: string | null) => void;
+  /** Fetch a project from the server and load its pages. Throws on failure. */
+  loadProject: (projectId: string) => Promise<void>;
+  /**
+   * Adopt a project identity for the current pages (e.g. after "Save as"
+   * created a new project). `savedPages` marks those pages as persisted.
+   */
+  setProjectMeta: (meta: { projectId: string | null; projectName: string | null; pagesBase: string | null;
+                           savedPages?: ComposerPage[] | null }) => void;
+  /**
+   * Save only the composer pages of the current project (with `base` for
+   * conflict detection). Saves are serialized; a save never runs against a
+   * project other than the one it started for.
+   */
+  savePages: (opts?: { force?: boolean }) => Promise<ComposerSaveResult>;
 
   /** Load all user-saved templates from backend, store into `userTemplates`. */
   loadUserTemplates: () => Promise<void>;
@@ -340,6 +394,13 @@ let idCounter = 0;
 const uid = () => `el_${Date.now()}_${++idCounter}`;
 const pageUid = () => `page_${Date.now()}_${++idCounter}`;
 
+/** Bumped whenever a project's pages are loaded; in-flight saves check it. */
+let loadGeneration = 0;
+/** Bumped per loadProject call so only the latest response is applied. */
+let loadSeq = 0;
+/** Saves run one after another (each needs the previous one's base). */
+let saveChain: Promise<ComposerSaveResult> = Promise.resolve('skipped');
+
 function templateToElements(template: ComposerTemplate): ComposerElement[] {
   return template.elements.map((el: Partial<ComposerElement>, i: number) => ({
     ...el,
@@ -350,10 +411,24 @@ function templateToElements(template: ComposerTemplate): ComposerElement[] {
   })) as ComposerElement[];
 }
 
+function makePage(templateId: string, order: number): ComposerPage {
+  const template = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0];
+  return {
+    id: pageUid(),
+    name: `Page ${order + 1}`,
+    templateId,
+    width: template.width,
+    height: template.height,
+    elements: templateToElements(template),
+    order,
+  };
+}
+
 export const useComposerStore = create<ComposerStore>()((set, get) => ({
   pages: [],
   currentPageId: null,
   selectedElementId: null,
+  editingElementId: null,
   activeTool: 'select',
   activeBubbleType: 'speech',
   zoom: 0.6,
@@ -362,29 +437,36 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
 
   imagePickerRequest: null,
 
-  _history: [],
-  _historyIndex: -1,
+  _past: [],
+  _future: [],
+  _lastCommitKey: null,
+  _lastCommitAt: 0,
 
-  _pushHistory: () => {
-    const { pages, _history, _historyIndex } = get();
-    const newHistory = _history.slice(0, _historyIndex + 1);
-    newHistory.push({ pages: JSON.parse(JSON.stringify(pages)) });
-    if (newHistory.length > 50) newHistory.shift();
-    set({ _history: newHistory, _historyIndex: newHistory.length - 1 });
+  projectId: null,
+  projectName: null,
+  pagesBase: null,
+  _savedPages: null,
+  saveConflict: false,
+
+  commit: (key) => {
+    const { pages, _past, _lastCommitKey, _lastCommitAt } = get();
+    const now = Date.now();
+    if (key && key === _lastCommitKey && now - _lastCommitAt < COALESCE_MS) {
+      // same burst: the step recorded at its start already covers it
+      set({ _lastCommitAt: now });
+      return;
+    }
+    const past = _past.length >= HISTORY_LIMIT
+      ? [..._past.slice(_past.length - HISTORY_LIMIT + 1), pages]
+      : [..._past, pages];
+    set({ _past: past, _future: [], _lastCommitKey: key ?? null, _lastCommitAt: now });
   },
 
+  _pushHistory: () => get().commit(),
+
   addPage: (templateId = 'blank') => {
-    const template = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0];
-    const newPage: ComposerPage = {
-      id: pageUid(),
-      name: `Page ${get().pages.length + 1}`,
-      templateId,
-      width: template.width,
-      height: template.height,
-      elements: templateToElements(template),
-      order: get().pages.length,
-    };
-    get()._pushHistory();
+    const newPage = makePage(templateId, get().pages.length);
+    get().commit();
     set(state => ({
       pages: [...state.pages, newPage],
       currentPageId: newPage.id,
@@ -395,7 +477,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   removePage: (pageId) => {
     const { pages, currentPageId } = get();
     if (pages.length <= 1) return;
-    get()._pushHistory();
+    get().commit();
     const newPages = pages.filter(p => p.id !== pageId);
     const newCurrentId = currentPageId === pageId
       ? (newPages[0]?.id || null)
@@ -409,7 +491,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
     const { pages } = get();
     const source = pages.find(p => p.id === pageId);
     if (!source) return;
-    get()._pushHistory();
+    get().commit();
     const newPage: ComposerPage = {
       ...JSON.parse(JSON.stringify(source)),
       id: pageUid(),
@@ -424,7 +506,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   },
 
   reorderPages: (fromIdx, toIdx) => {
-    get()._pushHistory();
+    get().commit();
     set(state => {
       const newPages = [...state.pages];
       const [moved] = newPages.splice(fromIdx, 1);
@@ -436,7 +518,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   applyTemplateToPage: (pageId, templateId) => {
     const template = TEMPLATES.find(t => t.id === templateId);
     if (!template) return;
-    get()._pushHistory();
+    get().commit();
     const newElements = templateToElements(template);
     set(state => ({
       pages: state.pages.map(p =>
@@ -454,7 +536,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
       console.warn('[composer] applyUserTemplate: template not found in store', templateId);
       return;
     }
-    get()._pushHistory();
+    get().commit();
     // Saved templates only carry geometry (no id/zIndex/locked/visible),
     // so templateToElements' spread-then-augment pattern works on them too.
     const newElements = templateToElements(template as unknown as ComposerTemplate);
@@ -475,7 +557,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   },
 
   addElement: (element) => {
-    get()._pushHistory();
+    get().commit();
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -504,7 +586,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   },
 
   removeElement: (elementId) => {
-    get()._pushHistory();
+    get().commit();
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -518,9 +600,10 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   },
 
   selectElement: (elementId) => set({ selectedElementId: elementId }),
+  setEditingElement: (elementId) => set({ editingElementId: elementId }),
 
   convertSlotToImage: (elementId, src) => {
-    get()._pushHistory();
+    get().commit();
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -550,7 +633,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   addFrame: () => {
     const page = get().pages.find(p => p.id === get().currentPageId);
     if (!page) return;
-    get()._pushHistory();
+    get().commit();
     const newEl: ImageSlotElement = {
       id: uid(),
       type: 'image-slot',
@@ -612,7 +695,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
       ];
     }
     const [a, b] = [make(pair[0], 'a'), make(pair[1], 'b')];
-    get()._pushHistory();
+    get().commit();
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -633,7 +716,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
     const g = gutterPct / 2;
     const lo = marginPct, hi = 100 - marginPct;
     if (cutPct <= lo + 5 || cutPct >= hi - 5) return null;
-    get()._pushHistory();
+    get().commit();
     const mk = (rect: { x: number; y: number; width: number; height: number }, label: string): ImageSlotElement => ({
       id: uid(), type: 'image-slot', rotation: 0, locked: false, visible: true,
       zIndex: page.elements.length,
@@ -662,7 +745,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   addPageImage: () => {
     const page = get().pages.find(p => p.id === get().currentPageId);
     if (!page) return;
-    get()._pushHistory();
+    get().commit();
     const newEl: PageImageElement = {
       id: uid(),
       type: 'page-image',
@@ -871,7 +954,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
       return;
     }
     console.log('[autoGap] modifying', modified.size, 'frames');
-    get()._pushHistory();
+    get().commit();
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -899,6 +982,8 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   },
 
   setAllFrameBorders: (width) => {
+    // slider-driven: one undo step per drag
+    get().commit('allFrameBorders');
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -918,6 +1003,7 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
 
   /** Snap frame edges near the page boundary to be parallel with a uniform margin. */
   snapFramesToEdge: (margin = 2) => {
+    get().commit();
     set(state => {
       const pageIdx = state.pages.findIndex(p => p.id === state.currentPageId);
       if (pageIdx === -1) return state;
@@ -985,19 +1071,33 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
   setZoom: (zoom) => set({ zoom: Math.max(0.15, Math.min(3, zoom)) }),
 
   undo: () => {
-    const { _history, _historyIndex } = get();
-    if (_historyIndex <= 0) return;
-    const newIndex = _historyIndex - 1;
-    const entry = _history[newIndex];
-    set({ pages: JSON.parse(JSON.stringify(entry.pages)), _historyIndex: newIndex, selectedElementId: null });
+    const { _past, _future, pages, currentPageId } = get();
+    if (_past.length === 0) return;
+    const prev = _past[_past.length - 1];
+    set({
+      pages: prev,
+      _past: _past.slice(0, -1),
+      _future: [..._future, pages],
+      _lastCommitKey: null,
+      selectedElementId: null,
+      editingElementId: null,
+      currentPageId: prev.some(p => p.id === currentPageId) ? currentPageId : (prev[0]?.id ?? null),
+    });
   },
 
   redo: () => {
-    const { _history, _historyIndex } = get();
-    if (_historyIndex >= _history.length - 1) return;
-    const newIndex = _historyIndex + 1;
-    const entry = _history[newIndex];
-    set({ pages: JSON.parse(JSON.stringify(entry.pages)), _historyIndex: newIndex, selectedElementId: null });
+    const { _past, _future, pages, currentPageId } = get();
+    if (_future.length === 0) return;
+    const next = _future[_future.length - 1];
+    set({
+      pages: next,
+      _past: [..._past, pages],
+      _future: _future.slice(0, -1),
+      _lastCommitKey: null,
+      selectedElementId: null,
+      editingElementId: null,
+      currentPageId: next.some(p => p.id === currentPageId) ? currentPageId : (next[0]?.id ?? null),
+    });
   },
 
   setPages: (pages) => {
@@ -1005,9 +1105,84 @@ export const useComposerStore = create<ComposerStore>()((set, get) => ({
       pages,
       currentPageId: pages[0]?.id || null,
       selectedElementId: null,
-      _history: [{ pages: JSON.parse(JSON.stringify(pages)) }],
-      _historyIndex: 0,
+      _past: [],
+      _future: [],
+      _lastCommitKey: null,
     });
+  },
+
+  loadProjectPages: (project, pagesBase) => {
+    const loaded = project.composerPages ?? [];
+    const pages = loaded.length > 0 ? loaded : [makePage('blank', 0)];
+    loadGeneration++;
+    set({
+      pages,
+      currentPageId: pages[0]?.id || null,
+      selectedElementId: null,
+      editingElementId: null,
+      _past: [],
+      _future: [],
+      _lastCommitKey: null,
+      projectId: project.id,
+      projectName: project.name ?? null,
+      pagesBase,
+      // the blank placeholder page isn't worth saving until it's edited
+      _savedPages: pages,
+      saveConflict: false,
+      imagePickerRequest: null,
+    });
+  },
+
+  loadProject: async (projectId) => {
+    const seq = ++loadSeq;
+    const res = await fetch(`/api/projects/load/${encodeURIComponent(projectId)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data?.project) throw new Error('project not found');
+    // a newer load started meanwhile: its result wins
+    if (seq !== loadSeq) return;
+    get().loadProjectPages(data.project, typeof data.pagesBase === 'string' ? data.pagesBase : null);
+  },
+
+  setProjectMeta: ({ projectId, projectName, pagesBase, savedPages = null }) => {
+    if (projectId !== get().projectId) loadGeneration++;
+    set({ projectId, projectName, pagesBase, _savedPages: savedPages, saveConflict: false });
+  },
+
+  savePages: ({ force = false } = {}) => {
+    const run = async (): Promise<ComposerSaveResult> => {
+      const { projectId, pages, pagesBase, _savedPages, saveConflict } = get();
+      if (!projectId || saveConflict) return saveConflict ? 'conflict' : 'skipped';
+      if (!force && pages === _savedPages) return 'skipped';
+      const gen = loadGeneration;
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/composer-pages`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pages, base: pagesBase }),
+        });
+        // the composer switched projects while this was in flight: drop it
+        if (gen !== loadGeneration || get().projectId !== projectId) return 'skipped';
+        if (res.status === 409) {
+          set({ saveConflict: true });
+          return 'conflict';
+        }
+        if (!res.ok) return 'error';
+        const data = await res.json().catch(() => null);
+        if (!data?.success) return 'error';
+        set({
+          pagesBase: typeof data.base === 'string' ? data.base : get().pagesBase,
+          _savedPages: pages,
+        });
+        return 'saved';
+      } catch {
+        return 'error';
+      }
+    };
+    // serialize: each save must carry the base returned by the previous one
+    const p = saveChain.then(run, run);
+    saveChain = p.catch(() => 'error');
+    return p;
   },
 
   loadUserTemplates: async () => {

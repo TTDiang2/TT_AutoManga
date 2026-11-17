@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   FiMousePointer, FiType, FiMessageCircle,
   FiRotateCcw, FiRotateCw, FiDownload,
@@ -12,7 +13,7 @@ import { Canvas } from './Canvas';
 import { PropertiesPanel } from './PropertiesPanel';
 import { renderPageToImage } from './pageRenderer';
 import './composer.css';
-import type { BubbleType } from '../../types';
+import type { BubbleType, ComposerPage } from '../../types';
 
 /** Module-scope download helpers: impure (Date.now) but never render-phase. */
 function timestampedName(base: string, ext: string) {
@@ -93,21 +94,102 @@ function BubbleIcon({ type }: { type: BubbleType }) {
   );
 }
 
+/**
+ * One page in the sidebar list. Memoized: a page's object only changes when
+ * that page is edited, so dragging on the canvas re-renders one thumbnail.
+ */
+const PageThumb = memo(function PageThumb({
+  page,
+  active,
+  canDelete,
+  duplicateTitle,
+  deleteTitle,
+  onSelect,
+  onDuplicate,
+  onDelete,
+}: {
+  page: ComposerPage;
+  active: boolean;
+  canDelete: boolean;
+  duplicateTitle: string;
+  deleteTitle: string;
+  onSelect: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div
+      className={`composer-page-thumb ${active ? 'active' : ''}`}
+      onClick={() => onSelect(page.id)}
+    >
+      <div className="composer-page-thumb-inner">
+        {page.elements
+          .filter(e => e.visible)
+          .sort((a, b) => a.zIndex - b.zIndex)
+          .map(el => (
+            <div
+              key={el.id}
+              className="composer-page-thumb-slot"
+              style={{
+                left: `${el.x}%`,
+                top: `${el.y}%`,
+                width: `${el.width}%`,
+                height: `${el.height}%`,
+                background: el.type === 'image' ? '#ddd' : undefined,
+              }}
+            />
+          ))}
+      </div>
+      <div className="composer-page-thumb-label">{page.name}</div>
+      <div className="composer-page-thumb-actions">
+        <button
+          title={duplicateTitle}
+          onClick={(e) => { e.stopPropagation(); onDuplicate(page.id); }}
+        >
+          <FiCopy size={9} />
+        </button>
+        <button
+          title={deleteTitle}
+          onClick={(e) => { e.stopPropagation(); if (canDelete) onDelete(page.id); }}
+          disabled={!canDelete}
+        >
+          <FiTrash2 size={9} />
+        </button>
+      </div>
+    </div>
+  );
+});
+
+const CONFLICT_MSG = "This project's pages were changed elsewhere (e.g. by a Comics import). "
+  + 'Reload to see them — your unsaved changes here will be lost.';
+
 export function ComposerTab() {
   const { t } = useTranslation();
   const language = useProjectStore(s => s.settings.language);
-  const { composerProjectId, setComposerProjectId } = useProjectStore();
-  // the composer's save payload must carry the live storyboard + project
-  // settings — posting panels: [] used to wipe agent-written storyboards
-  const storePanels = useProjectStore(s => s.panels);
-  const storeProject = useProjectStore(s => s.currentProject);
+  const composerProjectId = useProjectStore(s => s.composerProjectId);
+  const setComposerProjectId = useProjectStore(s => s.setComposerProjectId);
   const {
     pages,
     currentPageId,
     activeTool,
     activeBubbleType,
     zoom,
-    selectedElementId,
+    userTemplates,
+    currentProjectId,
+    currentProjectName,
+    saveConflict,
+  } = useComposerStore(useShallow(s => ({
+    pages: s.pages,
+    currentPageId: s.currentPageId,
+    activeTool: s.activeTool,
+    activeBubbleType: s.activeBubbleType,
+    zoom: s.zoom,
+    userTemplates: s.userTemplates,
+    currentProjectId: s.projectId,
+    currentProjectName: s.projectName,
+    saveConflict: s.saveConflict,
+  })));
+  const {
     addPage,
     removePage,
     setCurrentPage,
@@ -118,22 +200,43 @@ export function ComposerTab() {
     setZoom,
     undo,
     redo,
-    setPages: setComposerPages,
     addFrame,
     addElement,
-    removeElement,
-    selectElement,
-    userTemplates,
     loadUserTemplates,
     saveAsUserTemplate,
     applyUserTemplate,
     deleteUserTemplate,
     openImagePicker,
-  } = useComposerStore();
+    loadProject,
+    savePages,
+    setProjectMeta,
+  } = useComposerStore(useShallow(s => ({
+    addPage: s.addPage,
+    removePage: s.removePage,
+    setCurrentPage: s.setCurrentPage,
+    duplicatePage: s.duplicatePage,
+    applyTemplateToPage: s.applyTemplateToPage,
+    setActiveTool: s.setActiveTool,
+    setActiveBubbleType: s.setActiveBubbleType,
+    setZoom: s.setZoom,
+    undo: s.undo,
+    redo: s.redo,
+    addFrame: s.addFrame,
+    addElement: s.addElement,
+    loadUserTemplates: s.loadUserTemplates,
+    saveAsUserTemplate: s.saveAsUserTemplate,
+    applyUserTemplate: s.applyUserTemplate,
+    deleteUserTemplate: s.deleteUserTemplate,
+    openImagePicker: s.openImagePicker,
+    loadProject: s.loadProject,
+    savePages: s.savePages,
+    setProjectMeta: s.setProjectMeta,
+  })));
 
   useEffect(() => {
-    if (pages.length === 0) {
-      addPage('manga-4');
+    const { pages: current, addPage: add } = useComposerStore.getState();
+    if (current.length === 0 && !useProjectStore.getState().composerProjectId) {
+      add('manga-4');
     }
   }, []);
 
@@ -142,33 +245,57 @@ export function ComposerTab() {
     loadUserTemplates();
   }, [loadUserTemplates]);
 
-  // Delete / Backspace removes the selected element. Ignored while typing in an
-  // input/textarea/contentEditable to avoid hijacking text editing.
+  // Delete / Backspace removes the selected element. Ignored while an element
+  // is being edited inline, while focus is in any text-entry control, and for
+  // locked elements.
   useEffect(() => {
+    const isTextEntry = (node: Element | null) => {
+      if (!node) return false;
+      const tag = node.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || (node as HTMLElement).isContentEditable;
+    };
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
-      if (!selectedElementId) return;
-      const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable) return;
+      // Cmd/Ctrl+Z undoes, Cmd/Ctrl+Shift+Z (or Ctrl+Y) redoes; text fields keep their own undo
+      if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
+        if (isTextEntry(e.target as Element | null) || isTextEntry(document.activeElement)) return;
+        e.preventDefault();
+        const { undo, redo } = useComposerStore.getState();
+        if (e.key.toLowerCase() === 'y' || e.shiftKey) redo(); else undo();
+        return;
       }
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const state = useComposerStore.getState();
+      const id = state.selectedElementId;
+      if (!id || state.editingElementId) return;
+      if (isTextEntry(e.target as Element | null) || isTextEntry(document.activeElement)) return;
+      const el = state.pages.find(p => p.id === state.currentPageId)?.elements.find(x => x.id === id);
+      if (!el || el.locked) return;
       e.preventDefault();
-      removeElement(selectedElementId);
-      selectElement(null);
+      state.removeElement(id);
+      state.selectElement(null);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedElementId, removeElement, selectElement]);
+  }, []);
 
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveProjectName, setSaveProjectName] = useState('');
   const [saveMsg, setSaveMsg] = useState('');
-  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [sfxPresets, setSfxPresets] = useState<Array<{ word: string; lang?: string; meaning: string; meaningZh?: string }>>([]);
   const [showSfxMenu, setShowSfxMenu] = useState(false);
   const [paginating, setPaginating] = useState(false);
   const sfxRef = useRef<HTMLDivElement | null>(null);
+  const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // transient status message (clears itself); `sticky` keeps it until replaced
+  const flash = useCallback((msg: string, sticky = false) => {
+    if (msgTimerRef.current) clearTimeout(msgTimerRef.current);
+    setSaveMsg(msg);
+    msgTimerRef.current = sticky ? null : setTimeout(() => setSaveMsg(''), 2500);
+  }, []);
+  useEffect(() => () => { if (msgTimerRef.current) clearTimeout(msgTimerRef.current); }, []);
 
   const toggleSfxMenu = () => {
     const next = !showSfxMenu;
@@ -179,8 +306,7 @@ export function ComposerTab() {
         .then(d => setSfxPresets(d.presets || []))
         .catch(() => {
           setSfxPresets([]);
-          setSaveMsg(t.composer.sfxUnavailable || 'SFX presets unavailable');
-          setTimeout(() => setSaveMsg(''), 2500);
+          flash(t.composer.sfxUnavailable || 'SFX presets unavailable');
         });
     }
   };
@@ -212,119 +338,126 @@ export function ComposerTab() {
   // heuristic auto-pagination from the agent API: chunk imaged panels into
   // pages and append them, then reload the project's pages
   const autoPaginate = async () => {
-    if (!currentProjectId || paginating) return;
+    if (!currentProjectId || paginating || saveConflict) return;
     setPaginating(true);
-    const say = (msg: string) => {
-      setSaveMsg(msg);
-      setTimeout(() => setSaveMsg(''), 2500);
-    };
+    const projectId = currentProjectId;
     try {
-      const resp = await fetch(`/api/agent/projects/${currentProjectId}/plan-pages`, {
+      // persist local edits first: the reload below replaces the local pages
+      const pre = await savePages();
+      if (pre === 'conflict' || pre === 'error') {
+        if (pre === 'error') flash(t.composer.saveFailed || 'Save failed');
+        return;
+      }
+      const resp = await fetch(`/api/agent/projects/${projectId}/plan-pages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apply: true, panels_per_page: 4 }),
       });
       if (!resp.ok) {
         console.error('plan-pages failed:', resp.status);
-        say(`${t.composer.autoPagesFailed || 'Auto pages failed'} (HTTP ${resp.status})`);
+        flash(`${t.composer.autoPagesFailed || 'Auto pages failed'} (HTTP ${resp.status})`);
         return;
       }
       const data = await resp.json();
       if (!data.pages_added) {
-        say(t.composer.autoPagesEmpty || 'Generate panel art first');
+        flash(t.composer.autoPagesEmpty || 'Generate panel art first');
         return;
       }
-      const res = await fetch(`/api/projects/load/${currentProjectId}`);
-      const proj = await res.json();
-      if (proj.project?.composerPages) {
-        setComposerPages(proj.project.composerPages);
-        say((t.composer.autoPagesAdded || 'Added {n} page(s)')
-          .replace('{n}', String(data.pages_added)));
-      }
+      await loadProject(projectId);
+      flash((t.composer.autoPagesAdded || 'Added {n} page(s)')
+        .replace('{n}', String(data.pages_added)));
     } catch (e) {
       console.error('auto-paginate failed:', e);
-      say(t.composer.autoPagesFailed || 'Auto pages failed');
+      flash(t.composer.autoPagesFailed || 'Auto pages failed');
     } finally {
       setPaginating(false);
     }
   };
-  const [currentProjectName, setCurrentProjectName] = useState<string | null>(null);
 
+  // "Save as": the only path that creates a project (POST /api/projects/save)
   const saveToShowcase = async () => {
     const name = saveProjectName.trim();
     if (!name) return;
+    const { pages: sentPages } = useComposerStore.getState();
+    const { panels: storePanels, currentProject: storeProject } = useProjectStore.getState();
     try {
       const body: Record<string, unknown> = {
         name,
         panels: storePanels,
         settings: { ...(storeProject?.settings || {}), detailLevel: 3 },
-        composerPages: pages,
+        composerPages: sentPages,
       };
-      if (currentProjectId) body.id = currentProjectId;
       const res = await fetch('/api/projects/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
-      if (data.success) {
-        setCurrentProjectId(data.project.id);
-        setCurrentProjectName(data.project.name);
-        setSaveMsg(t.composer.savedSuccess || 'Saved!');
-        setShowSaveModal(false);
-        setSaveProjectName('');
-        setTimeout(() => setSaveMsg(''), 2500);
+      const data = res.ok ? await res.json().catch(() => null) : null;
+      if (!data?.success || !data.project?.id) {
+        flash(`${t.composer.saveFailed || 'Save failed'}${res.ok ? '' : ` (HTTP ${res.status})`}`);
+        return;
       }
+      // the base for later page saves (read-only GET)
+      let base: string | null = null;
+      try {
+        const lr = await fetch(`/api/projects/load/${data.project.id}`);
+        if (lr.ok) {
+          const ld = await lr.json();
+          if (typeof ld.pagesBase === 'string') base = ld.pagesBase;
+        }
+      } catch { /* base stays unknown; the next save sends null */ }
+      setProjectMeta({
+        projectId: data.project.id,
+        projectName: data.project.name ?? name,
+        pagesBase: base,
+        savedPages: sentPages,
+      });
+      flash(t.composer.savedSuccess || 'Saved!');
+      setShowSaveModal(false);
+      setSaveProjectName('');
     } catch {
-      setSaveMsg(t.composer.saveFailed || 'Save failed');
+      flash(t.composer.saveFailed || 'Save failed');
     }
   };
 
-  const autoSave = async () => {
-    if (!currentProjectId) return;
-    try {
-      await fetch('/api/projects/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: currentProjectId,
-          name: currentProjectName,
-          panels: storePanels,
-          settings: { ...(storeProject?.settings || {}), detailLevel: 3 },
-          composerPages: pages,
-        }),
-      });
-    } catch { /* silent auto-save */ }
+  const saveNow = async () => {
+    flash(t.composer.saving || 'Saving…', true);
+    const result = await savePages({ force: true });
+    if (result === 'saved') flash(t.composer.savedSuccess || 'Saved!');
+    else if (result === 'error') flash(t.composer.saveFailed || 'Save failed');
+    else flash('');
   };
 
+  // autosave: only the pages, against the base they were loaded from; the
+  // `pages` reference changes on every edit (immutable updates)
   useEffect(() => {
+    if (!currentProjectId || saveConflict || pages.length === 0) return;
+    if (pages === useComposerStore.getState()._savedPages) return;
     const id = setTimeout(() => {
-      if (currentProjectId && pages.length > 0) {
-        autoSave();
-      }
+      savePages().then(result => {
+        if (result === 'error') flash(t.composer.autoSaveFailed || 'Autosave failed — retrying on the next change');
+      });
     }, 2000);
     return () => clearTimeout(id);
-    }, [JSON.stringify(pages)]);
+  }, [pages, currentProjectId, saveConflict, savePages, flash, t]);
 
   useEffect(() => {
     if (!composerProjectId) return;
-    fetch(`/api/projects/load/${composerProjectId}`)
-      .then(r => r.json())
-      .then(data => {
-        if (!data.project) return;
-        setCurrentProjectId(data.project.id);
-        setCurrentProjectName(data.project.name);
-        if (data.project.composerPages?.length) {
-          setComposerPages(data.project.composerPages);
-        }
-        setComposerProjectId(null);
-      });
-  }, [composerProjectId]);
+    setLoadError('');
+    loadProject(composerProjectId)
+      .catch(err => {
+        console.error('composer: project load failed:', err);
+        setLoadError(`Could not load the project (${err instanceof Error ? err.message : 'network error'}).`);
+      })
+      .finally(() => setComposerProjectId(null));
+  }, [composerProjectId, loadProject, setComposerProjectId]);
 
-  const saveDraft = () => {
-    localStorage.setItem('composer-draft', JSON.stringify(pages));
-    setSaveMsg(t.composer.draftSaved || 'Draft saved!');
-    setTimeout(() => setSaveMsg(''), 2500);
+  const reloadProject = () => {
+    if (!currentProjectId) return;
+    setLoadError('');
+    loadProject(currentProjectId).catch(err => {
+      setLoadError(`Could not reload the project (${err instanceof Error ? err.message : 'network error'}).`);
+    });
   };
 
   const currentPage = pages.find(p => p.id === currentPageId);
@@ -364,11 +497,9 @@ export function ComposerTab() {
     if (id) {
       setShowSaveTplModal(false);
       setTplName('');
-      setSaveMsg(t.composer.templateSaved || 'Template saved');
-      setTimeout(() => setSaveMsg(''), 2500);
+      flash(t.composer.templateSaved || 'Template saved');
     } else {
-      setSaveMsg(t.composer.saveFailed || 'Save failed');
-      setTimeout(() => setSaveMsg(''), 2500);
+      flash(t.composer.saveFailed || 'Save failed');
     }
   };
 
@@ -478,46 +609,17 @@ export function ComposerTab() {
         </div>
         <div className="composer-page-items">
           {pages.map((page) => (
-            <div
+            <PageThumb
               key={page.id}
-              className={`composer-page-thumb ${currentPageId === page.id ? 'active' : ''}`}
-              onClick={() => setCurrentPage(page.id)}
-            >
-              <div className="composer-page-thumb-inner">
-                {page.elements
-                  .filter(e => e.visible)
-                  .sort((a, b) => a.zIndex - b.zIndex)
-                  .map(el => (
-                    <div
-                      key={el.id}
-                      className="composer-page-thumb-slot"
-                      style={{
-                        left: `${el.x}%`,
-                        top: `${el.y}%`,
-                        width: `${el.width}%`,
-                        height: `${el.height}%`,
-                        background: el.type === 'image' ? '#ddd' : undefined,
-                      }}
-                    />
-                  ))}
-              </div>
-              <div className="composer-page-thumb-label">{page.name}</div>
-              <div className="composer-page-thumb-actions">
-                <button
-                  title={t.composer.duplicatePage}
-                  onClick={(e) => { e.stopPropagation(); duplicatePage(page.id); }}
-                >
-                  <FiCopy size={9} />
-                </button>
-                <button
-                  title={t.composer.deletePage}
-                  onClick={(e) => { e.stopPropagation(); if (pages.length > 1) removePage(page.id); }}
-                  disabled={pages.length <= 1}
-                >
-                  <FiTrash2 size={9} />
-                </button>
-              </div>
-            </div>
+              page={page}
+              active={currentPageId === page.id}
+              canDelete={pages.length > 1}
+              duplicateTitle={t.composer.duplicatePage}
+              deleteTitle={t.composer.deletePage}
+              onSelect={setCurrentPage}
+              onDuplicate={duplicatePage}
+              onDelete={removePage}
+            />
           ))}
         </div>
         <button className="composer-add-page-btn" onClick={() => addPage('blank')}>
@@ -526,7 +628,7 @@ export function ComposerTab() {
         <button
           className="composer-add-page-btn"
           onClick={autoPaginate}
-          disabled={!currentProjectId || paginating}
+          disabled={!currentProjectId || paginating || saveConflict}
           title={t.composer.autoPaginate || 'Auto Pages'}
         >
           <FiLayout size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
@@ -743,24 +845,16 @@ export function ComposerTab() {
             <button
               className="composer-tool-btn"
               title="Save to Showcase"
+              disabled={saveConflict}
               onClick={() => {
                 if (currentProjectId) {
-                  autoSave();
-                  setSaveMsg(t.composer.savedSuccess || 'Saved!');
-                  setTimeout(() => setSaveMsg(''), 2500);
+                  saveNow();
                 } else {
                   setShowSaveModal(true);
                 }
               }}
             >
               <FiSave size={15} />
-            </button>
-            <button
-              className="composer-tool-btn"
-              title="Save Draft (local)"
-              onClick={saveDraft}
-            >
-              <FiBook size={15} />
             </button>
             <div style={{ position: 'relative' }}>
               <button
@@ -786,6 +880,27 @@ export function ComposerTab() {
             </div>
           </div>
         </div>
+
+        {(saveConflict || loadError) && (
+          <div className="composer-canvas-hint composer-save-conflict" role="alert">
+            <span className="composer-canvas-hint-dot" />
+            <span>{saveConflict ? (t.composer.pagesConflict || CONFLICT_MSG) : loadError}</span>
+            {saveConflict && currentProjectId && (
+              <button className="btn btn-secondary composer-save-conflict-btn" onClick={reloadProject}>
+                {t.composer.reload || 'Reload'}
+              </button>
+            )}
+            {!saveConflict && (
+              <button
+                className="composer-canvas-hint-cancel"
+                onClick={() => setLoadError('')}
+                title="Dismiss"
+              >
+                <FiX size={12} />
+              </button>
+            )}
+          </div>
+        )}
 
         {(activeTool === 'text' || activeTool === 'bubble') && (
           <div className="composer-canvas-hint" role="status">

@@ -248,10 +248,14 @@ export function AssetTab() {
 
   useEffect(() => {
     checkSwarmUIConnection();
+  }, [viewMode, currentFolder]);
+
+  // loadArchive reads folderSortBy, so reload after the state has changed
+  useEffect(() => {
     if (viewMode === 'archive') {
       loadArchive();
     }
-  }, [viewMode, currentFolder]);
+  }, [viewMode, currentFolder, folderSortBy]);
 
   useEffect(() => {
     if (!selectedArchiveImage) return;
@@ -387,19 +391,39 @@ export function AssetTab() {
     return panel.prompt.turbo || panel.scene;
   };
 
+  // Upload to the asset store (not a data URL in the project). With a saved
+  // project the server also binds the image to the panel.
   const handleUpload = async (panelId: string, file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      updatePanelImage(panelId, result);
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      let url: string | undefined;
+      if (currentProject?.id) {
+        const res = await fetch(`/api/assets/upload/${encodeURIComponent(currentProject.id)}/${encodeURIComponent(panelId)}`, {
+          method: 'POST',
+          body: form,
+        });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (!data?.image) throw new Error(res.ok ? 'no image url in response' : `HTTP ${res.status}`);
+        url = data.image;
+      } else {
+        form.append('kind', 'upload');
+        const res = await fetch('/api/assets/file', { method: 'POST', body: form });
+        const data = res.ok ? await res.json().catch(() => null) : null;
+        if (!data?.url) throw new Error(res.ok ? 'no url in response' : `HTTP ${res.status}`);
+        url = data.url;
+      }
+      updatePanelImage(panelId, url!);
       setPanelStatuses(prev => ({ ...prev, [panelId]: 'ready' }));
       setPanelErrors(prev => ({ ...prev, [panelId]: '' }));
-    };
-    reader.onerror = () => {
+    } catch (err) {
+      console.error('panel upload failed:', err);
       setPanelStatuses(prev => ({ ...prev, [panelId]: 'error' }));
-      setPanelErrors(prev => ({ ...prev, [panelId]: t.assets.uploadFailed }));
-    };
-    reader.readAsDataURL(file);
+      setPanelErrors(prev => ({
+        ...prev,
+        [panelId]: `${t.assets.uploadFailed}${err instanceof Error ? ` (${err.message})` : ''}`,
+      }));
+    }
   };
 
   const handleGenerate = async (panelId: string) => {
@@ -518,7 +542,7 @@ export function AssetTab() {
               <div style={{ display: 'flex', gap: '4px' }}>
                 <select
                   value={folderSortBy}
-                  onChange={(e) => { const v = e.target.value as 'order' | 'name' | 'created'; setFolderSortBy(v); loadArchive(); }}
+                  onChange={(e) => { const v = e.target.value as 'order' | 'name' | 'created'; setFolderSortBy(v); }}
                   style={{ fontSize: '10px', padding: '2px 4px', borderRadius: '4px', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
                 >
                   <option value="order">Default</option>

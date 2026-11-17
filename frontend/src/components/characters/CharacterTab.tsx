@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import type { Character } from '../../types';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -22,46 +23,70 @@ export function CharacterTab() {
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<CharacterTemplateMeta[]>([]);
-  const [backendLoaded, setBackendLoaded] = useState(false);
 
-  const syncCharactersToBackend = async (chars: typeof characters) => {
-    try {
-      await fetch('/api/characters/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(chars),
-      });
-    } catch {
-      // best-effort sync; the backend library is optional
-    }
+  // The library is shared (the Comics converter adds characters too), so
+  // changes go through the per-item endpoints; posting the full list would
+  // wipe whatever was added since this tab loaded it.
+  const reportSyncError = (what: string) => (err: unknown) => {
+    console.warn(`[characters] ${what} failed:`, err);
+  };
+  const checked = (res: Response) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res;
+  };
+
+  const addChar = (char: Character) => {
+    addCharacter(char);
+    fetch('/api/characters/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(char),
+    }).then(checked).catch(reportSyncError('add'));
+  };
+
+  const patchChar = (id: string, updates: Partial<Character>) => {
+    updateCharacter(id, updates);
+    fetch(`/api/characters/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).then(checked).catch(reportSyncError('update'));
+  };
+
+  const deleteChar = (id: string) => {
+    removeCharacter(id);
+    fetch(`/api/characters/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then(checked).catch(reportSyncError('delete'));
   };
 
   useEffect(() => {
     fetch('/api/characters/')
+      .then(checked)
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
           setCharacters(data);
-        } else if (characters.length === 0) {
-          const extracted = extractCharactersFromPanels();
-          if (extracted.length > 0) setCharacters(extracted);
+          return;
         }
-        setBackendLoaded(true);
+        // the library is empty: seed it once (nothing there to overwrite)
+        const { characters: local } = useProjectStore.getState();
+        const seed = local.length > 0 ? local : extractCharactersFromPanels();
+        if (seed.length === 0) return;
+        if (local.length === 0) setCharacters(seed);
+        fetch('/api/characters/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(seed),
+        }).then(checked).catch(reportSyncError('seed'));
       })
       .catch(() => {
-        if (characters.length === 0) {
+        // offline: show what can be derived locally, but don't write anything
+        if (useProjectStore.getState().characters.length === 0) {
           const extracted = extractCharactersFromPanels();
           if (extracted.length > 0) setCharacters(extracted);
         }
-        setBackendLoaded(true);
       });
   }, []);
-
-  useEffect(() => {
-    if (backendLoaded && characters.length >= 0) {
-      syncCharactersToBackend(characters);
-    }
-  }, [characters, backendLoaded]);
 
   useEffect(() => {
     if (showTemplates) {
@@ -83,7 +108,7 @@ export function CharacterTab() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    addCharacter(newChar);
+    addChar(newChar);
     setSelectedCharId(newChar.id);
     setEditForm({ name: newChar.name, description: '', appearance: '' });
     setIsEditing(true);
@@ -91,7 +116,7 @@ export function CharacterTab() {
 
   const handleSave = () => {
     if (selectedCharId) {
-      updateCharacter(selectedCharId, {
+      patchChar(selectedCharId, {
         ...editForm,
         updatedAt: new Date().toISOString(),
       });
@@ -101,7 +126,7 @@ export function CharacterTab() {
 
   const handleDelete = (id: string) => {
     if (!confirm('Delete this character?')) return;
-    removeCharacter(id);
+    deleteChar(id);
     if (selectedCharId === id) setSelectedCharId(null);
   };
 
@@ -133,7 +158,7 @@ export function CharacterTab() {
       const data = await response.json();
       
       if (data.success && data.image) {
-        updateCharacter(charId, { image: data.image, updatedAt: new Date().toISOString() });
+        patchChar(charId, { image: data.image, updatedAt: new Date().toISOString() });
       } else {
         // e.g. SwarmUI's "No model input given" when Settings has no model
         alert(`Image generation failed: ${data.error || data.detail || `HTTP ${response.status}`}`);
@@ -157,7 +182,7 @@ export function CharacterTab() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    addCharacter(newChar);
+    addChar(newChar);
     setSelectedCharId(newChar.id);
     setShowTemplates(false);
   };
@@ -168,7 +193,7 @@ export function CharacterTab() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const result = ev.target?.result as string;
-      updateCharacter(selectedCharId, { image: result, updatedAt: new Date().toISOString() });
+      patchChar(selectedCharId, { image: result, updatedAt: new Date().toISOString() });
     };
     reader.readAsDataURL(file);
   };

@@ -34,6 +34,9 @@ type ImageSource = 'panels' | 'archive';
 export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
   const { t } = useTranslation();
   const composerPages = useComposerStore(s => s.pages);
+  const projectId = useComposerStore(s => s.projectId);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   // Source tab
   const [source, setSource] = useState<ImageSource>('panels');
@@ -89,12 +92,30 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
       .finally(() => setArchiveLoading(false));
   }, [source, archiveFolder]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  // Upload to the asset store and reference it by URL: a data URL would be
+  // stored in the page, re-sent on every autosave and kept in undo history.
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => onSelect(reader.result as string);
-    reader.readAsDataURL(file);
+    setUploading(true);
+    setUploadError('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('kind', 'upload');
+      if (projectId) form.append('project_id', projectId);
+      const res = await fetch('/api/assets/file', { method: 'POST', body: form });
+      const data = res.ok ? await res.json().catch(() => null) : null;
+      if (!data?.url) throw new Error(res.ok ? 'no url in response' : `HTTP ${res.status}`);
+      onSelect(data.url);
+    } catch (err) {
+      console.error('image upload failed:', err);
+      setUploadError(`Upload failed${err instanceof Error ? ` (${err.message})` : ''}`);
+    } finally {
+      setUploading(false);
+      input.value = '';
+    }
   };
 
   const getArchiveImageSrc = (img: ArchiveImage) => `/api/archive/images/${img.id}/serve`;
@@ -199,9 +220,14 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
         <div className="composer-image-picker-footer">
           <label className="composer-upload-label">
             <FiUpload size={14} />
-            {t.composer.uploadFile}
-            <input type="file" accept="image/*" onChange={handleFileUpload} />
+            {uploading ? 'Uploading…' : t.composer.uploadFile}
+            <input type="file" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
           </label>
+          {uploadError && (
+            <span style={{ fontSize: 12, color: 'var(--error)', marginLeft: 8 }}>
+              {uploadError}
+            </span>
+          )}
         </div>
       </div>
     </div>

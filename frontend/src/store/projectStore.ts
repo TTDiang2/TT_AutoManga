@@ -82,43 +82,21 @@ export const useProjectStore = create<ProjectStore>()(
       promptMode: 'turbo',
       composerProjectId: null,
 
+      // The backend is the source of truth for a project's panels. Panel ids
+      // repeat across projects (panel_1…, p01-01…), so filling a missing image
+      // from whatever panel was in the store leaked one comic's art into
+      // another (and the old load path then saved it there).
       setCurrentProject: (project) => {
-        const storedPanels: Panel[] = get().panels || [];
-        const apiPanels: Panel[] = project?.panels || [];
-        const mergedPanels = apiPanels.map(apiPanel => {
-          const storedPanel = storedPanels.find(p => p.id === apiPanel.id);
-          if (!apiPanel.image && storedPanel?.image) {
-            return { ...apiPanel, image: storedPanel.image };
-          }
-          return apiPanel;
-        });
-        set({ currentProject: project, panels: mergedPanels });
+        set({ currentProject: project, panels: project?.panels || [] });
       },
 
       loadProjectWithImages: async (projectId: string) => {
         try {
           const res = await fetch(`/api/projects/load/${projectId}`);
+          if (!res.ok) return;
           const data = await res.json();
           if (data.project) {
-            const apiPanels: Panel[] = (data.project.panels || []) as Panel[];
-            const storedPanels: Panel[] = get().panels || [];
-            const mergedPanels = apiPanels.map(apiPanel => {
-              const storedPanel = storedPanels.find(p => p.id === apiPanel.id);
-              if (!apiPanel.image && storedPanel?.image) {
-                return { ...apiPanel, image: storedPanel.image };
-              }
-              return apiPanel;
-            });
-            const needsSave = mergedPanels.some((p, i) => p.image !== apiPanels[i]?.image);
-            set({ currentProject: data.project, panels: mergedPanels });
-            if (needsSave) {
-              const updatedProject = { ...data.project, panels: mergedPanels };
-              fetch('/api/projects/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updatedProject),
-              });
-            }
+            set({ currentProject: data.project, panels: (data.project.panels || []) as Panel[] });
           }
         } catch {
           // offline load failed: keep whatever is already in the store

@@ -13,7 +13,8 @@ import { useTranslation } from './hooks/useTranslation';
 import './styles/globals.css';
 
 function App() {
-  const { activeTab, setSettings } = useProjectStore();
+  const activeTab = useProjectStore(s => s.activeTab);
+  const setSettings = useProjectStore(s => s.setSettings);
   const { t } = useTranslation();
 
   // the server's lettering fonts (data/fonts), so the Composer draws text the way the export does

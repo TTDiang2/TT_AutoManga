@@ -1251,3 +1251,22 @@
   outline: 1px dashed rgba(59, 130, 246, 0.35);
   outline-offset: 4px;
 }
+
+/* Persistent save-conflict / load-error banner (same slot as the hint). */
+.composer-canvas-hint.composer-save-conflict {
+  background: rgba(244, 67, 54, 0.08);
+  border-bottom-color: rgba(244, 67, 54, 0.35);
+  color: var(--text-primary);
+}
+
+.composer-save-conflict .composer-canvas-hint-dot {
+  background: var(--error);
+  animation: none;
+}
+
+.composer-save-conflict-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 4px 12px;
+  font-size: 12px;
+}

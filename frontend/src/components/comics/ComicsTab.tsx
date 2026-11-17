@@ -137,20 +137,47 @@ export function ComicsTab() {
     })().catch(e => setError((e as Error).message));
   }, [loadScripts, openScript]);
 
-  // follow the run's log while it runs
+  // follow the run's log while it runs. A setTimeout chain (not setInterval)
+  // so one poll's response always lands before the next request goes out.
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finished = (r: Run) => { loadScripts(); loadPages(r.script); };
+    const poll = async () => {
       const r = runRef.current;
-      if (!r) return;
+      if (!r || cancelled) return;
       try {
         const { run: next } = await json<{ run: Run | null }>(await fetch(`/api/comics/runs/current?since=${r.next}`));
-        if (!next || next.id !== r.id) return;
-        setRun({ ...next, lines: [...r.lines, ...next.lines] });
-        if (next.status !== 'running') { loadScripts(); loadPages(next.script); }
+        if (cancelled) return;
+        if (next && next.id === r.id) {
+          setRun({ ...next, lines: [...r.lines, ...next.lines] });
+          if (next.status !== 'running') { finished(next); return; }
+        } else {
+          // the server no longer reports this run as current: it has ended.
+          // Refresh once (full log); if it's still unknown, give up on it.
+          const { run: full } = await json<{ run: Run | null }>(await fetch('/api/comics/runs/current'));
+          if (cancelled) return;
+          if (full && full.id === r.id) {
+            setRun(full);
+            if (full.status !== 'running') { finished(full); return; }
+          } else {
+            setRun({
+              ...r,
+              status: 'failed',
+              ended: r.ended ?? Date.now() / 1000,
+              lines: [...r.lines, '[the server lost track of this run]'],
+            });
+            setError('The server lost track of this run');
+            finished(r);
+            return;
+          }
+        }
       } catch { /* the server restarts now and then; keep polling */ }
-    }, 1000);
-    return () => clearInterval(timer);
+      if (!cancelled) timer = setTimeout(poll, 1000);
+    };
+    timer = setTimeout(poll, 1000);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [running, loadScripts, loadPages]);
 
   useEffect(() => {

@@ -53,21 +53,25 @@ export function PromptLabTab() {
   };
   const [importError, setImportError] = useState('');
 
-  const selectedPanel = panels.find(p => p.id === selectedPanelId);
-
+  // Sync the editor fields when the user picks another panel (or switches
+  // prompt mode) — not on every store update to that panel, which would wipe
+  // unsaved negative prompt / seed / removeBG edits when e.g. the enhanced
+  // prompt arrives. Read the panel from the store so the panel object isn't
+  // a dependency.
   useEffect(() => {
-    if (selectedPanel) {
-      setInputText(selectedPanel.scene);
+    const panel = useProjectStore.getState().panels.find(p => p.id === selectedPanelId);
+    if (panel) {
+      setInputText(panel.scene);
       if (promptMode === 'turbo') {
-        setOutputText(selectedPanel.prompt.turbo || '');
+        setOutputText(panel.prompt.turbo || '');
       } else {
-        setOutputText(selectedPanel.prompt.tags?.join(', ') || '');
+        setOutputText(panel.prompt.tags?.join(', ') || '');
       }
-      setNegativePrompt(selectedPanel.prompt.negativePrompt || '');
-      setSeed(selectedPanel.prompt.seed != null ? String(selectedPanel.prompt.seed) : '');
-      setRemoveBG(selectedPanel.prompt.removeBG || false);
+      setNegativePrompt(panel.prompt.negativePrompt || '');
+      setSeed(panel.prompt.seed != null ? String(panel.prompt.seed) : '');
+      setRemoveBG(panel.prompt.removeBG || false);
     }
-  }, [selectedPanelId, promptMode, selectedPanel]);
+  }, [selectedPanelId, promptMode]);
 
   const handleImport = () => {
     setImportError('');

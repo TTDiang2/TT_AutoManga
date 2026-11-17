@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { FiPlus } from 'react-icons/fi';
 import { useComposerStore } from '../../store/composerStore';
 import { ImagePicker } from './ImagePicker';
@@ -15,51 +16,87 @@ import type {
 
 type CornerKey = 'tl' | 'tr' | 'br' | 'bl';
 
-export function Canvas() {
+type DragState = {
+  elementId: string;
+  startX: number;
+  startY: number;
+  origX: number;
+  origY: number;
+  origW: number;
+  origH: number;
+  origCorners?: QuadCorners;
+  mode: 'move' | 'resize' | 'corner' | 'image-move';
+  handle?: string;
+  corner?: CornerKey;
+  origOffsetX?: number;
+  origOffsetY?: number;
+};
+
+type CutState = { fromX: number; fromY: number; toX: number; toY: number };
+
+/** Find an element on the current page without subscribing to it. */
+function findCurrentElement(elementId: string) {
+  const { pages, currentPageId } = useComposerStore.getState();
+  return pages.find(p => p.id === currentPageId)?.elements.find(e => e.id === elementId);
+}
+
+// memoized (no props): ComposerTab re-renders on every page edit, this
+// component only when its own store selections change
+export const Canvas = memo(function Canvas() {
+  // narrow subscriptions: `currentPage` keeps its reference while other pages
+  // change, and actions are stable, so a drag only re-renders this page
+  const currentPage = useComposerStore(s => s.pages.find(p => p.id === s.currentPageId));
   const {
-    pages,
     currentPageId,
     selectedElementId,
+    editingId,
     activeTool,
     activeBubbleType,
     zoom,
+    imagePickerRequest,
+  } = useComposerStore(useShallow(s => ({
+    currentPageId: s.currentPageId,
+    selectedElementId: s.selectedElementId,
+    editingId: s.editingElementId,
+    activeTool: s.activeTool,
+    activeBubbleType: s.activeBubbleType,
+    zoom: s.zoom,
+    imagePickerRequest: s.imagePickerRequest,
+  })));
+  const {
     updateElement,
     selectElement,
     addElement,
     convertSlotToImage,
     setActiveTool,
-    _pushHistory,
-    imagePickerRequest,
+    commit,
     closeImagePicker,
     splitFrame,
     createSplitPair,
-  } = useComposerStore();
+    setEditingId,
+  } = useComposerStore(useShallow(s => ({
+    updateElement: s.updateElement,
+    selectElement: s.selectElement,
+    addElement: s.addElement,
+    convertSlotToImage: s.convertSlotToImage,
+    setActiveTool: s.setActiveTool,
+    commit: s.commit,
+    closeImagePicker: s.closeImagePicker,
+    splitFrame: s.splitFrame,
+    createSplitPair: s.createSplitPair,
+    setEditingId: s.setEditingElement,
+  })));
 
-  const currentPage = pages.find(p => p.id === currentPageId);
-
-  const [dragState, setDragState] = useState<{
-    elementId: string;
-    startX: number;
-    startY: number;
-    origX: number;
-    origY: number;
-    origW: number;
-    origH: number;
-    origCorners?: QuadCorners;
-    mode: 'move' | 'resize' | 'corner' | 'image-move';
-    handle?: string;
-    corner?: CornerKey;
-    origOffsetX?: number;
-    origOffsetY?: number;
-  } | null>(null);
+  const [dragState, setDragState] = useState<DragState | null>(null);
 
   // drag-a-cut-line state (split tool): the line you draw becomes the gutter
   // between two frames — inside crossed frames it splits them, on an empty
   // page it spawns a frame pair (interaction ported from the
-  // novelai_local_web study, adapted to our rect+corners element model)
-  const [cutState, setCutState] = useState<{ fromX: number; fromY: number; toX: number; toY: number } | null>(null);
+  // novelai_local_web study, adapted to our rect+corners element model).
+  // The ref drives the side effect; the state only draws the preview line.
+  const [cutState, setCutState] = useState<CutState | null>(null);
+  const cutRef = useRef<CutState | null>(null);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -84,53 +121,60 @@ export function Canvas() {
   const handleCutStart = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const p = pageCoords(e);
-    setCutState({ fromX: p.x, fromY: p.y, toX: p.x, toY: p.y });
+    cutRef.current = { fromX: p.x, fromY: p.y, toX: p.x, toY: p.y };
+    setCutState(cutRef.current);
     e.preventDefault();
   }, [pageCoords]);
 
   const handleCutMove = useCallback((e: React.MouseEvent) => {
-    setCutState(prev => {
-      if (!prev) return prev;
-      const p = pageCoords(e);
-      return { ...prev, toX: p.x, toY: p.y };
-    });
+    const prev = cutRef.current;
+    if (!prev) return;
+    const p = pageCoords(e);
+    cutRef.current = { ...prev, toX: p.x, toY: p.y };
+    setCutState(cutRef.current);
   }, [pageCoords]);
 
   const handleCutEnd = useCallback(() => {
-    setCutState(prev => {
-      if (prev && currentPage) {
-        const dx = prev.toX - prev.fromX, dy = prev.toY - prev.fromY;
-        // dominant axis of the drawn line decides the cut orientation
-        const axis: 'x' | 'y' = Math.abs(dx) >= Math.abs(dy) ? 'y' : 'x';
-        const span = axis === 'x'
-          ? { lo: Math.min(prev.fromY, prev.toY), hi: Math.max(prev.fromY, prev.toY) }
-          : { lo: Math.min(prev.fromX, prev.toX), hi: Math.max(prev.fromX, prev.toX) };
-        const spanLen = span.hi - span.lo;
-        // the cut sits on the dominant axis; the span selects crossed frames
-        const cut = axis === 'x' ? (prev.fromX + prev.toX) / 2 : (prev.fromY + prev.toY) / 2;
-        if (spanLen >= 3) {
-          const crossed = currentPage.elements.filter(el => {
-            if (el.type !== 'image-slot' || el.corners || !el.visible) return false;
-            const otherLo = axis === 'x' ? el.y : el.x;
-            const otherHi = axis === 'x' ? el.y + el.height : el.x + el.width;
-            return otherLo < span.hi && otherHi > span.lo;
-          });
-          if (crossed.length > 0) {
-            crossed.forEach(el => splitFrame(el.id, axis, cut));
-          } else {
-            createSplitPair(axis, cut);
-          }
+    const prev = cutRef.current;
+    // mouseleave without a drag in progress must not end the tool
+    if (!prev) return;
+    cutRef.current = null;
+    setCutState(null);
+    const { pages, currentPageId: pageId } = useComposerStore.getState();
+    const page = pages.find(p => p.id === pageId);
+    if (page) {
+      const dx = prev.toX - prev.fromX, dy = prev.toY - prev.fromY;
+      // dominant axis of the drawn line decides the cut orientation
+      const axis: 'x' | 'y' = Math.abs(dx) >= Math.abs(dy) ? 'y' : 'x';
+      const span = axis === 'x'
+        ? { lo: Math.min(prev.fromY, prev.toY), hi: Math.max(prev.fromY, prev.toY) }
+        : { lo: Math.min(prev.fromX, prev.toX), hi: Math.max(prev.fromX, prev.toX) };
+      const spanLen = span.hi - span.lo;
+      // the cut sits on the dominant axis; the span selects crossed frames
+      const cut = axis === 'x' ? (prev.fromX + prev.toX) / 2 : (prev.fromY + prev.toY) / 2;
+      if (spanLen >= 3) {
+        const crossed = page.elements.filter(el => {
+          if (el.type !== 'image-slot' || el.corners || !el.visible) return false;
+          const otherLo = axis === 'x' ? el.y : el.x;
+          const otherHi = axis === 'x' ? el.y + el.height : el.x + el.width;
+          return otherLo < span.hi && otherHi > span.lo;
+        });
+        if (crossed.length > 0) {
+          crossed.forEach(el => splitFrame(el.id, axis, cut));
+        } else {
+          createSplitPair(axis, cut);
         }
       }
-      return null;
-    });
+    }
     setActiveTool('select');
-  }, [currentPage, splitFrame, createSplitPair, setActiveTool]);
+  }, [splitFrame, createSplitPair, setActiveTool]);
 
   const handleElementMouseDown = useCallback((e: React.MouseEvent, elementId: string) => {
     if (activeTool === 'crop' || activeTool === 'text' || activeTool === 'bubble' || activeTool === 'split') return;
     e.stopPropagation();
-    const el = currentPage?.elements.find(p => p.id === elementId);
+    // clicks inside the inline editor place the caret, they don't drag
+    if (useComposerStore.getState().editingElementId === elementId) return;
+    const el = findCurrentElement(elementId);
     if (!el || el.locked) return;
     selectElement(elementId);
     setDragState({
@@ -143,12 +187,12 @@ export function Canvas() {
       origH: el.height,
       mode: 'move',
     });
-  }, [activeTool, currentPage, selectElement]);
+  }, [activeTool, selectElement]);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent, elementId: string, handle: string) => {
     e.stopPropagation();
     e.preventDefault();
-    const el = currentPage?.elements.find(p => p.id === elementId);
+    const el = findCurrentElement(elementId);
     if (!el || el.locked) return;
     selectElement(elementId);
     setDragState({
@@ -162,15 +206,14 @@ export function Canvas() {
       mode: 'resize',
       handle,
     });
-  }, [currentPage, selectElement]);
+  }, [selectElement]);
 
   const handleCornerMouseDown = useCallback((e: React.MouseEvent, elementId: string, corner: CornerKey) => {
     e.stopPropagation();
     e.preventDefault();
-    const el = currentPage?.elements.find(p => p.id === elementId);
+    const el = findCurrentElement(elementId);
     if (!el || el.locked) return;
     selectElement(elementId);
-    _pushHistory();
     setDragState({
       elementId,
       startX: e.clientX,
@@ -183,7 +226,7 @@ export function Canvas() {
       mode: 'corner',
       corner,
     });
-  }, [currentPage, selectElement, _pushHistory]);
+  }, [selectElement]);
 
   // Click-drag on the visible image inside a frame repositions the image within
   // the frame (clip-path hides overflow). The frame bbox/corners stay put.
@@ -191,13 +234,12 @@ export function Canvas() {
   const handleImageMouseDown = useCallback((e: React.MouseEvent, elementId: string) => {
     if (activeTool !== 'select') return;
     e.stopPropagation();
-    const el = currentPage?.elements.find(p => p.id === elementId);
+    const el = findCurrentElement(elementId);
     if (!el || el.locked) return;
     if (el.type !== 'image' && el.type !== 'page-image') return;
     const offsetX = (el as ImageElement | PageImageElement).imageOffsetX ?? 0;
     const offsetY = (el as ImageElement | PageImageElement).imageOffsetY ?? 0;
     selectElement(elementId);
-    _pushHistory();
     setDragState({
       elementId,
       startX: e.clientX,
@@ -210,29 +252,49 @@ export function Canvas() {
       origOffsetX: offsetX,
       origOffsetY: offsetY,
     });
-  }, [activeTool, currentPage, selectElement, _pushHistory]);
+  }, [activeTool, selectElement]);
 
-  // Ctrl/Alt + wheel on an image scales it within the frame. This is the
-  // fastest way to "resize" the image without picking up a slider.
-  // Applies to both `image` and `page-image` types.
-  const handleImageWheel = useCallback((e: React.WheelEvent, elementId: string) => {
-    if (activeTool !== 'select') return;
-    if (!e.ctrlKey && !e.metaKey) return;
-    const el = currentPage?.elements.find(p => p.id === elementId);
-    if (!el || el.locked) return;
-    if (el.type !== 'image' && el.type !== 'page-image') return;
-    e.stopPropagation();
-    e.preventDefault();
-    const img = el as ImageElement | PageImageElement;
-    const next = Math.max(0.1, Math.min(4, (img.imageScale ?? 1) * (e.deltaY < 0 ? 1.05 : 1 / 1.05)));
-    updateElement(elementId, { imageScale: next } as Partial<ImageElement>);
-  }, [activeTool, currentPage, updateElement]);
+  // Ctrl/Cmd + wheel on an image scales it within the frame. React's onWheel
+  // is passive (preventDefault is ignored and the browser zooms too), so this
+  // is a native non-passive listener on the canvas element.
+  const hasPage = !!currentPage;
+  useEffect(() => {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      // never let Ctrl+scroll over the page zoom the whole browser
+      e.preventDefault();
+      if (useComposerStore.getState().activeTool !== 'select') return;
+      const target = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-image-el-id]');
+      const elementId = target?.dataset.imageElId;
+      if (!elementId) return;
+      const el = findCurrentElement(elementId);
+      if (!el || el.locked) return;
+      if (el.type !== 'image' && el.type !== 'page-image') return;
+      e.stopPropagation();
+      const img = el as ImageElement | PageImageElement;
+      const next = Math.max(0.1, Math.min(4, (img.imageScale ?? 1) * (e.deltaY < 0 ? 1.05 : 1 / 1.05)));
+      commit(`wheel:${elementId}`);
+      updateElement(elementId, { imageScale: next } as Partial<ImageElement>);
+    };
+    canvasEl.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvasEl.removeEventListener('wheel', onWheel);
+  }, [hasPage, currentPageId, commit, updateElement]);
 
   useEffect(() => {
     if (!dragState) return;
+    // one undo step per gesture, recorded on the first real movement so a
+    // plain click (select) doesn't leave an empty step behind
+    let committed = false;
     const handleMouseMove = (e: MouseEvent) => {
       const canvasEl = canvasRef.current;
       if (!canvasEl) return;
+      if (!committed) {
+        if (e.clientX === dragState.startX && e.clientY === dragState.startY) return;
+        commit();
+        committed = true;
+      }
       const rect = canvasEl.getBoundingClientRect();
       const deltaX = ((e.clientX - dragState.startX) / rect.width) * 100;
       const deltaY = ((e.clientY - dragState.startY) / rect.height) * 100;
@@ -290,7 +352,7 @@ export function Canvas() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState, updateElement]);
+  }, [dragState, updateElement, commit]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (e.target !== canvasRef.current && !(e.target as HTMLElement).classList.contains('composer-canvas')) return;
@@ -347,7 +409,7 @@ export function Canvas() {
       });
       setActiveTool('select');
     }
-  }, [activeTool, activeBubbleType, selectElement, addElement, setActiveTool]);
+  }, [activeTool, activeBubbleType, selectElement, addElement, setActiveTool, setEditingId]);
 
   const handleAddImageClick = useCallback((elementId: string, kind: 'slot' | 'pageImage' = 'slot') => {
     useComposerStore.getState().openImagePicker({ kind, id: elementId });
@@ -356,11 +418,24 @@ export function Canvas() {
 
   const handleDoubleClick = useCallback((e: React.MouseEvent, elementId: string) => {
     e.stopPropagation();
-    const el = currentPage?.elements.find(p => p.id === elementId);
-    if (el && (el.type === 'text' || el.type === 'bubble')) {
+    const el = findCurrentElement(elementId);
+    if (el && (el.type === 'text' || el.type === 'bubble') && !el.locked) {
       setEditingId(elementId);
     }
-  }, [currentPage]);
+  }, [setEditingId]);
+
+  // text edits are undo steps; typing bursts in a bubble coalesce into one
+  const handleBubbleTextChange = useCallback((id: string, text: string) => {
+    commit(`text:${id}`);
+    updateElement(id, { text } as Partial<BubbleElement>);
+  }, [commit, updateElement]);
+
+  const handleTextContentChange = useCallback((id: string, content: string) => {
+    const el = findCurrentElement(id);
+    if (el?.type === 'text' && el.content === content) return;
+    commit();
+    updateElement(id, { content } as Partial<TextElement>);
+  }, [commit, updateElement]);
 
   const handleImageSelect = useCallback((src: string) => {
     if (!imagePickerRequest) return;
@@ -368,10 +443,17 @@ export function Canvas() {
       convertSlotToImage(imagePickerRequest.id, src);
     } else {
       // page-image: just set src on the element directly
+      commit();
       updateElement(imagePickerRequest.id, { src } as Partial<PageImageElement>);
     }
     closeImagePicker();
-  }, [imagePickerRequest, convertSlotToImage, updateElement, closeImagePicker]);
+  }, [imagePickerRequest, convertSlotToImage, updateElement, closeImagePicker, commit]);
+
+  const elements = currentPage?.elements;
+  const sortedElements = useMemo(
+    () => (elements ? [...elements].sort((a, b) => a.zIndex - b.zIndex) : []),
+    [elements],
+  );
 
   if (!currentPage) {
     return (
@@ -382,8 +464,6 @@ export function Canvas() {
       </div>
     );
   }
-
-  const sortedElements = [...currentPage.elements].sort((a, b) => a.zIndex - b.zIndex);
 
   return (
     <>
@@ -423,10 +503,9 @@ export function Canvas() {
                 onCornerDown={handleCornerMouseDown}
                 onAddImageClick={handleAddImageClick}
                 onImageMouseDown={handleImageMouseDown}
-                onImageWheel={handleImageWheel}
                 onDoubleClick={handleDoubleClick}
-                onBubbleTextChange={(id, text) => updateElement(id, { text } as Partial<BubbleElement>)}
-                onTextContentChange={(id, content) => updateElement(id, { content } as Partial<TextElement>)}
+                onBubbleTextChange={handleBubbleTextChange}
+                onTextContentChange={handleTextContentChange}
                 setEditingId={setEditingId}
               />
             );
@@ -467,7 +546,7 @@ export function Canvas() {
       )}
     </>
   );
-}
+});
 
 interface ElementRendererProps {
   el: ComposerElement;
@@ -479,14 +558,52 @@ interface ElementRendererProps {
   onCornerDown: (e: React.MouseEvent, id: string, corner: CornerKey) => void;
   onAddImageClick: (id: string, kind: 'slot' | 'pageImage') => void;
   onImageMouseDown: (e: React.MouseEvent, id: string) => void;
-  onImageWheel: (e: React.WheelEvent, id: string) => void;
   onDoubleClick: (e: React.MouseEvent, id: string) => void;
   onBubbleTextChange: (id: string, text: string) => void;
   onTextContentChange: (id: string, content: string) => void;
   setEditingId: (id: string | null) => void;
 }
 
-function ElementRenderer({
+/**
+ * Inline editor for a text element. `autoFocus` does nothing on a
+ * contentEditable div, so focus it (caret at the end) once it mounts —
+ * otherwise Backspace on a fresh text box reaches the global delete handler.
+ */
+function TextContentEditor({
+  content,
+  onCommit,
+}: {
+  content: string;
+  onCommit: (content: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.focus();
+    const sel = window.getSelection();
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  }, []);
+  return (
+    <div
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      onBlur={(e) => onCommit(e.currentTarget.textContent || '')}
+      style={{ outline: 'none', width: '100%', height: '100%', display: 'flex', alignItems: 'center' }}
+    >
+      {content}
+    </div>
+  );
+}
+
+const ElementRenderer = memo(function ElementRenderer({
   el,
   isSelected,
   isEditing,
@@ -496,7 +613,6 @@ function ElementRenderer({
   onCornerDown,
   onAddImageClick,
   onImageMouseDown,
-  onImageWheel,
   onDoubleClick,
   onBubbleTextChange,
   onTextContentChange,
@@ -517,7 +633,6 @@ function ElementRenderer({
         onCornerDown={onCornerDown}
         onAddImageClick={onAddImageClick}
         onImageMouseDown={onImageMouseDown}
-        onImageWheel={onImageWheel}
         onDoubleClick={onDoubleClick}
       />
     );
@@ -547,15 +662,10 @@ function ElementRenderer({
           onDoubleClick={(e) => onDoubleClick(e, el.id)}
         >
           {isEditing ? (
-            <div
-              contentEditable
-              suppressContentEditableWarning
-              autoFocus
-              onBlur={(e) => { onTextContentChange(el.id, e.currentTarget.textContent || ''); setEditingId(null); }}
-              style={{ outline: 'none', width: '100%', height: '100%', display: 'flex', alignItems: 'center' }}
-            >
-              {textEl.content}
-            </div>
+            <TextContentEditor
+              content={textEl.content}
+              onCommit={(content) => { onTextContentChange(el.id, content); setEditingId(null); }}
+            />
           ) : (
             textEl.content || <span style={{ color: 'var(--text-muted)' }}>{textEl.content || 'Text'}</span>
           )}
@@ -608,7 +718,7 @@ function ElementRenderer({
     default:
       return null;
   }
-}
+});
 
 /**
  * Frame-style element rendering: shared by `image-slot`, `image`, and
@@ -627,7 +737,6 @@ interface FrameElementProps {
   onCornerDown: (e: React.MouseEvent, id: string, corner: CornerKey) => void;
   onAddImageClick: (id: string, kind: 'slot' | 'pageImage') => void;
   onImageMouseDown: (e: React.MouseEvent, id: string) => void;
-  onImageWheel: (e: React.WheelEvent, id: string) => void;
   onDoubleClick: (e: React.MouseEvent, id: string) => void;
 }
 
@@ -639,7 +748,6 @@ function FrameElement({
   onCornerDown,
   onAddImageClick,
   onImageMouseDown,
-  onImageWheel,
   onDoubleClick,
 }: FrameElementProps) {
   const corners = el.corners ?? DEFAULT_CORNERS;
@@ -696,8 +804,8 @@ function FrameElement({
             src={(el as ImageElement | PageImageElement).src}
             alt=""
             draggable={false}
+            data-image-el-id={el.id}
             onMouseDown={(e) => onImageMouseDown(e, el.id)}
-            onWheel={(e) => onImageWheel(e, el.id)}
             style={{
               transform: `translate(${(el as ImageElement | PageImageElement).imageOffsetX ?? 0}%, ${(el as ImageElement | PageImageElement).imageOffsetY ?? 0}%) scale(${(el as ImageElement | PageImageElement).imageScale ?? 1})`,
               transformOrigin: 'center center',

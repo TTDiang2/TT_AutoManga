@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -13,7 +13,8 @@ export function ShowcaseTab() {
   const [mode, setMode] = useState<'browse' | 'viewing' | 'editing'>('browse');
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [readerPage, setReaderPage] = useState(0);
-  const [readerImages, setReaderImages] = useState<string[]>([]);
+  // only the latest project click may set the active project
+  const loadSeqRef = useRef(0);
   const [coverImages, setCoverImages] = useState<Record<string, string>>({});
   const [showNewModal, setShowNewModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -78,23 +79,21 @@ export function ShowcaseTab() {
   }, [mode, JSON.stringify(projects.map(p => p.id))]);
 
   const handleLoadProject = async (projectId: string, action: 'view' | 'edit' = 'view') => {
+    const seq = ++loadSeqRef.current;
     try {
       const response = await fetch(`/api/projects/load/${projectId}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      if (!data.project) return;
+      if (!data.project || seq !== loadSeqRef.current) return;
       const project = data.project;
       setActiveProject(project);
       setCurrentProject(project);
       setComposerProjectId(project.id);
 
       if (action === 'view') {
+        // pages render server-side on demand (see ComicReader)
         setMode('viewing');
         setReaderPage(0);
-        setReaderImages([]);
-        if (project.composerPages?.length) {
-          Promise.all((project.composerPages as ComposerPage[]).map(page => renderPageToImage(page)))
-            .then(imgs => setReaderImages(imgs.filter(Boolean)));
-        }
       } else {
         // load panels into the store too, or the Storyboard tab shows 0
         loadProjectWithImages(project.id);
@@ -278,7 +277,6 @@ export function ShowcaseTab() {
         <ComicReader
           project={activeProject}
           page={readerPage}
-          images={readerImages}
           onPageChange={setReaderPage}
           onBack={() => setMode('browse')}
           onEdit={() => handleLoadProject(activeProject.id, 'edit')}
@@ -418,16 +416,42 @@ export function ShowcaseTab() {
   );
 }
 
-function ComicReader({ project, page, images, onPageChange, onBack, onEdit }: {
+/** Server-rendered page preview: same renderer as export (overlays, corners, borders, image offset/scale). */
+function previewUrl(project: Project, page: ComposerPage) {
+  const v = encodeURIComponent(project.updatedAt || '');
+  return `/api/agent/projects/${encodeURIComponent(project.id)}/pages/${encodeURIComponent(page.id)}/preview.png?scale=1&v=${v}`;
+}
+
+function ReaderPage({ src, label, visible }: { src: string; label: string; visible: boolean }) {
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  return (
+    <>
+      <div className="comic-reader-page" style={{ display: visible && status === 'ready' ? undefined : 'none' }}>
+        <img
+          src={src}
+          alt={label}
+          onLoad={() => setStatus('ready')}
+          onError={() => setStatus('error')}
+        />
+      </div>
+      {visible && status !== 'ready' && (
+        <div className="comic-reader-placeholder">
+          {status === 'error' ? `Could not render ${label.toLowerCase()}` : `Loading ${label.toLowerCase()}...`}
+        </div>
+      )}
+    </>
+  );
+}
+
+function ComicReader({ project, page, onPageChange, onBack, onEdit }: {
   project: Project;
   page: number;
-  images: string[];
   onPageChange: (p: number) => void;
   onBack: () => void;
   onEdit: () => void;
 }) {
-  const total = project.composerPages?.length || 0;
-  const currentImage = images[page];
+  const pages: ComposerPage[] = project.composerPages || [];
+  const total = pages.length;
 
   const prev = () => { if (page > 0) onPageChange(page - 1); };
   const next = () => { if (page < total - 1) onPageChange(page + 1); };
@@ -439,25 +463,30 @@ function ComicReader({ project, page, images, onPageChange, onBack, onEdit }: {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [page]);
+  }, [page, total]);
 
   return (
     <div className="comic-reader">
-      {currentImage ? (
-        <div className="comic-reader-page">
-          <img src={currentImage} alt={`Page ${page + 1}`} />
-        </div>
+      {total === 0 ? (
+        <div className="comic-reader-placeholder">No pages yet</div>
       ) : (
-        <div className="comic-reader-placeholder">
-          Loading page {page + 1}...
-        </div>
+        // the current page plus its neighbours (preloaded, hidden); keyed by
+        // page id so a page's load state never bleeds into another page
+        pages.map((p, i) => Math.abs(i - page) <= 1 ? (
+          <ReaderPage
+            key={`${project.id}:${p.id}`}
+            src={previewUrl(project, p)}
+            label={`Page ${i + 1}`}
+            visible={i === page}
+          />
+        ) : null)
       )}
       <div className="comic-reader-nav">
         <button className="btn btn-secondary" onClick={prev} disabled={page === 0}>
           <FiChevronLeft size={16} /> Previous
         </button>
-        <span>{page + 1} / {total}</span>
-        <button className="btn btn-secondary" onClick={next} disabled={page === total - 1}>
+        <span>{total === 0 ? 0 : page + 1} / {total}</span>
+        <button className="btn btn-secondary" onClick={next} disabled={page >= total - 1}>
           Next <FiChevronRight size={16} />
         </button>
       </div>
