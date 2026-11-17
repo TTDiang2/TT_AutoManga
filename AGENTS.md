@@ -631,7 +631,7 @@ which paints with comic.js and rebuilds the project here. Names are
   line}` (HTTP 200 either way). `current` = painted from this prompt/seed;
   `same` = the variant was painted from the current prompt, so pinning its
   seed reuses the picture.
-- `POST /api/comics/runs {script, mode, face?, panels?, force?, variants?}`,
+- `POST /api/comics/runs {script, mode, face?, panels?, force?, variants?, uncut?}`,
   one run at a time (409), detached; poll `GET /api/comics/runs/current?since=N`,
   stop with `POST /api/comics/runs/current/stop`. Modes: `paint`,
   `no-paint`, `dry-run`, `repaint` (`--panels a,b [--force]`; without
@@ -649,6 +649,19 @@ the same rules as here (Comics README); `automanga.js` sets the project's
 `contentRating` to the script's rating and fills a library character's `age`
 from the script when it has none. A mature script's `--plan` panels carry
 `rating` (and `notice` when forced SFW).
+
+Uncut editions: a script's `PAGE uncut` / `PANEL uncut` blocks (Comics README,
+"Uncut editions") make a second comic, built by `comic.js --uncut` into
+`out/<name>-uncut/` and imported as its own project, "<Title> (Uncut) —
+<Subtitle>", marked `comicScript: "<name>:uncut"` and rated `mature`. Runs and
+`/plan` take `uncut: true` (→ `--uncut`; uncut panel ids `1.u1` / `u1.2` need
+it), the page/panel/variant file routes take `?uncut=1` (uncut files
+`p01-u01.png`, `u01-02.png`). `--plan --uncut` panels add `edition`, `stem`,
+`regular` (copied from the regular edition), `rating`, `notice`, and the plan
+lists `slots` (todo slots). The script listing adds `uncut`, `uncut_slots` and
+`uncut_project_id`. Collections auto-group puts uncut editions in their own
+collection "<Title> (Uncut)" (stored `mature: true`), never with the regular
+episodes.
 
 Pick a variant: `variants` run → set the seed in the script (`seed: N` line if
 the panel has one, else `PANEL … seed=N`) → `PUT` the script → `repaint`

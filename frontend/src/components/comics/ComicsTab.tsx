@@ -3,6 +3,7 @@ import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPla
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
 import { useComicsDrafts, openedDraft } from './scriptDrafts';
+import { fill, useTranslation } from '../../hooks/useTranslation';
 import type { Project } from '../../types';
 import './comics.css';
 
@@ -15,6 +16,9 @@ interface Script {
   painted: number;
   project_id: string | null;
   updated: string;
+  uncut?: number;                     // PAGE uncut / PANEL uncut blocks in the saved script
+  uncut_slots?: number;               // of them, todo slots not written yet
+  uncut_project_id?: string | null;   // the uncut edition's AutoManga project
 }
 
 interface Run {
@@ -22,6 +26,7 @@ interface Run {
   script: string;
   mode: 'paint' | 'no-paint' | 'dry-run' | 'repaint' | 'variants';
   face: boolean;
+  uncut?: boolean;
   status: 'running' | 'done' | 'failed' | 'stopped';
   exit_code: number | null;
   started: number;
@@ -53,9 +58,17 @@ interface PlanPanel {
   prev: boolean;
   mtime: number | null;
   variants: { seed: number; same: boolean; mtime?: number }[];   // same: painted from this prompt, so pinning it reuses the image
+  // --plan --uncut only
+  edition?: 'regular' | 'uncut';
+  stem?: string;       // its file: p01-02, p01-u01, u01-02
+  regular?: boolean;   // the regular edition's painting of it is copied in, not painted again
+  rating?: 'sfw' | 'mature';
+  notice?: string;
 }
 
-type Plan = { ok: true; panels: PlanPanel[] } | { ok: false; error: string; line: number | null };
+interface UncutSlot { line: number; kind: 'page' | 'panel'; id: string; cast?: string[] }
+
+type Plan = { ok: true; panels: PlanPanel[]; edition?: 'uncut'; slots?: UncutSlot[] } | { ok: false; error: string; line: number | null };
 
 type View = 'script' | 'log' | 'pages' | 'panels';
 
@@ -91,7 +104,7 @@ const MAX_LOG_LINES = 2000;
 const capLog = (lines: string[]) => (lines.length > MAX_LOG_LINES ? lines.slice(-MAX_LOG_LINES) : lines);
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
-const panelStem = (p: PlanPanel) => `p${pad2(p.page)}-${pad2(p.n)}`;
+const panelStem = (p: PlanPanel) => p.stem ?? `p${pad2(p.page)}-${pad2(p.n)}`;
 /** A pinned seed with a variant painted from the current prompt, not yet in the panel: "Apply pinned" copies it. */
 const pinnedPending = (p: PlanPanel) => p.seedPinned && !p.current && p.variants.some(v => v.seed === p.seed && v.same);
 
@@ -109,13 +122,14 @@ function paintProgress(lines: string[]) {
   for (const l of lines) {
     const m = l.match(/^painting (\d+) panels?/);
     if (m) { total = Number(m[1]) * per; done = 0; }
-    else if (total && /^\s+\d+\.\d+ (\d|variant|from variant)/.test(l)) done++;
+    else if (total && /^\s+u?\d+\.u?\d+ (\d|variant|from variant)/.test(l)) done++;
   }
   return total ? { done, total } : null;
 }
 
 export function ComicsTab() {
   const { setCurrentProject, setComposerProjectId, loadProjectWithImages, setActiveTab } = useProjectStore();
+  const { t } = useTranslation();
   const [scripts, setScripts] = useState<Script[]>([]);
   const [comicsDir, setComicsDir] = useState('');
   const [listError, setListError] = useState<string | null>(null);
@@ -128,6 +142,11 @@ export function ComicsTab() {
   const setText = (value: string) => { if (selected) setDraft(selected, { text: value }); };
   const [view, setView] = useState<View>('script');
   const [face, setFace] = useState(false);
+  // the uncut edition: runs, the plan, the pages and the panels are its own (out/<name>-uncut/)
+  const [uncut, setUncut] = useState(false);
+  const uncutRef = useRef(uncut);
+  useEffect(() => { uncutRef.current = uncut; }, [uncut]);
+  const edQuery = uncut ? 'uncut=1&' : '';
   const [run, setRun] = useState<Run | null>(null);
   const [pages, setPages] = useState<PageImage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -173,7 +192,7 @@ export function ComicsTab() {
 
   const loadPages = useCallback(async (name: string) => {
     try {
-      const data = await json<{ pages: PageImage[] }>(await fetch(`/api/comics/scripts/${name}/pages`));
+      const data = await json<{ pages: PageImage[] }>(await fetch(`/api/comics/scripts/${name}/pages${uncutRef.current ? '?uncut=1' : ''}`));
       setPages(data.pages);
     } catch { setPages([]); }
   }, []);
@@ -263,7 +282,7 @@ export function ComicsTab() {
       try {
         const p = await json<Plan>(await fetch(`/api/comics/scripts/${selected}/plan`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, face }), signal: ctl.signal,
+          body: JSON.stringify({ text, face, uncut }), signal: ctl.signal,
         }));
         if (!ctl.signal.aborted) { setPlan(p); setPlanText(text); }
       } catch (e) {
@@ -271,7 +290,12 @@ export function ComicsTab() {
       }
     }, 600);
     return () => { clearTimeout(timer); ctl.abort(); };
-  }, [selected, text, face, planTick]);
+  }, [selected, text, face, uncut, planTick]);
+
+  // another edition: its pages (its panel ids are its own too: the toggle clears the selection)
+  useEffect(() => {
+    if (selectedRef.current) loadPages(selectedRef.current);
+  }, [uncut, loadPages]);
 
   useEffect(() => {
     if (view === 'log' && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -297,7 +321,7 @@ export function ComicsTab() {
     try {
       const r = await json<Run>(await fetch('/api/comics/runs', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ script: selected, mode, face, ...extra }),
+        body: JSON.stringify({ script: selected, mode, face, uncut, ...extra }),
       }));
       setRun(r);
       setView('log');
@@ -385,7 +409,8 @@ export function ComicsTab() {
   }
 
   const progress = runIsHere && run ? paintProgress(run.lines) : null;
-  const projectId = (runIsHere && run?.project_id) || current?.project_id || null;
+  const projectId = (runIsHere && Boolean(run?.uncut) === uncut && run?.project_id)
+    || (uncut ? current?.uncut_project_id : current?.project_id) || null;
   const elapsed = run ? Math.round(((run.ended ?? Math.max(now, run.started)) - run.started)) : 0;
   const planPanels = plan?.ok ? plan.panels : [];
   const stale = planPanels.filter(p => p.painted && !p.current).length;
@@ -419,6 +444,7 @@ export function ComicsTab() {
             {s.subtitle && <span className="comics-item-sub">{s.subtitle}</span>}
             <span className="comics-item-meta">
               {s.name}.comic · {s.pages}p · {s.painted}/{s.panels} painted
+              {!!s.uncut_slots && <span className="comics-uncut-slots" title={t.comics.uncutSlotsHint}> · {fill(t.comics.uncutSlots, { n: s.uncut_slots })}</span>}
               {run?.script === s.name && run.status === 'running' && <span className="comics-dot" title="Running" />}
             </span>
           </button>
@@ -445,6 +471,9 @@ export function ComicsTab() {
               <div className="comics-actions">
                 <label className="comics-check" title="A second pass on the face of single-character panels">
                   <input type="checkbox" checked={face} onChange={e => setFace(e.target.checked)} disabled={running} /> Face pass
+                </label>
+                <label className="comics-check" title={t.comics.uncutEditionHint}>
+                  <input type="checkbox" checked={uncut} onChange={e => { setUncut(e.target.checked); setPicked(new Set()); }} disabled={running} /> {t.comics.uncutEdition}
                 </label>
                 <button className="btn btn-secondary" onClick={() => start('dry-run')} disabled={running} title="Lay out with placeholders; no painting, nothing sent to AutoManga">
                   <FiEye size={14} /> Dry run
@@ -477,6 +506,9 @@ export function ComicsTab() {
                 {stale > 0 && <> · {stale} stale</>}
                 {unpainted > 0 && <> · {unpainted} unpainted</>}
                 {pinned.length > 0 && <> · {pinned.length} pinned to apply</>}
+                {plan.edition === 'uncut' && !!plan.slots?.length && (
+                  <span title={t.comics.uncutSlotsHint}> · {fill(t.comics.uncutSlots, { n: plan.slots.length })}</span>
+                )}
               </div>
             ) : (
               <button className="comics-plan comics-plan-error" disabled={plan.line == null}
@@ -488,7 +520,7 @@ export function ComicsTab() {
             {runIsHere && run && (
               <div className={`comics-status comics-status-${run.status}`}>
                 <span>
-                  {MODE_LABEL[run.mode]}{run.face ? ' + face pass' : ''}: {
+                  {MODE_LABEL[run.mode]}{run.face ? ' + face pass' : ''}{run.uncut ? ` · ${t.comics.uncutEdition}` : ''}: {
                     run.status === 'running' ? (progress ? `painting ${progress.done}/${progress.total}` : 'running')
                       : run.status === 'done' ? 'done' : run.status === 'stopped' ? 'stopped' : `failed (exit ${run.exit_code})`
                   } · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
@@ -580,11 +612,13 @@ export function ComicsTab() {
                   </div>
                   <div className="comics-pages comics-panels">
                     {planPanels.map(p => {
-                      const url = `/api/comics/scripts/${current.name}/panel/${panelStem(p)}.png?v=${p.mtime}`;
+                      // not painted in the uncut edition yet, but copied from the regular one on the next run: show that
+                      const fromRegular = uncut && !p.painted && !!p.regular;
+                      const url = `/api/comics/scripts/${current.name}/panel/${panelStem(p)}.png?${fromRegular ? '' : edQuery}v=${p.mtime}`;
                       return (
                         <div key={p.id} className={`comics-panel ${picked.has(p.id) ? 'picked' : ''}`}>
                           <div className="comics-panel-thumb" style={{ aspectRatio: `${p.gen[0]} / ${p.gen[1]}` }} onClick={() => togglePick(p.id)}>
-                            {p.painted ? <img src={url} alt={p.id} loading="lazy" /> : <span>not painted</span>}
+                            {p.painted || fromRegular ? <img src={url} alt={p.id} loading="lazy" /> : <span>not painted</span>}
                           </div>
                           <div className="comics-panel-head">
                             <label className="comics-check">
@@ -596,6 +630,9 @@ export function ComicsTab() {
                               </span>
                               {p.painted && !p.current && <span className="comics-badge stale" title="Painted from an older prompt or seed">stale</span>}
                               {pinnedPending(p) && <span className="comics-badge pinned" title="Apply pinned copies the variant in">to apply</span>}
+                              {p.edition === 'uncut' && <span className="comics-badge uncut" title={t.comics.uncutBadgeHint}>{t.comics.uncutBadge}</span>}
+                              {fromRegular && <span className="comics-badge" title={t.comics.fromRegularHint}>{t.comics.fromRegular}</span>}
+                              {p.notice && <span className="comics-badge stale" title={p.notice}>SFW</span>}
                             </span>
                           </div>
                           <details className="comics-panel-prompt">
@@ -614,7 +651,7 @@ export function ComicsTab() {
                             <div className="comics-variants">
                               {p.variants.map(v => {
                                 const chosen = p.seedPinned && v.seed === p.seed;
-                                const variantUrl = `/api/comics/scripts/${current.name}/variant/${panelStem(p)}_seed${v.seed}.png?v=${v.mtime ?? variantStamp}`;
+                                const variantUrl = `/api/comics/scripts/${current.name}/variant/${panelStem(p)}_seed${v.seed}.png?${edQuery}v=${v.mtime ?? variantStamp}`;
                                 return (
                                   <figure key={v.seed} className={chosen ? 'chosen' : ''}>
                                     <a href={variantUrl} target="_blank" rel="noreferrer">

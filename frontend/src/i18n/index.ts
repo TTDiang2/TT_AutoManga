@@ -186,6 +186,14 @@ export const translations = {
     },
     comics: {
       description: 'Paint .comic scripts and import them as projects',
+      uncutEdition: 'Uncut edition',
+      uncutEditionHint: 'Run, plan and show the uncut edition: the regular pages plus the script\'s PAGE uncut / PANEL uncut ones (mature), as its own AutoManga project',
+      uncutSlots: '{n} uncut slots',
+      uncutSlotsHint: 'PAGE uncut todo / PANEL uncut todo: slots not written yet (in neither edition)',
+      uncutBadge: 'uncut',
+      uncutBadgeHint: 'Only in the uncut edition (mature)',
+      fromRegular: 'from regular',
+      fromRegularHint: 'The regular edition painted this panel from the same prompt: it is copied, not painted again',
     },
     showcase: {
       title: 'Showcase',
@@ -616,6 +624,14 @@ export const translations = {
     },
     comics: {
       description: '绘制 .comic 脚本并导入为项目',
+      uncutEdition: '无删减版',
+      uncutEditionHint: '运行、检查并显示无删减版：常规页面加上脚本中的 PAGE uncut / PANEL uncut 内容（成人向），作为独立的 AutoManga 项目',
+      uncutSlots: '{n} 个无删减空位',
+      uncutSlotsHint: 'PAGE uncut todo / PANEL uncut todo：尚未编写的空位（两个版本中都不出现）',
+      uncutBadge: '无删减',
+      uncutBadgeHint: '仅出现在无删减版中（成人向）',
+      fromRegular: '取自常规版',
+      fromRegularHint: '常规版已用相同提示词绘制此分格：将直接复制，不再重绘',
     },
     showcase: {
       title: '作品陈列',

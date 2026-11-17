@@ -63,7 +63,8 @@ def _summaries(cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             cover = next((e["cover"] for e in episodes if e["cover"]), None)
         out.append({**c, "episodes": episodes, "missing": missing,
                     "pages": sum(e["pages"] for e in episodes),
-                    "mature": any(e["contentRating"] == "mature" for e in episodes),
+                    # an uncut-edition collection is stored mature (auto-group)
+                    "mature": bool(c.get("mature")) or any(e["contentRating"] == "mature" for e in episodes),
                     "coverUrl": cover})
     return out
 
