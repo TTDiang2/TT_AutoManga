@@ -228,6 +228,11 @@ export const translations = {
       builtIn: 'Built-in',
       useTemplate: 'Use Template',
       saveAsTemplate: 'Save as Template',
+      lora: 'LoRA',
+      loraNone: 'None',
+      loraWeight: 'Weight',
+      loraTrigger: 'Trigger word',
+      loraHint: 'Added to every panel this character is on (0.6 of the weight when the panel has several people).',
     },
     settings: {
       title: 'Settings',
@@ -489,6 +494,11 @@ export const translations = {
       builtIn: '内置',
       useTemplate: '使用模板',
       saveAsTemplate: '保存为模板',
+      lora: 'LoRA',
+      loraNone: '无',
+      loraWeight: '权重',
+      loraTrigger: '触发词',
+      loraHint: '用于该角色出现的每个分镜（多人分镜时为权重的 0.6 倍）。',
     },
     settings: {
       title: '设置',

@@ -121,7 +121,20 @@ async def generate_with_swarmui(req: GenerateImageRequest):
     loras = None
     if swarmsettings.currentLoras:
         loras = [l for l in swarmsettings.currentLoras if l.name]
-    
+    prompt = req.prompt
+    # the panel characters' trained LoRAs + trigger words (global LoRAs stay;
+    # a panel character's weight wins for the same LoRA)
+    project = None
+    try:
+        project = storage.load_project(req.project_id) if req.project_id else None
+    except InvalidProjectIdError:
+        project = None
+    panel = next((p for p in (project or {}).get("panels") or []
+                  if p.get("id") == req.panel_id), None) if project else None
+    if panel:
+        from ..prompting import apply_conditioning
+        prompt, loras, _ = apply_conditioning(prompt, loras, project, panel)
+
     try:
         import logging
         logger = logging.getLogger(__name__)
@@ -129,7 +142,7 @@ async def generate_with_swarmui(req: GenerateImageRequest):
         logger.info(f"[Generate] Using settings: steps={swarmsettings.currentSteps}, cfg={swarmsettings.currentCfgScale}, model={swarmsettings.currentModel}, w={swarmsettings.currentWidth}, h={swarmsettings.currentHeight}")
         
         result = await swarm_client.generate_image(
-            prompt=req.prompt,
+            prompt=prompt,
             negative_prompt=req.negative_prompt,
             model=swarmsettings.currentModel or None,
             steps=swarmsettings.currentSteps,
@@ -165,6 +178,26 @@ async def get_swarmui_models():
         return {"models": models}
     except Exception as e:
         return {"models": [], "error": str(e)}
+
+
+@router.get("/swarmui/loras")
+async def get_swarmui_loras():
+    """Installed LoRAs for the Characters tab: [{name, trigger, architecture}],
+    the name as SwarmUI's <lora:> tag wants it (relative to Models/Lora, no
+    extension), the trigger from the model's metadata or the name convention."""
+    from ..prompting import default_trigger, lora_base_name
+    try:
+        files = await swarm_client.list_models(subtype="LoRA")
+    except Exception as e:
+        return {"loras": [], "error": str(e)}
+    out = []
+    for f in files:
+        name = lora_base_name(f.get("name") or "")
+        if not name:
+            continue
+        trigger = (f.get("trigger_phrase") or "").strip() or default_trigger(name)
+        out.append({"name": name, "trigger": trigger, "architecture": f.get("architecture") or ""})
+    return {"loras": out}
 
 
 @router.get("/swarmui/test")

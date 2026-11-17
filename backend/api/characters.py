@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import json
@@ -11,6 +11,15 @@ router = APIRouter(prefix="/api/characters", tags=["characters"])
 CHARACTERS_FILE = Path(__file__).parent.parent.parent / "data" / "characters.json"
 
 
+class CharacterLora(BaseModel):
+    """A trained LoRA for the character: the SwarmUI name relative to
+    Models/Lora without extension (e.g. "SecondFloor/sf_nova"), its weight and
+    trigger word (None: the name convention, sf_nova -> sfnova)."""
+    name: str
+    weight: float = 0.8
+    trigger: Optional[str] = None
+
+
 class CharacterInput(BaseModel):
     id: str
     name: str
@@ -18,6 +27,7 @@ class CharacterInput(BaseModel):
     appearance: Optional[str] = None
     image: Optional[str] = None
     sourcePanelIds: List[str] = []
+    lora: Optional[CharacterLora] = None
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -54,6 +64,16 @@ async def add_character(character: CharacterInput):
 
 @router.patch("/{character_id}")
 async def update_character(character_id: str, updates: Dict[str, Any]):
+    if "lora" in updates:
+        # null or a name-less entry clears it; anything else must be {name, weight, trigger}
+        lora = updates["lora"]
+        if lora is None or (isinstance(lora, dict) and not str(lora.get("name") or "").strip()):
+            updates["lora"] = None
+        else:
+            try:
+                updates["lora"] = CharacterLora.model_validate(lora).model_dump()
+            except ValidationError as e:
+                raise HTTPException(status_code=422, detail=f"lora: {e.errors()[0].get('msg', 'invalid')}")
     characters = _load_characters()
     for c in characters:
         if c["id"] == character_id:

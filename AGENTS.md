@@ -303,6 +303,25 @@ project `settings.style` is appended to every panel prompt; for each character
 named on the panel, its `prompt_block` (project → global Characters library)
 is appended. Set them via `PUT /api/agent/projects/{id}/settings`.
 
+**Per-character LoRAs**: a character in the global library (`data/characters.json`,
+`GET/PATCH /api/characters/{id}`) may carry `lora: {name, weight, trigger}` —
+`name` is SwarmUI's LoRA name relative to `Models/Lora` without extension
+(`SecondFloor/sf_nova`), `weight` defaults to 0.8, `trigger` (null = the file
+name without `_`, `sf_nova` → `sfnova`) is the trained trigger word. PATCH
+validates it (`null` or a name-less entry clears it); the Characters tab sets
+it from a dropdown. For every panel character with a LoRA, generation adds its
+trigger word to the prompt and its LoRA to the request — full weight on a
+one-character panel, 0.6 × weight when the panel lists several — merged with
+the request's/global `loras` by name (the panel character's weight wins). A
+LoRA the prompt already tags (`<lora:SecondFloor/sf_nova:0.8>`, as converted
+comic panels carry) is not added twice. Each one is recorded in `injected` as
+`{"kind":"lora","text":"<lora:name:w>","name","weight","trigger"}`. It applies
+to `/api/agent/generate` (with `inject_characters`) and to
+`/api/assets/swarmui/generate` (from its `project_id`/`panel_id`).
+`GET /api/assets/swarmui/loras` lists the installed LoRAs as
+`{"loras":[{name, trigger, architecture}]}` (trigger from the model's
+`trigger_phrase` metadata, else the name convention).
+
 **Consistency & continuity tools**: fixed seeds make style-reproducible runs;
 `init_image` (+`init_creativity` 0-1) runs img2img against an asset or data
 URL — feed the previous panel (low creativity ~0.4-0.6) or a character sheet

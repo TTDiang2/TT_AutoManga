@@ -135,6 +135,14 @@ export interface LayoutDefinition {
   is_preset?: boolean;
 }
 
+/** A character's trained LoRA: the SwarmUI name relative to Models/Lora
+    (no extension), weight, trigger word (null: the name convention). */
+export interface CharacterLora {
+  name: string;
+  weight: number;
+  trigger?: string | null;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -142,6 +150,7 @@ export interface Character {
   appearance?: string;
   image?: string;
   sourcePanelIds: string[];
+  lora?: CharacterLora | null;
   createdAt: string;
   updatedAt: string;
 }

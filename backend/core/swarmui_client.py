@@ -132,6 +132,7 @@ class SwarmUIClient:
                     "class": f.get("class", ""),
                     "standard_width": f.get("standard_width", 0),
                     "standard_height": f.get("standard_height", 0),
+                    "trigger_phrase": f.get("trigger_phrase") or "",
                 } for f in files]
         except Exception:
             return []

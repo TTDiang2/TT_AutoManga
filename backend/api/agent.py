@@ -339,14 +339,14 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if mask_dataurl is None:
             raise ValueError(f"mask_image not found: {payload['mask_image']}")
 
-    # automatic injection: project style suffix + character blocks
+    # automatic injection: project style suffix + character blocks + LoRAs
     injected = []
     project = None
     if payload.get("project_id"):
         project = storage.load_project(payload["project_id"])
     if payload.get("inject_characters", True) and project:
-        from ..prompting import (blocks_for_panel, location_block_for_panel,
-                                 style_suffix)
+        from ..prompting import (apply_conditioning, blocks_for_panel,
+                                 location_block_for_panel, style_suffix)
         style = style_suffix(project)
         if style:
             prompt = f"{prompt}, {style}" if prompt_format_is_tags(payload) else f"{prompt}。{style}"
@@ -368,6 +368,12 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             for block in blocks_for_panel(project, panel):
                 prompt = f"{prompt}, {block}" if prompt_format_is_tags(payload) else f"{prompt}。{block}"
                 injected.append({"kind": "character", "text": block})
+            # the panel characters' trained LoRAs + trigger words, merged with the
+            # request/global LoRAs (a panel character's weight wins)
+            prompt, loras, lora_injected = apply_conditioning(
+                prompt, loras, project, panel,
+                sep=", " if prompt_format_is_tags(payload) else "。")
+            injected.extend(lora_injected)
 
     assets_out = []
     for v in range(variants):

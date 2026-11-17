@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
-import type { Character } from '../../types';
+import type { Character, CharacterLora } from '../../types';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -14,12 +14,24 @@ interface CharacterTemplateMeta {
   isBuiltIn?: boolean;
 }
 
+// shape returned by GET /api/assets/swarmui/loras
+interface SwarmLora {
+  name: string;
+  trigger: string;
+  architecture?: string;
+}
+
+const DEFAULT_LORA_WEIGHT = 0.8;
+
 export function CharacterTab() {
   const { characters, setCharacters, addCharacter, updateCharacter, removeCharacter, extractCharactersFromPanels } = useProjectStore();
   const { t } = useTranslation();
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', description: '', appearance: '' });
+  // the LoRA form: name '' = none; trigger '' falls back to the LoRA's own
+  const [loraForm, setLoraForm] = useState({ name: '', weight: DEFAULT_LORA_WEIGHT, trigger: '' });
+  const [swarmLoras, setSwarmLoras] = useState<SwarmLora[]>([]);
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<CharacterTemplateMeta[]>([]);
@@ -89,6 +101,29 @@ export function CharacterTab() {
   }, []);
 
   useEffect(() => {
+    if (!isEditing) return;
+    fetch('/api/assets/swarmui/loras')
+      .then(checked)
+      .then(r => r.json())
+      .then(data => setSwarmLoras(Array.isArray(data?.loras) ? data.loras : []))
+      .catch(() => setSwarmLoras([]));
+  }, [isEditing]);
+
+  const startEdit = (char: Character) => {
+    setEditForm({ name: char.name, description: char.description, appearance: char.appearance || '' });
+    setLoraForm({ name: char.lora?.name || '', weight: char.lora?.weight ?? DEFAULT_LORA_WEIGHT, trigger: char.lora?.trigger || '' });
+    setIsEditing(true);
+  };
+
+  const pickLora = (name: string) => {
+    const found = swarmLoras.find(l => l.name === name);
+    // a new pick brings its own trigger word; an edited one is kept
+    const ownTrigger = swarmLoras.find(l => l.name === loraForm.name)?.trigger || '';
+    const keepTrigger = loraForm.trigger && loraForm.trigger !== ownTrigger;
+    setLoraForm({ ...loraForm, name, trigger: keepTrigger ? loraForm.trigger : (found?.trigger || '') });
+  };
+
+  useEffect(() => {
     if (showTemplates) {
       fetch('/api/characters/templates/')
         .then(r => r.json())
@@ -110,14 +145,17 @@ export function CharacterTab() {
     };
     addChar(newChar);
     setSelectedCharId(newChar.id);
-    setEditForm({ name: newChar.name, description: '', appearance: '' });
-    setIsEditing(true);
+    startEdit(newChar);
   };
 
   const handleSave = () => {
     if (selectedCharId) {
+      const lora: CharacterLora | null = loraForm.name
+        ? { name: loraForm.name, weight: loraForm.weight, trigger: loraForm.trigger.trim() || null }
+        : null;
       patchChar(selectedCharId, {
         ...editForm,
+        lora,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -322,6 +360,47 @@ export function CharacterTab() {
                   placeholder={t.characters.appearancePlaceholder}
                 />
               </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }}>{t.characters.lora}</label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={loraForm.name}
+                  onChange={e => pickLora(e.target.value)}
+                >
+                  <option value="">{t.characters.loraNone}</option>
+                  {loraForm.name && !swarmLoras.some(l => l.name === loraForm.name) && (
+                    <option value={loraForm.name}>{loraForm.name}</option>
+                  )}
+                  {swarmLoras.map(l => (
+                    <option key={l.name} value={l.name}>{l.name}</option>
+                  ))}
+                </select>
+                {loraForm.name && (
+                  <div className="flex gap-sm items-center" style={{ marginTop: '8px' }}>
+                    <label style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>{t.characters.loraWeight}</label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1.2}
+                      step={0.05}
+                      value={loraForm.weight}
+                      onChange={e => setLoraForm({ ...loraForm, weight: Number(e.target.value) })}
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ fontSize: '12px', width: '32px', textAlign: 'right' }}>{loraForm.weight.toFixed(2)}</span>
+                    <input
+                      className="input"
+                      style={{ width: '140px' }}
+                      value={loraForm.trigger}
+                      onChange={e => setLoraForm({ ...loraForm, trigger: e.target.value })}
+                      placeholder={t.characters.loraTrigger}
+                      aria-label={t.characters.loraTrigger}
+                    />
+                  </div>
+                )}
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.loraHint}</p>
+              </div>
               <div className="flex gap-sm">
                 <button className="btn btn-primary" onClick={handleSave}>{t.characters.save}</button>
                 <button className="btn btn-secondary" onClick={handleSaveAsTemplate}>
@@ -340,7 +419,7 @@ export function CharacterTab() {
                   </p>
                 </div>
                 <div className="flex gap-sm">
-                  <button className="btn btn-secondary" onClick={() => { setEditForm({ name: selectedChar.name, description: selectedChar.description, appearance: selectedChar.appearance || '' }); setIsEditing(true); }}>
+                  <button className="btn btn-secondary" onClick={() => startEdit(selectedChar)}>
                     <FiEdit2 size={16} /> {t.characters.edit}
                   </button>
                   <button className="btn btn-ghost" onClick={() => handleDelete(selectedChar.id)} style={{ color: 'var(--error)' }}>
@@ -409,6 +488,15 @@ export function CharacterTab() {
                     <div>
                       <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.appearance}</h4>
                       <p style={{ fontSize: '14px', lineHeight: '1.6', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{selectedChar.appearance}</p>
+                    </div>
+                  )}
+
+                  {selectedChar.lora?.name && (
+                    <div style={{ marginTop: '16px' }}>
+                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.lora}</h4>
+                      <p style={{ fontSize: '14px', wordBreak: 'break-word' }}>
+                        {selectedChar.lora.name} · {selectedChar.lora.weight}{selectedChar.lora.trigger ? ` · ${selectedChar.lora.trigger}` : ''}
+                      </p>
                     </div>
                   )}
 
