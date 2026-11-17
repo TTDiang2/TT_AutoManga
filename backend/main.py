@@ -174,4 +174,7 @@ if __name__ == "__main__":
         logging.getLogger(name).setLevel(logging.INFO)
         logging.getLogger(name).propagate = True
 
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    # Loopback by default; set AUTOMANGA_HOST=0.0.0.0 to serve the LAN.
+    import os
+    host = os.environ.get("AUTOMANGA_HOST", "127.0.0.1")
+    uvicorn.run(app, host=host, port=port, log_level="info")
