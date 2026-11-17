@@ -3,29 +3,48 @@ from typing import Optional, Dict, Any, List
 from ..core.config import settings, LoraConfig
 
 
+def _normalize_address(address: str) -> str:
+    address = (address or "").strip().rstrip("/")
+    return address if address.startswith("http") else f"http://{address}"
+
+
 class SwarmUIClient:
+    """SwarmUI HTTP client.
+
+    The address is read from settings.swarmui.address on every call, so a
+    Settings change takes effect immediately; a per-request ``address``
+    override is one-shot and never stored on the shared client. Sessions
+    are kept per address (a session id is only valid on its own server).
+    """
+
     def __init__(self):
-        self.address = settings.swarmui.address
-        self.session_id: str = ""
-        self.session_expired: bool = True
+        self._sessions: Dict[str, str] = {}
 
-    def update_address(self, address: str):
-        self.address = address if address.startswith("http") else f"http://{address}"
+    @property
+    def address(self) -> str:
+        return _normalize_address(settings.swarmui.address)
 
-    async def get_session(self) -> bool:
+    def _base(self, address: Optional[str] = None) -> str:
+        return _normalize_address(address) if address else self.address
+
+    @property
+    def session_id(self) -> str:
+        return self._sessions.get(self.address, "")
+
+    async def get_session(self, address: Optional[str] = None) -> bool:
         """Acquire a session with brief retries (SwarmUI restarts are transient)."""
         import asyncio
+        base = self._base(address)
         for attempt in range(3):
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                     response = await client.post(
-                        f"{self.address}/API/GetNewSession",
+                        f"{base}/API/GetNewSession",
                         json={}
                     )
                     if response.status_code == 200:
                         data = response.json()
-                        self.session_id = data.get("session_id", "")
-                        self.session_expired = False
+                        self._sessions[base] = data.get("session_id", "")
                         return True
             except Exception as e:
                 import logging
@@ -34,9 +53,9 @@ class SwarmUIClient:
                 await asyncio.sleep(1.5)
         return False
 
-    async def ensure_session(self) -> bool:
-        if not self.session_id or self.session_expired:
-            return await self.get_session()
+    async def ensure_session(self, address: Optional[str] = None) -> bool:
+        if not self._sessions.get(self._base(address)):
+            return await self.get_session(address)
         return True
 
     def build_prompt_with_loras(self, prompt: str, loras: List[LoraConfig]) -> str:
@@ -51,29 +70,31 @@ class SwarmUIClient:
         return " ".join(parts)
 
     async def check_connection(self) -> Dict[str, Any]:
+        base = self.address
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                 response = await client.post(
-                    f"{self.address}/API/GetNewSession",
+                    f"{base}/API/GetNewSession",
                     json={}
                 )
                 if response.status_code == 200:
                     data = response.json()
-                    self.session_id = data.get("session_id", "")
+                    self._sessions[base] = data.get("session_id", "")
                     return {"connected": True, "status": "ok", "version": data.get("version", "")}
                 return {"connected": False, "status": f"HTTP {response.status_code}"}
         except Exception as e:
             return {"connected": False, "status": str(e)}
 
     async def get_models(self) -> List[str]:
-        if not await self.ensure_session():
+        base = self.address
+        if not await self.ensure_session(base):
             return []
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.post(
-                    f"{self.address}/API/GenerateText2Image",
+                    f"{base}/API/GenerateText2Image",
                     json={
-                        "session_id": self.session_id,
+                        "session_id": self._sessions.get(base, ""),
                         "images": 1,
                         "prompt": "",
                         "model": "",
@@ -91,13 +112,14 @@ class SwarmUIClient:
 
     async def list_models(self, subtype: str = "Stable-Diffusion") -> List[Dict[str, Any]]:
         """List installed models with architecture metadata (SwarmUI ListModels)."""
-        if not await self.ensure_session():
+        base = self.address
+        if not await self.ensure_session(base):
             return []
         try:
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.post(
-                    f"{self.address}/API/ListModels",
-                    json={"session_id": self.session_id, "path": "", "depth": 3,
+                    f"{base}/API/ListModels",
+                    json={"session_id": self._sessions.get(base, ""), "path": "", "depth": 3,
                           "subtype": subtype},
                 )
                 if response.status_code != 200:
@@ -130,16 +152,18 @@ class SwarmUIClient:
         init_image: str = None,          # data URL for img2img
         init_creativity: float = None,   # denoise strength 0-1
         mask_image: str = None,          # data URL inpaint mask (with init_image)
+        address: str = None,             # one-shot server override (not stored)
     ) -> Dict[str, Any]:
         swarmsettings = settings.swarmui
-        
-        if not await self.ensure_session():
+        base = self._base(address)
+
+        if not await self.ensure_session(base):
             return {"success": False, "error": "Failed to get SwarmUI session"}
         
         full_prompt = self.build_prompt_with_loras(prompt, loras or swarmsettings.currentLoras)
         
         payload: Dict[str, Any] = {
-            "session_id": self.session_id,
+            "session_id": self._sessions.get(base, ""),
             "images": 1,
             "prompt": full_prompt,
             "negativeprompt": negative_prompt or "",
@@ -178,9 +202,9 @@ class SwarmUIClient:
                 # session id — never degraded to a plain text2image call.
                 result = None
                 for attempt in range(2):
-                    payload["session_id"] = self.session_id
+                    payload["session_id"] = self._sessions.get(base, "")
                     response = await client.post(
-                        f"{self.address}/API/GenerateText2Image",
+                        f"{base}/API/GenerateText2Image",
                         json=payload
                     )
                     if response.status_code != 200:
@@ -188,9 +212,9 @@ class SwarmUIClient:
                     result = response.json()
                     if result.get("error_id") != "invalid_session_id":
                         break
-                    self.session_expired = True
+                    self._sessions.pop(base, None)
                     if attempt == 0:
-                        if not await self.get_session():
+                        if not await self.get_session(base):
                             return {"success": False, "error": "Failed to renew SwarmUI session"}
                         logger.info("[SwarmUI] session expired; replaying payload with new session")
                         continue
@@ -213,7 +237,7 @@ class SwarmUIClient:
 
                     async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as img_client:
                         img_response = await img_client.get(
-                            f"{self.address}/{image_path}"
+                            f"{base}/{image_path}"
                         )
                         if img_response.status_code == 200:
                             import base64

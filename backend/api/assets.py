@@ -117,9 +117,7 @@ async def upload_image(project_id: str, panel_id: str, file: UploadFile = File(.
 @router.post("/swarmui/generate")
 async def generate_with_swarmui(req: GenerateImageRequest):
     swarmsettings = settings.swarmui
-    if req.swarmui_address:
-        swarm_client.update_address(req.swarmui_address)
-    
+
     loras = None
     if swarmsettings.currentLoras:
         loras = [l for l in swarmsettings.currentLoras if l.name]
@@ -141,7 +139,9 @@ async def generate_with_swarmui(req: GenerateImageRequest):
             sampler_name=swarmsettings.currentSamplerName,
             loras=loras,
             seed=req.seed,
-            remove_background=req.remove_background
+            remove_background=req.remove_background,
+            # one-shot override: never rewrites the shared client's address
+            address=req.swarmui_address or None,
         )
         
         if result.get("success"):

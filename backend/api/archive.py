@@ -12,7 +12,7 @@ import base64
 import zipfile
 import io
 
-from ..core.config import _backup_corrupt
+from ..core.config import _backup_corrupt, atomic_write_json
 
 router = APIRouter(prefix="/api/archive", tags=["archive"])
 
@@ -26,6 +26,9 @@ ARCHIVE_ROOT = ARCHIVE_DIR.resolve()
 # Folder ids become directory names under data/archive — same rule as
 # project ids, so ids can never traverse out of the archive.
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+_SERVE_RE = re.compile(r"/api/archive/images/([A-Za-z0-9_-]{1,128})/serve")
 
 
 def _validate_id(value: str, what: str = "id") -> str:
@@ -43,6 +46,41 @@ def _archive_file(path: str) -> Path:
         raise HTTPException(status_code=400,
                             detail="image path is outside the archive directory")
     return p
+
+
+def _created_ts(value: str) -> float:
+    """created_at is an epoch-seconds string (archive) or an ISO timestamp
+    (frontend-created folders); unparseable values sort first."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def resolve_archive_ref(ref: str) -> Optional[Path]:
+    """Map an ``/api/archive/images/<id>/serve`` URL to its file via the
+    archive's own metadata (never a client-supplied path); None if unknown
+    or outside data/archive."""
+    m = _SERVE_RE.fullmatch((ref or "").split("?", 1)[0])
+    if not m:
+        return None
+    image = next((img for img in load_metadata().images if img.id == m.group(1)),
+                 None)
+    if not image:
+        return None
+    try:
+        p = _archive_file(image.path)
+    except HTTPException:
+        return None
+    return p if p.is_file() else None
 
 
 class ArchiveImage(BaseModel):
@@ -82,8 +120,7 @@ def load_metadata() -> ArchiveMetadata:
 
 
 def save_metadata(metadata: ArchiveMetadata) -> None:
-    with open(METADATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(metadata.model_dump(), f, indent=2)
+    atomic_write_json(METADATA_FILE, metadata.model_dump(), indent=2)
 
 
 @router.get("/images")
@@ -101,7 +138,7 @@ async def list_folders(parent_id: Optional[str] = None, sort_by: Optional[str] =
     if sort_by == "name":
         folders = sorted(folders, key=lambda f: f.name.lower())
     elif sort_by == "created":
-        folders = sorted(folders, key=lambda f: float(f.created_at))
+        folders = sorted(folders, key=lambda f: _created_ts(f.created_at))
     else:
         folders = sorted(folders, key=lambda f: f.sort_order)
     return folders

@@ -10,6 +10,7 @@ Semantic parity checklist (see docs/plans/2026-10-06-agent-pipeline-design.md §
 - image-slot: empty slots render nothing (same as the old export path)
 """
 from __future__ import annotations
+import math
 from typing import Any, Callable, Optional, Tuple
 from PIL import Image, ImageChops, ImageDraw
 from . import bubbles
@@ -29,10 +30,23 @@ def render_page(page: dict, scale: float = 1.0,
     elements = [e for e in page.get("elements", []) if e.get("visible", True)]
     elements.sort(key=lambda e: e.get("zIndex", 0))
     for el in elements:
-        layer = _render_element(el, W, H, scale, resolve)
-        if layer is not None:
-            canvas = Image.alpha_composite(canvas, layer)
+        placed = _render_element(el, W, H, scale, resolve)
+        if placed is not None:
+            img, x, y = placed
+            _composite_at(canvas, img, x, y)
     return canvas.convert("RGB")
+
+
+def _composite_at(canvas: Image.Image, img: Image.Image, x: int, y: int) -> None:
+    """alpha_composite img onto canvas at (x, y), clipping to the canvas
+    (Image.alpha_composite refuses negative / overhanging destinations)."""
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(canvas.width, x + img.width), min(canvas.height, y + img.height)
+    if x1 <= x0 or y1 <= y0:
+        return
+    if (x0, y0, x1, y1) != (x, y, x + img.width, y + img.height):
+        img = img.crop((x0 - x, y0 - y, x1 - x, y1 - y))
+    canvas.alpha_composite(img, (x0, y0))
 
 
 def _corners_polygon(el: dict, w: int, h: int):
@@ -44,7 +58,8 @@ def _corners_polygon(el: dict, w: int, h: int):
     return pts
 
 
-def _render_element(el, W, H, scale, resolve) -> Optional[Image.Image]:
+def _render_element(el, W, H, scale, resolve):
+    """Render one element locally → (image, x, y) page placement, or None."""
     X = el.get("x", 0) / 100 * W
     Y = el.get("y", 0) / 100 * H
     EW = el.get("width", 0) / 100 * W
@@ -68,16 +83,56 @@ def _render_element(el, W, H, scale, resolve) -> Optional[Image.Image]:
     if local is None:
         return None
 
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    # Replace (not blend) the empty region with the element layer so its
-    # alpha channel is preserved exactly; alpha_composite blends once later.
-    layer.paste(local, (int(round(X)) - pad, int(round(Y)) - pad))
+    px, py = int(round(X)) - pad, int(round(Y)) - pad
     rot = el.get("rotation") or 0
-    if rot:
-        # CSS rotate() is clockwise; PIL rotates counter-clockwise.
-        layer = layer.rotate(-float(rot), center=(X + EW / 2, Y + EH / 2),
-                             resample=Image.BICUBIC, expand=False)
-    return layer
+    if not rot:
+        return local, px, py
+    # Rotate only the element's own pixels, never a page-sized layer. This
+    # is the exact affine map Image.rotate(-rot, center=...) applied to the
+    # old full-page layer, restricted to the rotated element's bounding box
+    # (so output pixels are the same, at a fraction of the cost).
+    return _rotate_local(local, px, py, float(rot),
+                         (X + EW / 2, Y + EH / 2), W, H)
+
+
+def _rotate_local(local: Image.Image, px: int, py: int, rot: float,
+                  center: Tuple[float, float], W: int, H: int):
+    # 2px transparent margin: bicubic sampling at the element's edge must
+    # see transparent neighbours, as it did inside the full-page layer
+    m = 2
+    src = Image.new("RGBA", (local.width + 2 * m, local.height + 2 * m), (0, 0, 0, 0))
+    src.paste(local, (m, m))
+    px, py = px - m, py - m
+
+    # CSS rotate() is clockwise; PIL's rotate(-rot) builds this inverse map
+    # (output page coords → input page coords), see PIL Image.rotate.
+    ang = -math.radians(-rot)
+    a, b = round(math.cos(ang), 15), round(math.sin(ang), 15)
+    d, e = -b, a
+    cx, cy = center
+    c = a * -cx + b * -cy + cx
+    f = d * -cx + e * -cy + cy
+
+    # forward-map the source corners to find the output bounding box
+    xs, ys = [], []
+    for qx, qy in ((px, py), (px + src.width, py), (px, py + src.height),
+                   (px + src.width, py + src.height)):
+        # inverse of [[a, b], [d, e]] is its transpose (pure rotation)
+        tx, ty = qx - c, qy - f
+        xs.append(a * tx + d * ty)
+        ys.append(b * tx + e * ty)
+    bx0 = max(0, int(math.floor(min(xs))) - 1)
+    by0 = max(0, int(math.floor(min(ys))) - 1)
+    bx1 = min(W, int(math.ceil(max(xs))) + 1)
+    by1 = min(H, int(math.ceil(max(ys))) + 1)
+    if bx1 <= bx0 or by1 <= by0:
+        return None
+    # same map, re-based: output origin at (bx0, by0), input origin at (px, py)
+    data = (a, b, a * bx0 + b * by0 + c - px,
+            d, e, d * bx0 + e * by0 + f - py)
+    out = src.transform((bx1 - bx0, by1 - by0), Image.AFFINE, data,
+                        resample=Image.BICUBIC)
+    return out, bx0, by0
 
 
 def _draw_image(el, ew, eh, scale, resolve):
@@ -184,6 +239,8 @@ def _draw_text(el, ew, eh, scale):
         total = len(lines) * line_h
         y0 = (eh - total) / 2
         align = el.get("textAlign") or "left"
+        if align not in ("left", "center", "right"):
+            align = "left"   # unknown values (e.g. "justify") render as left
         ax = {"left": "lm", "center": "mm", "right": "rm"}[align]
         x = {"left": 0, "center": ew / 2, "right": ew}[align]
         for i, line in enumerate(lines):

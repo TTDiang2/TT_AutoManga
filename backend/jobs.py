@@ -26,13 +26,27 @@ class Job:
     status: str = "queued"           # queued|running|done
     created_at: str = ""
     concurrency: int = 1
+    finished_at: Optional[float] = None   # time.time() when the last item ended
 
 
 _jobs: Dict[str, Job] = {}
 _semaphores: Dict[str, asyncio.Semaphore] = {}
 
+FINISHED_JOB_TTL_S = 3600
+
+
+def _prune_finished(now: Optional[float] = None) -> None:
+    """Drop finished jobs older than an hour (their results hold whole
+    generation records; the table would otherwise grow forever)."""
+    now = time.time() if now is None else now
+    for jid, job in list(_jobs.items()):
+        if job.finished_at is not None and now - job.finished_at > FINISHED_JOB_TTL_S:
+            _jobs.pop(jid, None)
+            _semaphores.pop(jid, None)
+
 
 def create_job(payloads: List[Dict[str, Any]], concurrency: int = 1) -> Job:
+    _prune_finished()
     job = Job(id=uuid.uuid4().hex, total=len(payloads),
               items=[JobItem(payload=p) for p in payloads],
               created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -77,3 +91,4 @@ async def run_job(job_id: str, worker: Callable[[Dict[str, Any]], Any]) -> None:
 
     await asyncio.gather(*[_one(i) for i in job.items])
     job.status = "done"
+    job.finished_at = time.time()

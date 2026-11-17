@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 import shutil
+import tempfile
 from pathlib import Path
 from pydantic import BaseModel
 
@@ -94,6 +96,27 @@ def is_masked_api_key(value: str) -> bool:
     return bool(value) and value.startswith("****")
 
 
+def atomic_write_json(path: Path, data, **dump_kwargs) -> None:
+    """Write JSON to a temp file in the same dir, then os.replace it over
+    ``path`` — a crash mid-write can never leave a truncated file behind."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, **dump_kwargs)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _backup_corrupt(file: Path) -> None:
     """Copy an unreadable JSON file aside so the next save can't destroy it."""
     try:
@@ -123,8 +146,16 @@ def load_settings() -> AppSettings:
 
 def save_settings(settings: AppSettings) -> None:
     """Save settings to JSON file."""
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings.model_dump(), f, indent=2)
+    atomic_write_json(SETTINGS_FILE, settings.model_dump(), indent=2)
+
+
+def reset_settings_in_place(target: AppSettings) -> None:
+    """Restore defaults by mutating ``target`` — other modules imported the
+    settings object itself (``from .config import settings``), so rebinding
+    config.settings would leave them reading the stale one."""
+    fresh = AppSettings()
+    for name in AppSettings.model_fields:
+        setattr(target, name, getattr(fresh, name))
 
 
 # Global settings instance

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import Optional, List, Dict, Any
 from ..core import config
 from ..core.config import is_masked_api_key
@@ -70,6 +70,19 @@ async def get_settings():
 
 @router.post("/")
 async def update_settings(update: FullSettingsUpdate):
+    # pydantic does not validate on assignment: normalize posted dicts to
+    # model instances (so readers can use attribute access) — up front, so
+    # an invalid list is a 400 before anything is changed
+    presets = loras = None
+    try:
+        if update.swarmui and update.swarmui.presets is not None:
+            presets = [config.SwarmUIPreset.model_validate(p)
+                       for p in update.swarmui.presets]
+        if update.swarmui and update.swarmui.currentLoras is not None:
+            loras = [config.LoraConfig.model_validate(l)
+                     for l in update.swarmui.currentLoras]
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     try:
         if update.api:
             if update.api.endpoint is not None:
@@ -103,12 +116,12 @@ async def update_settings(update: FullSettingsUpdate):
                 config.settings.swarmui.address = update.swarmui.address
             if update.swarmui.activePresetId is not None:
                 config.settings.swarmui.activePresetId = update.swarmui.activePresetId
-            if update.swarmui.presets is not None:
-                config.settings.swarmui.presets = update.swarmui.presets
+            if presets is not None:
+                config.settings.swarmui.presets = presets
             if update.swarmui.currentModel is not None:
                 config.settings.swarmui.currentModel = update.swarmui.currentModel
             if update.swarmui.currentLoras is not None:
-                config.settings.swarmui.currentLoras = update.swarmui.currentLoras
+                config.settings.swarmui.currentLoras = loras
             if update.swarmui.currentSteps is not None:
                 config.settings.swarmui.currentSteps = update.swarmui.currentSteps
             if update.swarmui.currentCfgScale is not None:
@@ -143,7 +156,9 @@ async def update_settings(update: FullSettingsUpdate):
 @router.post("/reset")
 async def reset_settings():
     try:
-        config.settings = config.AppSettings()
+        # mutate in place: agent/assets/storyboard/clients hold references
+        # to this object, a rebind would leave them on the old values
+        config.reset_settings_in_place(config.settings)
         config.save_settings(config.settings)
         return {"success": True}
     except Exception as e:

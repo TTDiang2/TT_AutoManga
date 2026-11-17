@@ -4,16 +4,19 @@ from the web UI.
 The Comics repo (COMICS_DIR, default ~/Projects/Comics) holds the scripts in
 scripts/*.comic and the converter; its output lands in out/<name>/. This
 router lists and edits the scripts, runs one conversion at a time (SwarmUI
-paints one panel at a time anyway) and streams its log, and serves the page
+paints one panel at a time anyway) detached from the server, serves its log
+incrementally, and serves the page
 PNGs comic.js renders. Script names are restricted to [a-z0-9_-] so no
 request can reach outside the repo.
 """
-import asyncio
 import json
 import logging
 import os
 import re
+import shlex
 import shutil
+import signal
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -23,6 +26,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ..core.config import DATA_DIR, atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/comics", tags=["comics"])
@@ -31,7 +36,7 @@ COMICS_DIR = Path(os.environ.get("COMICS_DIR", Path.home() / "Projects" / "Comic
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
 _PAGE_FILE_RE = re.compile(r"^(page|draft)_\d{2}\.png$")
 _MODES = {"paint": [], "no-paint": ["--no-paint"], "dry-run": ["--dry-run"]}
-_LOG_LIMIT = 5000
+_LOG_LIMIT = 5000           # max lines returned per poll
 
 
 def _scripts_dir() -> Path:
@@ -39,7 +44,7 @@ def _scripts_dir() -> Path:
 
 
 def _script_path(name: str) -> Path:
-    if not _NAME_RE.match(name or ""):
+    if not _NAME_RE.fullmatch(name or ""):
         raise HTTPException(status_code=400, detail="script names use letters, digits, _ and - only")
     return _scripts_dir() / f"{name}.comic"
 
@@ -113,7 +118,8 @@ class SaveScriptRequest(BaseModel):
 @router.put("/scripts/{name}")
 async def save_script(name: str, req: SaveScriptRequest):
     path = _script_path(name)
-    if _current and _current.status == "running" and _current.script == name:
+    running = _running_run()
+    if running and running["script"] == name:
         raise HTTPException(status_code=409, detail="this script is being converted; save when the run ends")
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".comic.tmp")
@@ -140,7 +146,7 @@ async def list_pages(name: str):
 @router.get("/scripts/{name}/file/{file}")
 async def page_file(name: str, file: str):
     _script_path(name)
-    if not _PAGE_FILE_RE.match(file):
+    if not _PAGE_FILE_RE.fullmatch(file):
         raise HTTPException(status_code=400, detail="not a page file")
     path = _out_dir(name) / file
     if not path.exists():
@@ -149,58 +155,179 @@ async def page_file(name: str, file: str):
 
 
 # ---------------------------------------------------------------------------
-# Runs (one at a time)
+# Runs (one at a time, detached, restart-proof)
+#
+# The converter runs in its own session (start_new_session) under /bin/sh,
+# which appends all output to out/<name>/automanga.run.log and writes the
+# exit code to automanga.run.log.exit when node ends. Nothing streams
+# through a pipe (no line-length limit, no dependency on this process), so
+# restarting the server neither kills the conversion nor loses its log.
+# The current run is persisted to DATA_DIR/comics_run.json and picked up
+# again on start; its status is derived from the pid and the .exit file.
 # ---------------------------------------------------------------------------
 
-class Run:
-    def __init__(self, script: str, mode: str, face: bool):
-        self.id = uuid.uuid4().hex
-        self.script, self.mode, self.face = script, mode, face
-        self.status = "running"            # running | done | failed | stopped
-        self.exit_code: Optional[int] = None
-        self.lines: List[str] = []
-        self.started = time.time()
-        self.ended: Optional[float] = None
-        self.proc: Optional[asyncio.subprocess.Process] = None
+RUN_FILE = DATA_DIR / "comics_run.json"
+_LINE_LIMIT = 4000          # chars per returned line (one giant line stays usable)
+_procs: Dict[int, subprocess.Popen] = {}   # children of this server, for reaping
+_line_index: Dict[str, "_LogIndex"] = {}   # log path → newline offsets
+_verified: Dict[tuple, bool] = {}          # (pid, run id) → pid is that run
 
-    def snapshot(self, since: int = 0) -> Dict[str, Any]:
-        summary = None
+
+class _LogIndex:
+    """Byte offsets of line starts in a growing log, extended incrementally
+    so a poll only reads what was appended since the last one."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.starts: List[int] = [0]
+        self.scanned = 0
+        self.ident = None
+
+    def refresh(self) -> int:
         try:
-            summary = _summary(_script_path(self.script))
-        except Exception:
-            pass
-        return {"id": self.id, "script": self.script, "mode": self.mode, "face": self.face,
-                "status": self.status, "exit_code": self.exit_code,
-                "started": self.started, "ended": self.ended,
-                "lines": self.lines[since:], "next": len(self.lines),
-                "project_id": summary and summary["project_id"]}
+            st = self.path.stat()
+        except OSError:
+            return 0
+        if self.ident != (st.st_ino, st.st_dev) or st.st_size < self.scanned:
+            # replaced or truncated (a new run): start over
+            self.starts, self.scanned = [0], 0
+            self.ident = (st.st_ino, st.st_dev)
+        if st.st_size > self.scanned:
+            with open(self.path, "rb") as f:
+                f.seek(self.scanned)
+                while True:
+                    chunk = f.read(1 << 20)
+                    if not chunk:
+                        break
+                    base = self.scanned
+                    i = chunk.find(b"\n")
+                    while i != -1:
+                        self.starts.append(base + i + 1)
+                        i = chunk.find(b"\n", i + 1)
+                    self.scanned += len(chunk)
+        return self.scanned
+
+    def lines(self, since: int, include_partial: bool):
+        """(lines[since:], total) — complete lines, plus the unterminated
+        tail once the run has ended."""
+        size = self.refresh()
+        complete = len(self.starts) - 1
+        has_tail = include_partial and self.starts[-1] < size
+        total = complete + (1 if has_tail else 0)
+        since = max(0, since)
+        if total - since > _LOG_LIMIT:
+            since = total - _LOG_LIMIT   # far behind: send the newest lines only
+        if since >= total:
+            return [], total
+        begin = self.starts[since]
+        end = size if has_tail else self.starts[complete]
+        with open(self.path, "rb") as f:
+            f.seek(begin)
+            blob = f.read(end - begin)
+        out = blob.decode("utf-8", errors="replace").split("\n")
+        if not has_tail:
+            out = out[:-1]   # split leaves "" after the final newline
+        return [l.rstrip("\r")[:_LINE_LIMIT] for l in out], total
 
 
-_current: Optional[Run] = None
-_tasks: set = set()
+def _log_path(script: str) -> Path:
+    return _out_dir(script) / "automanga.run.log"
 
 
-async def _execute(run: Run, cmd: List[str]) -> None:
-    env = dict(os.environ)
-    env["PATH"] = os.pathsep.join([str(Path(cmd[0]).parent), env.get("PATH", "")])
-    env.setdefault("AUTOMANGA_URL", f"http://127.0.0.1:{os.environ.get('AUTOMANGA_PORT', '5180')}")
+def _load_run() -> Optional[Dict[str, Any]]:
     try:
-        run.proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=str(COMICS_DIR), env=env,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-        async for raw in run.proc.stdout:
-            run.lines.append(raw.decode("utf-8", errors="replace").rstrip())
-            if len(run.lines) > _LOG_LIMIT:
-                del run.lines[: len(run.lines) - _LOG_LIMIT]
-        run.exit_code = await run.proc.wait()
-        if run.status == "running":
-            run.status = "done" if run.exit_code == 0 else "failed"
+        run = json.loads(RUN_FILE.read_text(encoding="utf-8"))
+        return run if isinstance(run, dict) and run.get("pid") else None
+    except FileNotFoundError:
+        return None
     except Exception as e:
-        logger.exception("comic run failed")
-        run.lines.append(f"error: {e}")
-        run.status = "failed"
-    finally:
-        run.ended = time.time()
+        logger.warning("unreadable %s: %s", RUN_FILE, e)
+        return None
+
+
+def _save_run(run: Dict[str, Any]) -> None:
+    atomic_write_json(RUN_FILE, run, indent=2)
+
+
+def _is_our_process(run: Dict[str, Any]) -> bool:
+    """After a restart (or reboot) the persisted pid may belong to someone
+    else: trust it only if its command line is our /bin/sh, which names
+    the run's log file. Checked once per run."""
+    key = (int(run["pid"]), run["id"])
+    if key not in _verified:
+        try:
+            out = subprocess.run(["ps", "-o", "command=", "-p", str(key[0])],
+                                 capture_output=True, text=True, timeout=5).stdout
+            _verified[key] = run["log"] in out
+        except Exception:
+            _verified[key] = True   # can't tell: don't declare a live run dead
+    return _verified[key]
+
+
+def _pid_alive(run: Dict[str, Any]) -> bool:
+    pid = int(run["pid"])
+    proc = _procs.get(pid)
+    if proc is not None:
+        # our own child: poll() reaps it (a zombie still answers kill(0))
+        if proc.poll() is None:
+            return True
+        _procs.pop(pid, None)
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    return _is_our_process(run)
+
+
+def _exit_code(run: Dict[str, Any]) -> Optional[int]:
+    try:
+        return int(Path(run["log"] + ".exit").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _status(run: Dict[str, Any]):
+    """(status, exit_code, ended) of a persisted run."""
+    code = _exit_code(run)
+    if run.get("stopped"):
+        return "stopped", code, run.get("ended")
+    if code is not None:
+        try:
+            ended = Path(run["log"] + ".exit").stat().st_mtime
+        except OSError:
+            ended = None
+        return ("done" if code == 0 else "failed"), code, ended
+    if _pid_alive(run):
+        return "running", None, None
+    # gone without an exit code: killed from outside (reboot, kill -9)
+    return "failed", None, run.get("ended")
+
+
+def _snapshot(run: Dict[str, Any], since: int = 0) -> Dict[str, Any]:
+    status, code, ended = _status(run)
+    log = Path(run["log"])
+    idx = _line_index.get(run["log"])
+    if idx is None:
+        idx = _line_index[run["log"]] = _LogIndex(log)
+    lines, total = idx.lines(since, include_partial=status != "running")
+    summary = None
+    try:
+        summary = _summary(_script_path(run["script"]))
+    except Exception:
+        pass
+    return {"id": run["id"], "script": run["script"], "mode": run["mode"],
+            "face": run["face"], "status": status, "exit_code": code,
+            "started": run["started"], "ended": ended,
+            "lines": lines, "next": total,
+            "project_id": summary and summary["project_id"]}
+
+
+def _running_run() -> Optional[Dict[str, Any]]:
+    run = _load_run()
+    return run if run and _status(run)[0] == "running" else None
 
 
 class StartRunRequest(BaseModel):
@@ -211,43 +338,72 @@ class StartRunRequest(BaseModel):
 
 @router.post("/runs")
 async def start_run(req: StartRunRequest):
-    global _current
     path = _script_path(req.script)
     if not path.exists():
         raise HTTPException(status_code=404, detail="script not found")
     if req.mode not in _MODES:
         raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(_MODES)}")
-    if _current and _current.status == "running":
-        raise HTTPException(status_code=409, detail=f"already converting {_current.script}")
-    cmd = [_node(), str(COMICS_DIR / "automanga.js"), str(path), *_MODES[req.mode]]
+    busy = _running_run()
+    if busy:
+        raise HTTPException(status_code=409, detail=f"already converting {busy['script']}")
+    node = _node()
+    args = [node, str(COMICS_DIR / "automanga.js"), str(path), *_MODES[req.mode]]
     if req.face:
-        cmd.append("--face")
-    run = Run(req.script, req.mode, req.face)
-    run.lines.append("$ node automanga.js " + " ".join([f"scripts/{path.name}", *cmd[3:]]))
-    _current = run
-    task = asyncio.create_task(_execute(run, cmd))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
-    return run.snapshot()
+        args.append("--face")
+
+    log = _log_path(req.script)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    exit_file = Path(str(log) + ".exit")
+    exit_file.unlink(missing_ok=True)
+    # truncate: one log per run
+    log.write_text("$ node automanga.js " + " ".join([f"scripts/{path.name}", *args[3:]]) + "\n",
+                   encoding="utf-8")
+    q = shlex.quote
+    # exit code via tmp + mv so a poll never reads a half-written file
+    shell = (" ".join(q(a) for a in args) + f" >> {q(str(log))} 2>&1; "
+             f"echo $? > {q(str(exit_file) + '.tmp')}; "
+             f"mv -f {q(str(exit_file) + '.tmp')} {q(str(exit_file))}")
+
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join([str(Path(node).parent), env.get("PATH", "")])
+    env.setdefault("AUTOMANGA_URL", f"http://127.0.0.1:{os.environ.get('AUTOMANGA_PORT', '5180')}")
+    try:
+        proc = subprocess.Popen(["/bin/sh", "-c", shell], cwd=str(COMICS_DIR), env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        logger.exception("comic run failed to start")
+        raise HTTPException(status_code=500, detail=f"could not start the converter: {e}")
+    _procs[proc.pid] = proc
+    run = {"id": uuid.uuid4().hex, "script": req.script, "mode": req.mode,
+           "face": req.face, "pid": proc.pid, "log": str(log), "started": time.time()}
+    _save_run(run)
+    return _snapshot(run)
 
 
 @router.get("/runs/current")
 async def current_run(since: int = 0):
-    return {"run": _current.snapshot(since) if _current else None}
+    run = _load_run()
+    return {"run": _snapshot(run, since) if run else None}
 
 
 @router.post("/runs/current/stop")
 async def stop_run():
-    if not _current or _current.status != "running" or not _current.proc:
+    run = _running_run()
+    if not run:
         raise HTTPException(status_code=409, detail="nothing is running")
-    _current.status = "stopped"
-    _current.lines.append("stopped")
-    # the converter runs comic.js as a child: stop that first (once the parent
-    # is gone the child is re-parented and -P no longer finds it)
-    proc = await asyncio.create_subprocess_exec("pkill", "-TERM", "-P", str(_current.proc.pid))
-    await proc.wait()
+    run["stopped"] = True
+    run["ended"] = time.time()
+    _save_run(run)
     try:
-        _current.proc.terminate()
+        with open(run["log"], "a", encoding="utf-8") as f:
+            f.write("stopped\n")
+    except OSError:
+        pass
+    # the converter runs comic.js as a child; the whole session is one
+    # process group (start_new_session), so one signal stops all of it
+    try:
+        os.killpg(int(run["pid"]), signal.SIGTERM)
     except ProcessLookupError:
         pass
-    return {"run": _current.snapshot()}
+    return {"run": _snapshot(run)}

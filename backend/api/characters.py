@@ -4,6 +4,8 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 import json
 
+from ..core.config import atomic_write_json
+
 router = APIRouter(prefix="/api/characters", tags=["characters"])
 
 CHARACTERS_FILE = Path(__file__).parent.parent.parent / "data" / "characters.json"
@@ -28,9 +30,7 @@ def _load_characters() -> List[Dict[str, Any]]:
 
 
 def _save_characters(characters: List[Dict[str, Any]]) -> None:
-    CHARACTERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CHARACTERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(characters, f, indent=2, ensure_ascii=False)
+    atomic_write_json(CHARACTERS_FILE, characters, indent=2, ensure_ascii=False)
 
 
 @router.get("/")

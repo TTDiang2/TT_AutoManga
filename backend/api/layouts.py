@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import logging
 
+from ..core.config import atomic_write_json
+
 router = APIRouter(prefix="/api/layouts", tags=["layouts"])
 
 LAYOUTS_FILE = Path(__file__).parent.parent.parent / "data" / "layouts.json"
@@ -73,8 +75,7 @@ def load_layouts() -> List[dict]:
 
 
 def save_layouts(layouts: List[dict]) -> None:
-    with open(LAYOUTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(layouts, f, indent=2)
+    atomic_write_json(LAYOUTS_FILE, layouts, indent=2)
 
 
 @router.get("/")

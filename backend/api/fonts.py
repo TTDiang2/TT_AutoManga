@@ -3,14 +3,14 @@ the same fonts the server renderer uses.
 
 A font's family is its file name up to the first "-", lower-cased:
 title-bebas.ttf → "title", default-letter-bold.ttf → "default". The server
-renderer matches a requested family by substring of the file name, so an
-element with fontFamily "title" renders with title-bebas.ttf in both places;
-"default" is what unnamed text (all bubbles) uses (render/fonts.py).
+renderer uses the same rule (render/fonts.font_family), so an element with
+fontFamily "title" renders with title-bebas.ttf in both places; "default" is
+what unnamed text (all bubbles) and unknown families use (render/fonts.py).
 """
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from ..render.fonts import _USER_FONT_DIR
+from ..render.fonts import _USER_FONT_DIR, font_family
 
 router = APIRouter(prefix="/api/fonts", tags=["fonts"])
 
@@ -26,7 +26,7 @@ def _fonts():
 
 @router.get("")
 async def list_fonts():
-    return {"fonts": [{"family": name.split("-")[0].rsplit(".", 1)[0].lower(),
+    return {"fonts": [{"family": font_family(name),
                        "file": name, "url": f"/api/fonts/file/{name}"}
                       for name in _fonts()]}
 

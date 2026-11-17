@@ -14,6 +14,8 @@ from typing import List, Optional, Any
 from pathlib import Path
 import json
 import logging
+
+from ..core.config import atomic_write_json
 import time
 
 router = APIRouter(prefix="/api/composer/templates", tags=["composer-templates"])
@@ -67,8 +69,7 @@ def _load() -> List[dict]:
 
 
 def _save(templates: List[dict]) -> None:
-    with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
-        json.dump(templates, f, indent=2, ensure_ascii=False)
+    atomic_write_json(TEMPLATES_FILE, templates, indent=2, ensure_ascii=False)
 
 
 def _strip_image_payload(el: dict) -> dict:

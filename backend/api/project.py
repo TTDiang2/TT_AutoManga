@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from ..storage.manager import storage, InvalidProjectIdError
+from ..storage.manager import storage, InvalidProjectIdError, pages_base
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -39,6 +40,11 @@ async def save_project(project: Project):
         existing = storage.load_project(project.id) if project.id else None
         if not data.get("panels") and existing and existing.get("panels"):
             data["panels"] = existing["panels"]
+        # same guard for the composer pages: an empty list from a client
+        # that never loaded them must not wipe agent-built pages
+        if not data.get("composerPages") and existing \
+                and existing.get("composerPages"):
+            data["composerPages"] = existing["composerPages"]
         if existing:
             # settings are independent keys (UI edits detailLevel, the agent
             # writes style/characters/locations/bible): merge, never replace
@@ -57,7 +63,7 @@ async def load_project(project_id: str):
     try:
         project = storage.load_project(project_id)
         if project:
-            return {"project": project}
+            return {"project": project, "pagesBase": pages_base(project)}
         raise HTTPException(status_code=404, detail="Project not found")
     except InvalidProjectIdError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -65,6 +71,36 @@ async def load_project(project_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class ComposerPagesUpdate(BaseModel):
+    pages: List[Dict[str, Any]]
+    base: Optional[str] = None   # pagesBase the client last saw; None = force
+
+
+@router.put("/{project_id}/composer-pages")
+async def put_composer_pages(project_id: str, req: ComposerPagesUpdate):
+    """Composer autosave: replace ONLY composerPages, with optimistic
+    concurrency. ``base`` is the pagesBase from the last load/save; if the
+    stored pages changed since (agent API, another tab) the write is
+    refused with 409 instead of silently clobbering them.
+
+    No await between load and save, so the check-and-write is atomic with
+    respect to other request handlers on the event loop."""
+    try:
+        project = storage.load_project(project_id)
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    current = pages_base(project)
+    if req.base is not None and req.base != current:
+        return JSONResponse(status_code=409, content={
+            "detail": "pages changed elsewhere", "base": current})
+    project["composerPages"] = req.pages
+    saved = storage.save_project(project)
+    return {"success": True, "base": pages_base(saved),
+            "updatedAt": saved.get("updatedAt")}
 
 
 @router.get("/covers")

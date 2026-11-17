@@ -1,9 +1,13 @@
 import httpx
 import logging
 from typing import Optional, Dict, Any
-from ..core.config import settings
+from ..core.config import settings, is_masked_api_key
 
 logger = logging.getLogger(__name__)
+
+
+def _norm_endpoint(url: str) -> str:
+    return (url or "").strip().rstrip("/").lower()
 
 
 class OpenAIClient:
@@ -36,6 +40,22 @@ class OpenAIClient:
             self.max_tokens = max_tokens
         if thinking is not None:
             self.thinking = thinking
+
+    def apply_request_endpoint(self, endpoint: Optional[str],
+                               api_key: Optional[str]) -> None:
+        """Per-request endpoint/key overrides (call after reload_from_settings).
+
+        The stored api_key is only ever sent to the stored endpoint: a
+        request naming another endpoint must bring its own key (or gets
+        none) — otherwise any caller could point the server at their own
+        host and collect the user's key. A masked echo of the stored key
+        (from GET /api/settings/) never counts as a key."""
+        own_key = api_key if api_key is not None and not is_masked_api_key(api_key) \
+            else None
+        if endpoint and _norm_endpoint(endpoint) != _norm_endpoint(settings.api.endpoint):
+            self.update_config(endpoint=endpoint, api_key=own_key or "")
+        elif own_key is not None:
+            self.update_config(api_key=own_key)
 
     async def chat_completion(self, messages: list, temperature: float = None, system_prompt: str = None) -> Dict[str, Any]:
         temp = temperature if temperature is not None else self.temperature

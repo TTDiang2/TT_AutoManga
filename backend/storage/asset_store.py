@@ -14,7 +14,9 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
+
+from ..core.config import atomic_write_json
 
 _EXT_BY_MIME = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
@@ -45,10 +47,8 @@ class AssetStore:
         return {}
 
     def _flush(self) -> None:
-        tmp = self.index_file.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._index, f, ensure_ascii=False, indent=2)
-        tmp.replace(self.index_file)
+        atomic_write_json(self.index_file, self._index,
+                          ensure_ascii=False, indent=2)
 
     def save_bytes(self, data: bytes, ext: str = "png", *,
                    project_id: Optional[str] = None, kind: str = "embed",
@@ -111,6 +111,17 @@ class AssetStore:
             Path(entry["path"]).unlink(missing_ok=True)
             return True
         return False
+
+    def remove_many(self, asset_ids: Iterable[str]) -> int:
+        """Remove several assets with a single index flush; returns count."""
+        with self._lock:
+            entries = [self._index.pop(a, None) for a in asset_ids]
+            entries = [e for e in entries if e]
+            if entries:
+                self._flush()
+        for entry in entries:
+            Path(entry["path"]).unlink(missing_ok=True)
+        return len(entries)
 
 
 from ..core.config import DATA_DIR  # noqa: E402

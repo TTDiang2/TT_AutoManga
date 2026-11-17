@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from PIL import Image
 
 from ..assembly import build_page
-from ..core.config import settings, is_masked_api_key
+from ..core.config import settings
 from ..core.openai_client import client as llm_client
 from ..core.swarmui_client import swarm_client
 from ..jobs import create_job, job_snapshot, run_job
@@ -196,11 +196,9 @@ async def agent_storyboard(req: StoryboardRequest):
     project = _load_or_404(req.project_id)
 
     llm_client.reload_from_settings()
-    if req.endpoint:
-        llm_client.update_config(endpoint=req.endpoint)
-    # skip the masked echo clients may send back from GET /api/settings/
-    if req.api_key is not None and not is_masked_api_key(req.api_key):
-        llm_client.update_config(api_key=req.api_key)
+    # masked echoes are ignored; the stored key is only sent to the stored
+    # endpoint (a foreign endpoint needs the request's own api_key)
+    llm_client.apply_request_endpoint(req.endpoint, req.api_key)
     if req.model:
         llm_client.update_config(model=req.model)
 
@@ -1074,10 +1072,16 @@ async def page_preview(project_id: str, page_id: str, scale: float = 2.0):
     project = _load_or_404(project_id)
     page = _find_page(project, page_id)
     scale = min(8.0, max(0.5, scale))
+    # CPU-bound PIL work: keep the event loop (and every other request) free
+    png = await asyncio.to_thread(_render_png, page, scale)
+    return Response(content=png, media_type="image/png")
+
+
+def _render_png(page: Dict[str, Any], scale: float) -> bytes:
     img = render_page(page, scale, _resolver)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
-    return Response(content=buf.getvalue(), media_type="image/png")
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -1157,9 +1161,11 @@ async def agent_export(req: AgentExportRequest):
         raise HTTPException(status_code=400, detail="format must be pdf|zip|both")
     fmt = req.format
     base_name = f"manga_{req.project_id[:8]}_{time.strftime('%Y%m%d_%H%M%S')}"
-    result = export_pages(pages, fmt, min(8.0, max(0.5, req.scale)),
-                          _resolver, _exports_dir(), base_name,
-                          page_numbers=req.page_numbers)
+    # minutes of PIL/reportlab work for a long project: run it in a thread
+    result = await asyncio.to_thread(
+        export_pages, pages, fmt, min(8.0, max(0.5, req.scale)),
+        _resolver, _exports_dir(), base_name,
+        page_numbers=req.page_numbers)
     logger.info("agent/export project=%s fmt=%s base=%s", req.project_id, fmt,
                 base_name)
     return result

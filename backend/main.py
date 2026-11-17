@@ -7,11 +7,34 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 import uvicorn
 import json
+import time
 
 from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 logger = logging.getLogger(__name__)
+
+
+ORPHAN_ASSET_MIN_AGE_S = 14 * 24 * 3600
+
+
+def _asset_created(entry: dict) -> float:
+    """Creation time of an asset: index created_at, else file mtime. An
+    asset whose age can't be told counts as brand new (never deleted)."""
+    created = entry.get("created_at")
+    if created:
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            pass
+    try:
+        return Path(entry.get("path", "")).stat().st_mtime
+    except OSError:
+        return time.time()
 
 
 def _cleanup_orphan_assets() -> None:
@@ -70,20 +93,26 @@ def _cleanup_orphan_assets() -> None:
                 "keeping all assets", meta_file, e)
             return
 
-    from .storage.asset_store import asset_store
-    removed = 0
-    for asset_id in list(asset_store.ids()):
-        if asset_id not in referenced:
-            if asset_store.remove(asset_id):
-                removed += 1
+    from .storage import asset_store as asset_store_mod
+    asset_store = asset_store_mod.asset_store
+    # Unreferenced is not the same as unwanted: unapplied variants, upscale
+    # outputs, overlay/cover art not placed yet and /api/assets/file uploads
+    # (the Comics converter caches those URLs) are all legitimately
+    # unreferenced for a while. Only reclaim assets nobody used for weeks.
+    cutoff = time.time() - ORPHAN_ASSET_MIN_AGE_S
+    stale = [a for a in asset_store.ids()
+             if a not in referenced
+             and _asset_created(asset_store.get(a) or {}) < cutoff]
+    removed = asset_store.remove_many(stale)   # one index.json flush
 
-    # Legacy per-project dirs (pre-refactor uploads): same rule as before.
+    # Legacy per-project dirs (pre-refactor uploads): same rule, same age gate.
     for item in ASSETS_DIR.iterdir():
         if not item.is_dir():
             continue
         for pf in item.rglob("*"):
             if pf.is_file() and str(pf.resolve()) not in referenced_paths \
-                    and pf.name != "index.json":
+                    and pf.name != "index.json" \
+                    and pf.stat().st_mtime < cutoff:
                 pf.unlink()
                 removed += 1
 
