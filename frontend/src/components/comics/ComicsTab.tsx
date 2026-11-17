@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
+import type { Project } from '../../types';
 import './comics.css';
 
 interface Script {
@@ -128,11 +129,18 @@ export function ComicsTab() {
   const logRef = useRef<HTMLPreElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const runRef = useRef<Run | null>(null);
-  runRef.current = run;
+  useEffect(() => { runRef.current = run; }, [run]);
 
   const dirty = text !== savedText;
   const current = scripts.find(s => s.name === selected) || null;
   const running = run?.status === 'running';
+  // the run's elapsed time ticks from a clock state, not a Date.now() during render
+  const [now, setNow] = useState(() => Date.now() / 1000);
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => clearInterval(timer);
+  }, [running]);
   const runIsHere = run && run.script === selected;
 
   const loadScripts = useCallback(async () => {
@@ -333,7 +341,7 @@ export function ComicsTab() {
 
   const openInComposer = async (projectId: string) => {
     try {
-      const data = await json<{ project: any }>(await fetch(`/api/projects/load/${projectId}`));
+      const data = await json<{ project: Project }>(await fetch(`/api/projects/load/${projectId}`));
       setCurrentProject(data.project);
       setComposerProjectId(projectId);
       loadProjectWithImages(projectId);
@@ -353,7 +361,7 @@ export function ComicsTab() {
 
   const progress = runIsHere && run ? paintProgress(run.lines) : null;
   const projectId = (runIsHere && run?.project_id) || current?.project_id || null;
-  const elapsed = run ? Math.round(((run.ended ?? Date.now() / 1000) - run.started)) : 0;
+  const elapsed = run ? Math.round(((run.ended ?? Math.max(now, run.started)) - run.started)) : 0;
   const planPanels = plan?.ok ? plan.panels : [];
   const stale = planPanels.filter(p => p.painted && !p.current).length;
   const unpainted = planPanels.filter(p => !p.painted).length;

@@ -546,7 +546,7 @@ export function CharacterTab() {
                   {!selectedChar.description && !selectedChar.appearance && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>No description or appearance details yet.</p>
                   )}
-                  <TrainingPanel character={selectedChar} />
+                  <TrainingPanel key={selectedChar.id} character={selectedChar} />
                 </div>
               </div>
             </div>

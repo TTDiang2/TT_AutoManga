@@ -82,11 +82,9 @@ export function TrainingPanel({ character }: { character: Character }) {
     setLoaded(true);
   }, [character.id]);
 
-  useEffect(() => {
-    setDataset(null); setLoaded(false); setError(null);
-    setForm({ slug: slugFor(character.name), trigger: triggerFor(character.name) });
-    loadDataset();
-  }, [character.id, character.name, loadDataset]);
+  // CharacterTab mounts this panel with key={character.id}, so a new character starts from fresh state
+  // started from a promise callback: the loaders only set state after their fetches resolve
+  useEffect(() => { void Promise.resolve().then(() => loadDataset()); }, [loadDataset]);
 
   // poll the job (and a running generation) while something runs
   const pollJob = useCallback(async () => {
@@ -105,7 +103,7 @@ export function TrainingPanel({ character }: { character: Character }) {
     } catch (e) { report(e); }
   }, [character.id, updateCharacter]);
 
-  useEffect(() => { pollJob(); }, [pollJob]);
+  useEffect(() => { void Promise.resolve().then(pollJob); }, [pollJob]);
   const generating = !!dataset?.generation?.running;
   const jobRunning = !!job?.running;
   useEffect(() => {

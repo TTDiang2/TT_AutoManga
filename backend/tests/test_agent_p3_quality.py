@@ -187,6 +187,7 @@ def test_upscale_requires_runtime_or_real_model(client):
 
 
 def test_upscale_error_mapping(client, monkeypatch):
+    pytest.importorskip("onnxruntime")   # the mapped errors come after the runtime check
     # bad bytes -> 400 (UnidentifiedImageError is an OSError)
     r = client.post("/api/agent/upscale", json={
         "asset_url": "data:image/png;base64,QUJD", "model": "realesr-animevideov3"})
@@ -257,6 +258,7 @@ def test_upscale_multitile_seamless():
 
 def test_upscale_output_budget_guard():
     """Oversized inputs raise a clean ModelError before allocating (P3 #5)."""
+    pytest.importorskip("onnxruntime")
     from backend.inference import ModelError, upscale_bytes
     img = Image.new("RGB", (5000, 3000), (10, 10, 10))
     buf = io.BytesIO(); img.save(buf, format="PNG")

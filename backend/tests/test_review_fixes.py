@@ -475,7 +475,7 @@ def _old_render(page, scale, resolve):
 
 
 def test_rotated_render_matches_full_layer_reference():
-    import numpy as np
+    np = pytest.importorskip("numpy")
     from backend.render import render_page
     from backend.render.resolve import make_resolver
     from backend.tests._fixtures import transparent_circle_png
