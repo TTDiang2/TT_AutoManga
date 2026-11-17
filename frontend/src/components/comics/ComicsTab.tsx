@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiBookOpen, FiCheck, FiCopy, FiCpu, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal, FiZap } from 'react-icons/fi';
+import { FiBookOpen, FiCheck, FiCopy, FiCpu, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal, FiUpload, FiZap } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
 import { AiRewrite, type AiTarget } from './AiRewrite';
@@ -9,7 +9,8 @@ import { BatchReview } from './BatchReview';
 import { applyAccepted, finished, mergeBatch, type Batch, type BatchResult } from './batchApply';
 import { toApply, useBatchReview } from './batchDecisions';
 import { parseOutline, targetAt, targetLabel, type OutlineEntry, type OutlineKind, type OutlineWords } from './outline';
-import { useComicsDrafts, openedDraft } from './scriptDrafts';
+import { useComicsDrafts, openedDraft, isDirty } from './scriptDrafts';
+import { comicFiles, postUpload, uploaded, uploadSummary, type UploadResult } from './comicsUpload';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import type { Project } from '../../types';
 import './comics.css';
@@ -215,6 +216,9 @@ export function ComicsTab() {
   const [pages, setPages] = useState<PageImage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState<string | null>(null);
+  const [uploadNotice, setUploadNotice] = useState<{ text: string; warn: boolean } | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const uploadInput = useRef<HTMLInputElement>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planText, setPlanText] = useState<string | null>(null);   // the editor text the plan was made from
   const [planTick, setPlanTick] = useState(0);   // bump to re-plan the same text (after a run, a pin)
@@ -590,6 +594,35 @@ export function ComicsTab() {
     } catch (e) { setError((e as Error).message); }
   };
 
+  // .comic files from the upload button or dropped on the list; an existing script is replaced only after a confirm
+  const upload = async (all: File[]) => {
+    const files = comicFiles(all);
+    if (!files.length) { if (all.length) setUploadNotice({ text: `${all.map(f => f.name).join(', ')}: not a .comic file`, warn: true }); return; }
+    setUploadNotice(null);
+    try {
+      let results: UploadResult[] = await postUpload(files, false);
+      const exists = results.filter(r => r.status === 'exists');
+      if (exists.length) {
+        const drafts = useComicsDrafts.getState().drafts;
+        const dirty = exists.filter(r => isDirty(drafts[r.name!])).map(r => `${r.name}.comic`);
+        let msg = fill(c.uploadReplace, { names: exists.map(r => `${r.name}.comic`).join(', ') });
+        if (dirty.length) msg += fill(c.uploadReplaceDirty, { names: dirty.join(', ') });
+        if (window.confirm(msg)) {
+          const again = await postUpload(files.filter(f => exists.some(r => r.file === f.name)), true);
+          results = results.map(r => (r.status === 'exists' && again.find(a => a.file === r.file)) || r);
+        }
+      }
+      const done = results.filter(uploaded);
+      // a replaced script's editor draft goes: it opens with the uploaded text
+      const { setDraft: putDraft } = useComicsDrafts.getState();
+      for (const r of done) if (r.status === 'replaced') putDraft(r.name!, { text: '', savedText: '' });
+      setUploadNotice(uploadSummary(results, c));
+      await loadScripts();
+      const open = done.find(r => r.name === selected) ?? done[0];
+      if (open) { await openScript(open.name!); setView('script'); }
+    } catch (e) { setUploadNotice({ text: (e as Error).message, warn: true }); }
+  };
+
   const select = (name: string) => {
     if (name === selected) return;
     // no confirm: the draft of this script stays in useComicsDrafts and comes back when it is reopened
@@ -687,14 +720,26 @@ export function ComicsTab() {
 
   return (
     <div className="comics-tab">
-      <aside className="comics-list">
+      <aside className={`comics-list ${dropping ? 'dropping' : ''}`}
+        onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
+        onDrop={e => { e.preventDefault(); setDropping(false); upload([...e.dataTransfer.files]); }}>
         <div className="comics-list-head">
           <span className="text-sm text-muted" title={comicsDir}>{scripts.length} scripts</span>
           <div className="flex gap-xs">
             <button className="btn btn-ghost btn-icon" onClick={loadScripts} title="Refresh"><FiRefreshCw size={14} /></button>
+            <button className="btn btn-ghost btn-icon" onClick={() => uploadInput.current?.click()} title={c.uploadOpen} aria-label={c.uploadOpen}><FiUpload size={14} /></button>
             <button className="btn btn-secondary btn-icon" onClick={() => setNewName('')} title="New script"><FiPlus size={14} /></button>
+            <input ref={uploadInput} type="file" accept=".comic,.txt" multiple hidden
+              onChange={e => { upload([...(e.target.files ?? [])]); e.target.value = ''; }} />
           </div>
         </div>
+        {dropping && <div className="comics-drop-hint">{c.uploadDrop}</div>}
+        {uploadNotice && (
+          <div className={`comics-upload-notice ${uploadNotice.warn ? 'warn' : ''}`} onClick={() => setUploadNotice(null)} title="Dismiss">
+            {uploadNotice.text}
+          </div>
+        )}
         {newName !== null && (
           <form className="comics-new" onSubmit={e => { e.preventDefault(); create(); }}>
             <input className="input" autoFocus placeholder="file name, e.g. rooftop-static" value={newName}
