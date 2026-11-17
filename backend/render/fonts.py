@@ -57,6 +57,12 @@ def _find_font(family: Optional[str], bold: bool = False) -> Optional[str]:
     user = _match_user_font(family, bold)
     if user:
         return user
+    if not family and _USER_FONT_DIR.exists():
+        # a user font named default* replaces the system fallback for
+        # unnamed text (bubbles never name a family)
+        for f in sorted(_USER_FONT_DIR.glob("default*")):
+            if f.suffix.lower() in (".ttf", ".otf", ".ttc"):
+                return str(f)
     if family:
         for p in _FALLBACKS:
             if family.lower() in os.path.basename(p).lower() and os.path.exists(p):
