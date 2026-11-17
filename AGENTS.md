@@ -28,7 +28,7 @@ Human ──UI────> /api/*      ──┴──> project.json (panels + 
 Start the server: `python -m backend.main 5180` (probe: `GET /api/health`).
 CLI alternative: `python -m backend.agent_cli <cmd>` (set `AUTOMANGA_URL` to
 override the base URL).
-MCP alternative: `python -m backend.mcp_server` exposes the same API as 26
+MCP alternative: `python -m backend.mcp_server` exposes the same API as 30
 typed MCP tools (any MCP client; `render_page_preview` returns image
 content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
 (agentskills.io format).
@@ -337,8 +337,58 @@ curl -s -X DELETE $BASE/api/export/download/manga_1a2b3c4d_20261117_120000.pdf
 
 Exports are pruned on every new export: `data/exports/` keeps nothing older
 than 7 days and at most the 20 newest exports per project (grouped by the
-name's `manga_<project id, first 8>` / `composer` prefix; other files there
-are left alone).
+name's `manga_<project id, first 8>` / `collection_<collection id, first 8>` /
+`composer` prefix; other files there are left alone).
+
+### Collections (episodes of a series)
+
+A collection groups projects as the ordered episodes of a series
+(`data/collections.json`; a project may be in several; deleting a project
+removes it from every collection; ids of vanished projects are skipped with a
+warning and reported under `missing`). Single-project export is unchanged.
+
+```bash
+curl -s $BASE/api/collections        # [{id, name, description, projectIds, cover, auto,
+                                     #   episodes: [{id, name, pages, firstPageId, cover}],
+                                     #   missing, pages, coverUrl}]
+curl -s -X POST $BASE/api/collections -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Jade & Haile\",\"projectIds\":[\"$P1\",\"$P2\"]}"
+# full new order (existing projects, no duplicates); cover = the page the
+# generated collection cover uses ({projectId, pageId} or null)
+curl -s -X PATCH $BASE/api/collections/$CID -H 'Content-Type: application/json' \
+  -d "{\"name\":\"...\",\"description\":\"...\",\"projectIds\":[\"$P2\",\"$P1\"],
+       \"cover\":{\"projectId\":\"$P1\",\"pageId\":\"$PG\"}}"
+curl -s -X DELETE $BASE/api/collections/$CID        # projects untouched
+# group "<Title> — <Subtitle>" names (also " - "), or identical names, >= 2
+# per title, ordered by "Episode 3" / "Ep. 3" / "Part Two" / "Part II" in the
+# subtitle, else by name. Creates/refreshes `auto: true` collections only; a
+# collection you created or edited (auto false) is never touched.
+curl -s -X POST $BASE/api/collections/auto-group
+# → {created: [...], updated: [...], unchanged: [...], skipped: [...], collections}
+```
+
+**Collection export** (background job, one at a time → 409 while one runs):
+
+```bash
+curl -s -X POST $BASE/api/collections/$CID/export -H 'Content-Type: application/json' \
+  -d '{"format":"both","scale":2,"pageNumbers":true,"episodeTitlePages":true,"cover":true}'
+# → 202 {id, status:"running", done:0, total:N, warnings:[...]}
+curl -s $BASE/api/collections/exports/$JOB
+# → {status: running|done|error, done, total, error, warnings,
+#    pdf: {url, name} | null, zip: {url, name} | null}
+```
+
+`cover` adds a generated page 1 (collection name over the chosen cover page,
+else the first episode's first page); `episodeTitlePages` (default on) puts a
+generated page before each episode (collection name, the episode's subtitle,
+a thumbnail of its first page); `pageNumbers` numbers every page
+continuously across the collection, the cover excepted. Titles use font
+family `title` when `data/fonts/` has one. Pages render one at a time, so
+length does not matter. Files are `collection_<id8>_<timestamp>.pdf|.zip` in
+`data/exports/`, pruned like other exports and deletable with
+`DELETE /api/export/download/{name}`. Episodes whose project is missing or
+has no pages are skipped (listed in `warnings`). MCP: `list_collections`,
+`export_collection` (waits for the job).
 
 **Preview-adjust loop**: render `preview.png` at every meaningful step and
 actually inspect it (you can read images). Overlapping bubbles, clipped

@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload } from 'react-icons/fi';
+import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import { renderPageToImage } from '../composer/pageRenderer';
 import type { Project, ComposerPage } from '../../types';
+import { CollectionsView } from './CollectionsView';
+import './collections.css';
 
 export function ShowcaseTab() {
   const { setCurrentProject, setActiveTab, setComposerProjectId, loadProjectWithImages } = useProjectStore();
@@ -18,6 +20,9 @@ export function ShowcaseTab() {
   const [coverImages, setCoverImages] = useState<Record<string, string>>({});
   const [showNewModal, setShowNewModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  // browse: every comic (as before) or the collections (series of episodes)
+  const [view, setView] = useState<'comics' | 'collections'>('comics');
+  const [openCollectionId, setOpenCollectionId] = useState<string | null>(null);
 
   const loadProjects = async () => {
     setIsLoading(true);
@@ -180,7 +185,8 @@ export function ShowcaseTab() {
             {mode === 'editing' && (activeProject?.name + ' — Editing')}
           </h3>
           <p className="text-sm text-secondary mt-sm">
-            {mode === 'browse' && `${projects.length} comic${projects.length !== 1 ? 's' : ''}`}
+            {mode === 'browse' && view === 'comics' && `${projects.length} comic${projects.length !== 1 ? 's' : ''}`}
+            {mode === 'browse' && view === 'collections' && t.showcase.collections}
             {mode === 'viewing' && `Page ${readerPage + 1} of ${activeProject?.composerPages?.length || 0}`}
             {mode === 'editing' && 'Editing in Composer'}
           </p>
@@ -195,6 +201,18 @@ export function ShowcaseTab() {
             </button>
           )}
           {mode === 'browse' && (
+            <div className="showcase-view-toggle" role="tablist">
+              <button role="tab" aria-selected={view === 'comics'} className={view === 'comics' ? 'active' : ''}
+                onClick={() => setView('comics')}>
+                <FiGrid size={13} /> {t.showcase.comics}
+              </button>
+              <button role="tab" aria-selected={view === 'collections'} className={view === 'collections' ? 'active' : ''}
+                onClick={() => setView('collections')}>
+                <FiLayers size={13} /> {t.showcase.collections}
+              </button>
+            </div>
+          )}
+          {mode === 'browse' && (
             <label
               className="flex items-center gap-xs text-sm"
               style={{ marginRight: 8, cursor: 'pointer', userSelect: 'none' }}
@@ -207,7 +225,7 @@ export function ShowcaseTab() {
               {t.showcase.pageNumbers || 'Page numbers'}
             </label>
           )}
-          {mode === 'browse' && (
+          {mode === 'browse' && view === 'comics' && (
             <button className="btn btn-secondary" onClick={() => setShowNewModal(true)}>
               <FiPlus size={14} /> New Comic
             </button>
@@ -215,7 +233,17 @@ export function ShowcaseTab() {
         </div>
       </div>
 
-      {mode === 'browse' && projects.length === 0 && !isLoading ? (
+      {mode === 'browse' && view === 'collections' ? (
+        <CollectionsView
+          projects={projects}
+          openId={openCollectionId}
+          onOpen={setOpenCollectionId}
+          onView={id => handleLoadProject(id, 'view')}
+          onEdit={id => handleLoadProject(id, 'edit')}
+          onExport={handleExportProject}
+          exportingId={exportingId}
+        />
+      ) : mode === 'browse' && projects.length === 0 && !isLoading ? (
         <div className="empty-state">
           <FiFolder size={48} />
           <h3>{t.showcase.noProjects}</h3>

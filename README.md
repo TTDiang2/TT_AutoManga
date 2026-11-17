@@ -25,7 +25,7 @@ idea ──► storyboard ──► image generation ──► page assembly ─
 ```
 
 The pipeline is **agent-first**: every step above is exposed as a typed tool
-(28 MCP tools, 30 REST endpoints, a CLI and an agent skill), so an LLM agent
+(30 MCP tools, 30 REST endpoints, a CLI and an agent skill), so an LLM agent
 can take *"make me a comic about X"* and run the whole thing — while a human
 can open the same project in the UI and polish anything by hand. Both read
 and write the same project JSON.
@@ -208,7 +208,7 @@ Settings live in `data/settings.json` (gitignored, created on first change):
 ```
 backend/          FastAPI app (api/, storage/, render/)
   agent.py        30 agent endpoints — the whole pipeline over HTTP
-  mcp_tools.py    28 MCP tools mirroring the API
+  mcp_tools.py    30 MCP tools mirroring the API
   assembly.py     template filling + automatic dialogue bubbles
   render/         server-side page renderer + vertical typesetting
   inference.py    local Real-ESRGAN upscaling

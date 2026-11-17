@@ -5,6 +5,7 @@ One function per MCP tool, no MCP dependency — the MCP server
 exercise them through an injected httpx.MockTransport. The base URL comes
 from AUTOMANGA_URL (default http://127.0.0.1:5180).
 """
+import asyncio
 import os
 from typing import Any, Dict, List, Optional
 
@@ -326,6 +327,40 @@ async def export_project(project_id: str, format: str = "both",
     return await _call("POST", "/api/agent/export",
                        json={"project_id": project_id, "format": format,
                              "scale": scale, "page_numbers": page_numbers})
+
+
+# ------------------------------------------------------------------ collections
+
+async def list_collections() -> Dict[str, Any]:
+    """Collections (projects grouped as episodes of a series), each with its
+    ordered episodes (id, name, pages, cover)."""
+    return await _call("GET", "/api/collections")
+
+
+async def export_collection(collection_id: str, format: str = "pdf",
+                            scale: float = 2.0, page_numbers: bool = False,
+                            episode_title_pages: bool = True,
+                            cover: bool = False,
+                            poll_interval: float = 1.0,
+                            timeout: float = 1800.0) -> Dict[str, Any]:
+    """Export a whole collection (pdf|zip|both) as one file: optional
+    generated cover, a title page before each episode, page numbers
+    continuous across episodes. Starts the background job and waits for it;
+    returns the finished job (status, done/total, pdf/zip download URLs)."""
+    job = await _call("POST", f"/api/collections/{collection_id}/export",
+                      json={"format": format, "scale": scale,
+                            "pageNumbers": page_numbers,
+                            "episodeTitlePages": episode_title_pages,
+                            "cover": cover})
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while job.get("status") == "running":
+        if loop.time() > deadline:
+            raise ToolError(f"collection export {job.get('id')} still running "
+                            f"after {timeout:.0f}s ({job.get('done')}/{job.get('total')})")
+        await asyncio.sleep(poll_interval)
+        job = await _call("GET", f"/api/collections/exports/{job['id']}")
+    return job
 
 
 # ------------------------------------------------------------------ local inference
