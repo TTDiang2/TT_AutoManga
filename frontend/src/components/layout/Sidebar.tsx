@@ -8,7 +8,8 @@ import {
   FiLayers, 
   FiGrid, 
   FiSettings,
-  FiUser 
+  FiUser,
+  FiBookOpen
 } from 'react-icons/fi';
 
 const tabs: { id: TabId; icon: React.ReactNode }[] = [
@@ -18,6 +19,7 @@ const tabs: { id: TabId; icon: React.ReactNode }[] = [
   { id: 'assets', icon: <FiImage size={20} /> },
   { id: 'composer', icon: <FiLayers size={20} /> },
   { id: 'showcase', icon: <FiGrid size={20} /> },
+  { id: 'comics', icon: <FiBookOpen size={20} /> },
   { id: 'settings', icon: <FiSettings size={20} /> },
 ];
 

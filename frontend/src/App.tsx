@@ -7,6 +7,7 @@ import { ComposerTab } from './components/composer/ComposerTab';
 import { ShowcaseTab } from './components/showcase/ShowcaseTab';
 import { SettingsTab } from './components/settings/SettingsTab';
 import { CharacterTab } from './components/characters/CharacterTab';
+import { ComicsTab } from './components/comics/ComicsTab';
 import { useProjectStore } from './store/projectStore';
 import { useTranslation } from './hooks/useTranslation';
 import './styles/globals.css';
@@ -45,6 +46,8 @@ function App() {
         return <SettingsTab />;
       case 'characters':
         return <CharacterTab />;
+      case 'comics':
+        return <ComicsTab />;
       default:
         return <StoryboardTab />;
     }
@@ -59,6 +62,7 @@ function App() {
     showcase: t.showcase.description,
     settings: t.settings.description,
     characters: t.characters.description,
+    comics: t.comics.description,
   };
   const description = descriptions[activeTab] || t.storyboard.description;
 

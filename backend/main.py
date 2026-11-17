@@ -8,7 +8,7 @@ from pathlib import Path
 import uvicorn
 import json
 
-from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent
+from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,7 @@ app.include_router(characters.router)
 app.include_router(composer_templates.router)
 app.include_router(render.router)
 app.include_router(agent.router)
+app.include_router(comics.router)
 
 
 @app.get("/api/health")
@@ -177,4 +178,5 @@ if __name__ == "__main__":
     # Loopback by default; set AUTOMANGA_HOST=0.0.0.0 to serve the LAN.
     import os
     host = os.environ.get("AUTOMANGA_HOST", "127.0.0.1")
+    os.environ["AUTOMANGA_PORT"] = str(port)   # the comics converter calls back here
     uvicorn.run(app, host=host, port=port, log_level="info")

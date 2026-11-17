@@ -90,7 +90,7 @@ export interface SwarmUIPreset {
   promptSuffix: string;
 }
 
-export type TabId = 'storyboard' | 'prompt' | 'assets' | 'composer' | 'showcase' | 'settings' | 'characters';
+export type TabId = 'storyboard' | 'prompt' | 'assets' | 'composer' | 'showcase' | 'settings' | 'characters' | 'comics';
 
 export type BubbleType = 'speech' | 'thought' | 'shout' | 'whisper' | 'narration' | 'inner-voice';
 

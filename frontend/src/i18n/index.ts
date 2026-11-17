@@ -8,6 +8,7 @@ export const translations = {
       showcase: 'Showcase',
       settings: 'Settings',
       characters: 'Characters',
+      comics: 'Comics',
     },
     storyboard: {
       title: 'Storyboard',
@@ -171,6 +172,9 @@ export const translations = {
       cancel: 'Cancel',
       save: 'Save',
     },
+    comics: {
+      description: 'Paint .comic scripts and import them as projects',
+    },
     showcase: {
       title: 'Showcase',
       description: 'Manage projects and export your manga',
@@ -263,6 +267,7 @@ export const translations = {
       showcase: '作品',
       settings: '设置',
       characters: '角色',
+      comics: '漫画脚本',
     },
     storyboard: {
       title: '分镜拆解',
@@ -385,6 +390,9 @@ export const translations = {
       addImage: '图片',
       pageImage: '破图',
       pageImageHint: '浮于画布上的自由图片，可拖动/缩放/变形成任意四边形',
+    },
+    comics: {
+      description: '绘制 .comic 脚本并导入为项目',
     },
     showcase: {
       title: '作品陈列',
