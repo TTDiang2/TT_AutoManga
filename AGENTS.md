@@ -639,6 +639,25 @@ which paints with comic.js and rebuilds the project here. Names are
   `PANEL seed=` is copied in: the log says `from variant seed=`), `variants`
   (`--panels a,b --variants N`, N 2-8: paints seeds into `out/<name>/variants/`
   and imports nothing). `panels` are ids like `"1.2"`.
+- `POST /api/comics/scripts/{name}/rewrite {text, start, end, action,
+  instruction?, model?, remove_todo?}` (`backend/api/comics_rewrite.py`, the
+  editor's "AI rewrite"): the configured LLM (`OpenAIClient.for_request`,
+  stored endpoint/key, `model` overrides; temperature 0.7, max 4096 tokens,
+  5 min timeout) rewrites `text[start:end]` (UTF-16 offsets, as a textarea
+  gives them; unsaved text is fine, nothing is saved). `action`:
+  `tighten_dialogue` | `enrich_description` | `draft_uncut` (only inside a
+  `PAGE uncut`/`PANEL uncut` block; keeps `todo` unless `remove_todo`) |
+  `custom` (needs `instruction`, ≤ 2000 chars). The model gets the header,
+  the block and 40 lines around it. Minor protection: for `draft_uncut`, any
+  uncut block and any block of a `rating: mature` script, the block's panels
+  are planned as uncut panels (`comic.js --plan --stdin --uncut`) BEFORE the
+  model is called; a minor, an unknown age or a plan error → 400 and nothing
+  is sent. Returns `{suggestion, original, plan: {ok, error, line}, model,
+  durationMs}`: `plan` checks the text with the block replaced (`--uncut`
+  when the script has uncut blocks) plus the same minor check on the new
+  block; a failing suggestion is still returned, flagged. LLM failures → 502
+  with a hint (endpoint must end in `/v1`; model crashed in LM Studio).
+  Concurrent calls are allowed.
 - Images: `GET /api/comics/scripts/{name}/file/page_01.png` (or `draft_01`),
   `/panel/p01-02.png` (`p01-02.prev.png` = the one it replaced),
   `/variant/p01-02_seed4301.png`.

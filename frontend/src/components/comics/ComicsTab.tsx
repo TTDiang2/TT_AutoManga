@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal } from 'react-icons/fi';
+import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal, FiZap } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
+import { AiRewrite } from './AiRewrite';
 import { useComicsDrafts, openedDraft } from './scriptDrafts';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import type { Project } from '../../types';
@@ -161,6 +162,15 @@ export function ComicsTab() {
   useEffect(() => { runRef.current = run; }, [run]);
   const selectedRef = useRef<string | null>(selected);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
+  // AI rewrite: the editor selection it opened on, and the LLM from Settings (endpoint + model)
+  const [ai, setAi] = useState<{ start: number; end: number } | null>(null);
+  const [llm, setLlm] = useState<{ endpoint: string; model: string } | null>(null);
+  useEffect(() => {
+    fetch('/api/settings/').then(r => (r.ok ? r.json() : null))
+      .then(d => setLlm(d?.api ? { endpoint: d.api.endpoint || '', model: d.api.model || '' } : null))
+      .catch(() => setLlm(null));
+  }, []);
+  const llmReady = !!(llm?.endpoint && llm.model);
 
   const dirty = text !== savedText;
   // the plan was made from other text (typing, or the 600 ms check hasn't caught up): its line numbers
@@ -207,6 +217,7 @@ export function ComicsTab() {
       setPlan(null);
       setPlanText(null);
       setPicked(new Set());
+      setAi(null);
       loadPages(name);
     } catch (e) { setError((e as Error).message); }
   }, [loadPages]);
@@ -341,6 +352,27 @@ export function ComicsTab() {
     try { next = pinSeed(text, p, seed); } catch (e) { setError(`${p.id}: ${(e as Error).message}; wait for the check to catch up`); return; }
     setText(next);
     if (await save(next)) setPlanTick(t => t + 1);
+  };
+
+  const openAi = () => {
+    const ed = editorRef.current;
+    setAi({ start: ed?.selectionStart ?? 0, end: ed?.selectionEnd ?? 0 });
+  };
+
+  /** Back in the editor after the AI popover, the cursor at the block (selecting it after an accept). */
+  const focusEditor = (start: number, end = start) => {
+    requestAnimationFrame(() => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      ed.focus();
+      ed.setSelectionRange(start, end);
+    });
+  };
+
+  const acceptAi = (start: number, end: number, replacement: string) => {
+    setText(text.slice(0, start) + replacement + text.slice(end));
+    setAi(null);
+    focusEditor(start, start + replacement.length);
   };
 
   /** Show a line of the script in the editor and put the cursor on it. */
@@ -545,26 +577,39 @@ export function ComicsTab() {
                 <FiGrid size={13} /> Panels{stale ? ` (${stale} stale)` : ''}
               </button>
               {view === 'script' && (
-                <button className="comics-save" onClick={() => save()} disabled={!dirty || scriptBusy}>
-                  <FiSave size={13} /> Save
-                </button>
+                <>
+                  <button className="comics-save" onClick={openAi} disabled={!llmReady || !!ai}
+                    title={llmReady ? t.comics.aiRewriteHint : t.comics.aiNoLlm}>
+                    <FiZap size={13} /> {t.comics.aiRewrite}
+                  </button>
+                  <button onClick={() => save()} disabled={!dirty || scriptBusy}>
+                    <FiSave size={13} /> Save
+                  </button>
+                </>
               )}
             </div>
 
             {view === 'script' && (
-              <textarea
-                ref={editorRef}
-                className="comics-editor"
-                spellCheck={false}
-                value={text}
-                onChange={e => setText(e.target.value)}
-                onKeyDown={e => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-                    e.preventDefault();
-                    if (dirty && !scriptBusy) save();   // the Save button's own check
-                  }
-                }}
-              />
+              <div className="comics-editor-wrap">
+                <textarea
+                  ref={editorRef}
+                  className="comics-editor"
+                  spellCheck={false}
+                  value={text}
+                  onChange={e => setText(e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+                      e.preventDefault();
+                      if (dirty && !scriptBusy) save();   // the Save button's own check
+                    }
+                  }}
+                />
+                {ai && (
+                  <AiRewrite key={current.name} script={current.name} text={text} caret={ai} model={llm?.model ?? ''}
+                    onAccept={acceptAi}
+                    onClose={block => { setAi(null); focusEditor(block?.start ?? ai.start); }} />
+                )}
+              </div>
             )}
             {view === 'log' && runIsHere && run && (
               <pre className="comics-log" ref={logRef}>{run.lines.join('\n')}</pre>
