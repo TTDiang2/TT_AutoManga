@@ -340,13 +340,16 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"mask_image not found: {payload['mask_image']}")
 
     # automatic injection: project style suffix + character blocks + LoRAs
+    # (+ a solo panel's character sheet as an IP-Adapter reference)
     injected = []
+    ref_kwargs: Dict[str, Any] = {}
     project = None
     if payload.get("project_id"):
         project = storage.load_project(payload["project_id"])
     if payload.get("inject_characters", True) and project:
-        from ..prompting import (apply_conditioning, blocks_for_panel,
-                                 location_block_for_panel, style_suffix)
+        from ..prompting import (apply_conditioning, blocks_for_panel, ipadapter_args,
+                                 location_block_for_panel, reference_for_panel,
+                                 style_suffix)
         style = style_suffix(project)
         if style:
             prompt = f"{prompt}, {style}" if prompt_format_is_tags(payload) else f"{prompt}。{style}"
@@ -374,6 +377,14 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
                 prompt, loras, project, panel,
                 sep=", " if prompt_format_is_tags(payload) else "。")
             injected.extend(lora_injected)
+            # a solo panel's character sheet guides it through IP-Adapter
+            # (the character's refWeight > 0; the sheet itself is not echoed)
+            ref_kwargs = ipadapter_args(reference_for_panel(project, panel))
+            if ref_kwargs:
+                ref_name = next(str(n).strip() for n in panel.get("characters") or [] if str(n).strip())
+                injected.append({"kind": "reference", "name": ref_name,
+                                 "weight": ref_kwargs["ipadapter_weight"],
+                                 "preset": ref_kwargs["ipadapter"]})
 
     assets_out = []
     for v in range(variants):
@@ -392,6 +403,7 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             init_image=init_dataurl,
             init_creativity=payload.get("init_creativity"),
             mask_image=mask_dataurl,
+            **ref_kwargs,
         )
         if not result.get("success"):
             raise RuntimeError(f"SwarmUI: {result.get('error', 'unknown error')}")
@@ -416,6 +428,8 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             "prompt_format": payload.get("prompt_format"),
             "kind": payload.get("kind") or "panel",
             "alpha_method": alpha_method if payload.get("remove_background") else None,
+            "ipadapter": ({"preset": ref_kwargs["ipadapter"], "weight": ref_kwargs["ipadapter_weight"]}
+                          if ref_kwargs else None),
         })
         img = Image.open(io.BytesIO(img_bytes))
         has_alpha = (img.mode == "RGBA"

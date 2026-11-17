@@ -28,6 +28,9 @@ class CharacterInput(BaseModel):
     image: Optional[str] = None
     sourcePanelIds: List[str] = []
     lora: Optional[CharacterLora] = None
+    # 0-1: how strongly the sheet (``image``) guides the character's solo
+    # panels through SwarmUI's IP-Adapter; None / 0 = off (opt-in)
+    refWeight: Optional[float] = None
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -74,6 +77,13 @@ async def update_character(character_id: str, updates: Dict[str, Any]):
                 updates["lora"] = CharacterLora.model_validate(lora).model_dump()
             except ValidationError as e:
                 raise HTTPException(status_code=422, detail=f"lora: {e.errors()[0].get('msg', 'invalid')}")
+    if "refWeight" in updates:
+        # null or 0 turns the sheet reference off; else a number in 0..1
+        w = updates["refWeight"]
+        if w is not None:
+            if isinstance(w, bool) or not isinstance(w, (int, float)) or not 0 <= w <= 1:
+                raise HTTPException(status_code=422, detail="refWeight: a number from 0 to 1 (0 = off)")
+            updates["refWeight"] = round(float(w), 3) or None
     characters = _load_characters()
     for c in characters:
         if c["id"] == character_id:

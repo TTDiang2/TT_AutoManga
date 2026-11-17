@@ -137,6 +137,36 @@ class SwarmUIClient:
         except Exception:
             return []
 
+    async def ipadapter_features(self, _retry: bool = True) -> Dict[str, Any]:
+        """Whether a running backend has SwarmUI's IP-Adapter feature (the
+        ComfyUI_IPAdapter_plus node pack) and the "Use IP-Adapter" presets:
+        ``{"ipadapter": bool, "presets": [str]}`` ("None" left out)."""
+        base = self.address
+        out: Dict[str, Any] = {"ipadapter": False, "presets": []}
+        if not await self.ensure_session(base):
+            return out
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                sid = self._sessions.get(base, "")
+                backends = (await client.post(f"{base}/API/ListBackends", json={"session_id": sid})).json()
+                if isinstance(backends, dict) and backends.get("error_id") == "invalid_session_id" and _retry:
+                    self._sessions.pop(base, None)
+                    return await self.ipadapter_features(_retry=False)
+                out["ipadapter"] = any("ipadapter" in (b.get("features") or [])
+                                       for b in (backends.values() if isinstance(backends, dict) else [])
+                                       if isinstance(b, dict) and b.get("status") == "running")
+                params = (await client.post(f"{base}/API/ListT2IParams", json={"session_id": sid})).json()
+                for p in params.get("list") or []:
+                    if p.get("id") == "useipadapter":
+                        out["presets"] = [v for v in (p.get("values") or []) if v and v != "None"]
+                        break
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug("SwarmUI feature probe failed: %s", e)
+        if not out["presets"]:
+            out["ipadapter"] = False
+        return out
+
     async def generate_image(
         self,
         prompt: str,
@@ -154,6 +184,11 @@ class SwarmUIClient:
         init_creativity: float = None,   # denoise strength 0-1
         mask_image: str = None,          # data URL inpaint mask (with init_image)
         address: str = None,             # one-shot server override (not stored)
+        prompt_images: List[str] = None, # data URLs: IP-Adapter references (character sheets)
+        ipadapter: str = None,           # SwarmUI "Use IP-Adapter" preset, e.g. "PLUS (high strength)"
+        ipadapter_weight: float = None,  # 0-1; IP-Adapter strength
+        ipadapter_weight_type: str = None,  # "standard" | "prompt is more important" | "style transfer"
+        ipadapter_end: float = None,     # 0-1: stop applying it after this fraction of the steps
     ) -> Dict[str, Any]:
         swarmsettings = settings.swarmui
         base = self._base(address)
@@ -183,13 +218,27 @@ class SwarmUIClient:
                 payload["initimagecreativity"] = float(init_creativity)
             if mask_image:
                 payload["maskimage"] = mask_image
+        # IP-Adapter: the reference images ride in "promptimages" (|-joined
+        # data URLs) and the preset in "useipadapter" (SwarmUI param ids from
+        # /API/ListT2IParams); without a preset the images are not sent, so
+        # SwarmUI never falls back to ReVision/unCLIP on them
+        refs = [r for r in (prompt_images or []) if r]
+        if refs and ipadapter and ipadapter != "None":
+            payload["promptimages"] = "|".join(refs)
+            payload["useipadapter"] = ipadapter
+            if ipadapter_weight is not None:
+                payload["ipadapterweight"] = float(ipadapter_weight)
+            if ipadapter_weight_type:
+                payload["ipadapterweighttype"] = ipadapter_weight_type
+            if ipadapter_end is not None:
+                payload["ipadapterend"] = float(ipadapter_end)
 
         import logging
         logger = logging.getLogger(__name__)
         # log everything except embedded images: img2img payloads embed
         # multi-MB base64 data URLs that would bloat the log
         log_payload = {k: (f"<data URL, {len(v)} chars>"
-                           if k in ("initimage", "maskimage") else v)
+                           if k in ("initimage", "maskimage", "promptimages") else v)
                        for k, v in payload.items()}
         logger.info("[SwarmUI] FULL PAYLOAD: %s", log_payload)
 

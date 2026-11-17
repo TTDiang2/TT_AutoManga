@@ -115,7 +115,7 @@ def test_conditioning_project_entry_wins(library):
 
 def test_conditioning_no_characters(library):
     from backend.prompting import conditioning_for_panel
-    assert conditioning_for_panel({}, {"characters": []}) == {"loras": [], "triggers": []}
+    assert conditioning_for_panel({}, {"characters": []}) == {"loras": [], "triggers": [], "reference": None}
 
 
 # --- generation paths -----------------------------------------------------------

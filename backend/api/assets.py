@@ -131,9 +131,12 @@ async def generate_with_swarmui(req: GenerateImageRequest):
         project = None
     panel = next((p for p in (project or {}).get("panels") or []
                   if p.get("id") == req.panel_id), None) if project else None
+    ref_kwargs: Dict[str, Any] = {}
     if panel:
-        from ..prompting import apply_conditioning
+        from ..prompting import apply_conditioning, ipadapter_args, reference_for_panel
         prompt, loras, _ = apply_conditioning(prompt, loras, project, panel)
+        # a solo panel's character sheet (refWeight > 0) guides it via IP-Adapter
+        ref_kwargs = ipadapter_args(reference_for_panel(project, panel))
 
     try:
         import logging
@@ -155,6 +158,7 @@ async def generate_with_swarmui(req: GenerateImageRequest):
             remove_background=req.remove_background,
             # one-shot override: never rewrites the shared client's address
             address=req.swarmui_address or None,
+            **ref_kwargs,
         )
         
         if result.get("success"):
@@ -207,3 +211,27 @@ async def test_swarmui_connection():
         return result
     except Exception as e:
         return {"connected": False, "status": str(e)}
+
+
+# SwarmUI's optional features, probed at most once a minute (the Characters
+# tab asks on every mount; the backend list rarely changes)
+_FEATURES_TTL = 60.0
+_features_cache: Dict[str, Any] = {"at": 0.0, "address": None, "value": None}
+
+
+@router.get("/swarmui/features")
+async def get_swarmui_features():
+    """``{"ipadapter": bool, "presets": [str], "preset": str}``: whether a
+    running SwarmUI backend has the IP-Adapter nodes (character-sheet
+    references), its "Use IP-Adapter" presets and the configured one."""
+    import time
+    now = time.monotonic()
+    address = swarm_client.address
+    cached = _features_cache["value"]
+    if cached is None or _features_cache["address"] != address or now - _features_cache["at"] > _FEATURES_TTL:
+        try:
+            cached = await swarm_client.ipadapter_features()
+        except Exception:
+            cached = {"ipadapter": False, "presets": []}
+        _features_cache.update(at=now, address=address, value=cached)
+    return {**cached, "preset": settings.swarmui.ipadapterPreset}

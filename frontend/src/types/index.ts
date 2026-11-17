@@ -151,6 +151,8 @@ export interface Character {
   image?: string;
   sourcePanelIds: string[];
   lora?: CharacterLora | null;
+  // 0-1: the sheet guides the character's solo panels via IP-Adapter; null/0 = off
+  refWeight?: number | null;
   createdAt: string;
   updatedAt: string;
 }

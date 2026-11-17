@@ -38,6 +38,9 @@ class SwarmUIConfigUpdate(BaseModel):
     currentHeight: Optional[int] = None
     currentSamplerName: Optional[str] = None
     promptSuffix: Optional[str] = None
+    ipadapterPreset: Optional[str] = None
+    ipadapterWeightType: Optional[str] = None
+    ipadapterEnd: Optional[float] = None
 
 
 class DefaultSettingsUpdate(BaseModel):
@@ -134,6 +137,12 @@ async def update_settings(update: FullSettingsUpdate):
                 config.settings.swarmui.currentSamplerName = update.swarmui.currentSamplerName
             if update.swarmui.promptSuffix is not None:
                 config.settings.swarmui.promptSuffix = update.swarmui.promptSuffix
+            if update.swarmui.ipadapterPreset is not None:
+                config.settings.swarmui.ipadapterPreset = update.swarmui.ipadapterPreset
+            if update.swarmui.ipadapterWeightType is not None:
+                config.settings.swarmui.ipadapterWeightType = update.swarmui.ipadapterWeightType
+            if update.swarmui.ipadapterEnd is not None:
+                config.settings.swarmui.ipadapterEnd = min(1.0, max(0.05, update.swarmui.ipadapterEnd))
         
         if update.defaults:
             if update.defaults.detailLevel is not None:
