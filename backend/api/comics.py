@@ -9,6 +9,10 @@ incrementally, and serves the page PNGs, panels and seed variants comic.js
 renders. /plan asks comic.js for its plan of a script (saved or unsaved
 text) without painting, for live checking and the panel view. Script names are restricted to [a-z0-9_-] so no
 request can reach outside the repo.
+
+Uncut editions: a script's PAGE uncut / PANEL uncut blocks make a second comic
+(comic.js --uncut, out/<name>-uncut/, its own AutoManga project). Runs and
+plans take ``uncut: true``; the file endpoints take ``?uncut=1``.
 """
 import json
 import logging
@@ -36,9 +40,13 @@ router = APIRouter(prefix="/api/comics", tags=["comics"])
 COMICS_DIR = Path(os.environ.get("COMICS_DIR", Path.home() / "Projects" / "Comics")).expanduser()
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
 _PAGE_FILE_RE = re.compile(r"^(page|draft)_\d{2}\.png$")
-_PANEL_FILE_RE = re.compile(r"^p\d{2}-\d{2}(\.prev)?\.png$")
-_VARIANT_FILE_RE = re.compile(r"^p\d{2}-\d{2}_seed\d{1,12}\.png$")
-_PANEL_ID_RE = re.compile(r"^\d+\.\d+$")
+# panel files: p01-02 (regular), and the uncut edition's p01-u01 / u01-02
+_STEM = r"(?:p\d{2}-(?:\d{2}|u\d{2})|u\d{2}-\d{2})"
+_PANEL_FILE_RE = re.compile(rf"^{_STEM}(\.prev)?\.png$")
+_VARIANT_FILE_RE = re.compile(rf"^{_STEM}_seed\d{{1,12}}\.png$")
+# panel ids: 1.2, and the uncut edition's 1.u1 / u1.2
+_PANEL_ID_RE = re.compile(r"^(?:\d+\.(?:\d+|u\d+)|u\d+\.\d+)$")
+_UNCUT_RE = re.compile(r"^(PAGE|PANEL)\s+(?:\d+\s+)?uncut\b(\s+todo\b)?")
 _MODES = ("paint", "no-paint", "dry-run", "repaint", "variants")
 _PLAN_TIMEOUT = 20          # seconds for comic.js --plan
 _LOG_LIMIT = 5000           # max lines returned per poll
@@ -54,8 +62,8 @@ def _script_path(name: str) -> Path:
     return _scripts_dir() / f"{name}.comic"
 
 
-def _out_dir(name: str) -> Path:
-    return COMICS_DIR / "out" / name
+def _out_dir(name: str, uncut: bool = False) -> Path:
+    return COMICS_DIR / "out" / (f"{name}-uncut" if uncut else name)
 
 
 def _node() -> str:
@@ -77,6 +85,8 @@ def _summary(path: Path) -> Dict[str, Any]:
     """Title and counts from a script, without the converter (cheap enough for a listing)."""
     name = path.stem
     title, subtitle, pages, panels = None, None, 0, 0
+    uncut, slots = 0, 0          # uncut pages/panels, and those of them still todo
+    in_uncut_page = False
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         t = line.strip()
         if t.startswith("//"):
@@ -85,10 +95,16 @@ def _summary(path: Path) -> Dict[str, Any]:
             title = t.split(":", 1)[1].strip()
         if subtitle is None and t.lower().startswith("subtitle:"):
             subtitle = t.split(":", 1)[1].strip()
+        u = _UNCUT_RE.match(t)
+        if u:
+            uncut += 1
+            slots += 1 if u.group(2) else 0
         if re.match(r"^PAGE\b", t):
-            pages += 1
+            in_uncut_page = bool(u)
+            pages += 0 if u else 1
         elif re.match(r"^PANEL\b", t):
-            panels += 1
+            # the regular edition's counts: an uncut page's panels and uncut panels are not in it
+            panels += 0 if (u or in_uncut_page) else 1
     out = _out_dir(name)
     painted = len(list((out / "panels").glob("p??-??.png"))) if (out / "panels").exists() else 0
     project_id = None
@@ -96,8 +112,15 @@ def _summary(path: Path) -> Dict[str, Any]:
         project_id = json.loads((out / "automanga.json").read_text()).get("project_id")
     except Exception:
         pass
+    uncut_project_id = None
+    if uncut:
+        try:
+            uncut_project_id = json.loads((_out_dir(name, True) / "automanga.json").read_text()).get("project_id")
+        except Exception:
+            pass
     return {"name": name, "title": title or name, "subtitle": subtitle, "pages": pages, "panels": panels,
             "painted": painted, "project_id": project_id,
+            "uncut": uncut, "uncut_slots": slots, "uncut_project_id": uncut_project_id,
             "updated": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(path.stat().st_mtime))}
 
 
@@ -140,56 +163,58 @@ async def save_script(name: str, req: SaveScriptRequest):
 
 
 @router.get("/scripts/{name}/pages")
-async def list_pages(name: str):
+async def list_pages(name: str, uncut: bool = False):
     """The page PNGs comic.js rendered last: the painted pages or the dry-run drafts, whichever is newer."""
     _script_path(name)
-    out = _out_dir(name)
+    out = _out_dir(name, uncut)
     if not out.exists():
         return {"pages": []}
     sets = [sorted(out.glob(f"{kind}_*.png")) for kind in ("page", "draft")]
     sets = [s for s in sets if s]
     newest = max(sets, key=lambda s: max(p.stat().st_mtime for p in s)) if sets else []
     pages = [p.name for p in newest]
-    return {"pages": [{"file": f, "url": f"/api/comics/scripts/{name}/file/{f}",
+    q = "?uncut=1" if uncut else ""
+    return {"pages": [{"file": f, "url": f"/api/comics/scripts/{name}/file/{f}{q}",
                        "mtime": int((out / f).stat().st_mtime)} for f in pages]}
 
 
-def _png(name: str, file: str, pattern: "re.Pattern[str]", sub: str, what: str) -> FileResponse:
+def _png(name: str, file: str, pattern: "re.Pattern[str]", sub: str, what: str, uncut: bool = False) -> FileResponse:
     _script_path(name)
     if not pattern.fullmatch(file):
         raise HTTPException(status_code=400, detail=f"not a {what} file")
-    path = _out_dir(name) / sub / file
+    path = _out_dir(name, uncut) / sub / file
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"{what} not painted")
     return FileResponse(path, media_type="image/png")
 
 
 @router.get("/scripts/{name}/file/{file}")
-async def page_file(name: str, file: str):
+async def page_file(name: str, file: str, uncut: bool = False):
     _script_path(name)
     if not _PAGE_FILE_RE.fullmatch(file):
         raise HTTPException(status_code=400, detail="not a page file")
-    path = _out_dir(name) / file
+    path = _out_dir(name, uncut) / file
     if not path.exists():
         raise HTTPException(status_code=404, detail="page not rendered")
     return FileResponse(path, media_type="image/png")
 
 
 @router.get("/scripts/{name}/panel/{file}")
-async def panel_file(name: str, file: str):
-    """A painted panel (p01-02.png) or the one it replaced (p01-02.prev.png)."""
-    return _png(name, file, _PANEL_FILE_RE, "panels", "panel")
+async def panel_file(name: str, file: str, uncut: bool = False):
+    """A painted panel (p01-02.png) or the one it replaced (p01-02.prev.png); ?uncut=1: the uncut edition's."""
+    return _png(name, file, _PANEL_FILE_RE, "panels", "panel", uncut)
 
 
 @router.get("/scripts/{name}/variant/{file}")
-async def variant_file(name: str, file: str):
+async def variant_file(name: str, file: str, uncut: bool = False):
     """A seed variant painted with --variants (p01-02_seed4301.png)."""
-    return _png(name, file, _VARIANT_FILE_RE, "variants", "variant")
+    return _png(name, file, _VARIANT_FILE_RE, "variants", "variant", uncut)
 
 
 class PlanRequest(BaseModel):
     text: Optional[str] = None   # unsaved editor text; None plans the saved script
     face: bool = False           # as a run with the face pass would key the panels
+    uncut: bool = False          # the uncut edition's plan (comic.js --plan --uncut)
 
 
 @router.post("/scripts/{name}/plan")
@@ -209,6 +234,8 @@ def plan_script(name: str, req: PlanRequest):
         args.append("--stdin")
     if req.face:
         args.append("--face")
+    if req.uncut:
+        args.append("--uncut")
     try:
         proc = subprocess.run(args, cwd=str(COMICS_DIR), env=_node_env(node),
                               input=req.text if req.text is not None else "",
@@ -304,8 +331,8 @@ class _LogIndex:
         return [l.rstrip("\r")[:_LINE_LIMIT] for l in out], total
 
 
-def _log_path(script: str) -> Path:
-    return _out_dir(script) / "automanga.run.log"
+def _log_path(script: str, uncut: bool = False) -> Path:
+    return _out_dir(script, uncut) / "automanga.run.log"
 
 
 def _load_run() -> Optional[Dict[str, Any]]:
@@ -394,11 +421,13 @@ def _snapshot(run: Dict[str, Any], since: int = 0) -> Dict[str, Any]:
         summary = _summary(_script_path(run["script"]))
     except Exception:
         pass
+    uncut = bool(run.get("uncut"))
     return {"id": run["id"], "script": run["script"], "mode": run["mode"],
             "face": run["face"], "status": status, "exit_code": code,
             "started": run["started"], "ended": ended,
             "lines": lines, "next": total,
-            "project_id": summary and summary["project_id"]}
+            "project_id": summary and summary["uncut_project_id" if uncut else "project_id"],
+            **({"uncut": True} if uncut else {})}
 
 
 def _running_run() -> Optional[Dict[str, Any]]:
@@ -413,18 +442,28 @@ class StartRunRequest(BaseModel):
     panels: List[str] = []   # repaint / variants: panel ids, "1.2"
     force: bool = False      # repaint: paint even a current panel (else only stale ones, or a pinned variant)
     variants: Optional[int] = Field(default=None, ge=2, le=8)
+    uncut: bool = False      # the uncut edition (automanga.js --uncut): its own out folder and project
 
     @field_validator("panels")
     @classmethod
     def _panel_ids(cls, v: List[str]) -> List[str]:
         bad = [p for p in v if not _PANEL_ID_RE.fullmatch(p)]
         if bad:
-            raise ValueError(f"panel ids look like 1.2, not {bad[0]!r}")
+            raise ValueError(f"panel ids look like 1.2 (or 1.u1 / u1.2 in the uncut edition), not {bad[0]!r}")
         return v
 
 
 def _mode_args(req: StartRunRequest) -> List[str]:
-    """automanga.js arguments for a run mode."""
+    """automanga.js arguments for a run mode (and --uncut for the uncut edition)."""
+    args = _base_mode_args(req)
+    if req.uncut:
+        args.append("--uncut")
+    elif any("u" in p for p in req.panels):
+        raise HTTPException(status_code=400, detail="uncut panel ids (1.u1, u1.2) need the uncut edition (uncut: true)")
+    return args
+
+
+def _base_mode_args(req: StartRunRequest) -> List[str]:
     if req.mode not in _MODES:
         raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(_MODES)}")
     if req.mode in ("repaint", "variants") and not req.panels:
@@ -457,7 +496,7 @@ async def start_run(req: StartRunRequest):
     if req.face:
         args.append("--face")
 
-    log = _log_path(req.script)
+    log = _log_path(req.script, req.uncut)
     log.parent.mkdir(parents=True, exist_ok=True)
     exit_file = Path(str(log) + ".exit")
     exit_file.unlink(missing_ok=True)
@@ -481,7 +520,7 @@ async def start_run(req: StartRunRequest):
         raise HTTPException(status_code=500, detail=f"could not start the converter: {e}")
     _procs[proc.pid] = proc
     run = {"id": uuid.uuid4().hex, "script": req.script, "mode": req.mode,
-           "face": req.face, "pid": proc.pid, "log": str(log), "started": time.time()}
+           "face": req.face, "uncut": req.uncut, "pid": proc.pid, "log": str(log), "started": time.time()}
     _save_run(run)
     return _snapshot(run)
 

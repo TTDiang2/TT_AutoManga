@@ -12,7 +12,11 @@ from every collection.
 Auto-grouping (POST /api/collections/auto-group) reads series titles from
 project names: "<Title> — <Subtitle>" (the Comics converter's em dash; " - "
 and " – " too) or projects sharing an exact name, ordered by the episode/part
-number in the subtitle.
+number in the subtitle. The uncut edition of a Comics script (its project
+marked ``settings.comicScript: "<name>:uncut"``, named "<Title> (Uncut) — …")
+always goes into its own collection, "<Title> (Uncut)", never with the
+regular episodes; such a collection is stored with ``mature: true`` (the
+Showcase blurs mature collections).
 """
 import json
 import logging
@@ -267,13 +271,35 @@ def order_episodes(projects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(projects, key=_episode_sort_key)
 
 
+UNCUT_SUFFIX = " (Uncut)"
+_UNCUT_RE = re.compile(r"\s*\(uncut\)\s*$", re.IGNORECASE)
+
+
+def is_uncut(project: Dict[str, Any]) -> bool:
+    """An uncut edition: marked so by the Comics converter, or named "<Title> (Uncut)…"."""
+    mark = (project.get("settings") or {}).get("comicScript")
+    if isinstance(mark, str) and mark.endswith(":uncut"):
+        return True
+    base, _ = split_title(project.get("name", ""))
+    return bool(_UNCUT_RE.search(base))
+
+
+def group_title(project: Dict[str, Any]) -> str:
+    """The collection a project auto-groups into: its base title, with
+    " (Uncut)" for an uncut edition (so it never joins the regular episodes)."""
+    base, _ = split_title(project.get("name", ""))
+    if base and is_uncut(project):
+        base = _UNCUT_RE.sub("", base).strip() + UNCUT_SUFFIX
+    return base
+
+
 def auto_groups(projects: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     """base title -> ordered project ids, for titles with >= 2 projects."""
     by_base: Dict[str, List[Dict[str, Any]]] = {}
     for p in projects:
         if not p.get("id"):
             continue
-        base, _ = split_title(p.get("name", ""))
+        base = group_title(p)
         if base:
             by_base.setdefault(base, []).append(p)
     return {base: [p["id"] for p in order_episodes(ps)]
@@ -285,6 +311,7 @@ def auto_group(projects: List[Dict[str, Any]]) -> Dict[str, Any]:
     the user made or edited (auto false) is never changed; a title it
     already covers is reported under ``skipped``."""
     groups = auto_groups(projects)
+    uncut_titles = {group_title(p) for p in projects if p.get("id") and is_uncut(p)}
     created: List[Dict[str, Any]] = []
     updated: List[Dict[str, Any]] = []
     unchanged: List[Dict[str, Any]] = []
@@ -304,10 +331,14 @@ def auto_group(projects: List[Dict[str, Any]]) -> Dict[str, Any]:
                 col = {"id": uuid.uuid4().hex, "name": base, "description": "",
                        "projectIds": ids, "cover": None, "auto": True,
                        "createdAt": now, "updatedAt": now}
+                if base in uncut_titles:
+                    col["mature"] = True
                 items.append(col)
                 created.append({"id": col["id"], "name": base, "projectIds": ids})
-            elif existing.get("projectIds") != ids:
+            elif existing.get("projectIds") != ids or (base in uncut_titles and not existing.get("mature")):
                 existing["projectIds"] = ids
+                if base in uncut_titles:
+                    existing["mature"] = True
                 if (existing.get("cover") or {}).get("projectId") not in ids:
                     existing["cover"] = None
                 existing["updatedAt"] = _now()

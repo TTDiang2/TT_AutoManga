@@ -401,6 +401,15 @@
   color: #141414;
 }
 
+.comics-badge.uncut {
+  background: var(--danger, #c0392b);
+  color: #fff;
+}
+
+.comics-uncut-slots {
+  color: var(--warning);
+}
+
 .comics-panel-prompt summary {
   cursor: pointer;
 }

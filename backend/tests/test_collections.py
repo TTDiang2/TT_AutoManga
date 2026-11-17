@@ -346,3 +346,40 @@ def test_prune_groups_collection_exports(tmp_path):
     left = sorted(p.name for p in tmp_path.iterdir())
     assert len(left) == 20 and old.name not in left
     assert "collection_ab12cd34_20261117_000021.pdf" not in left
+
+
+# ---------------------------------------------------------------- uncut editions
+
+def test_auto_groups_keep_uncut_editions_apart():
+    def uncut(i, n, marked=True):
+        return {"id": f"u{i}", "name": f"Jade & Haile (Uncut) — Episode {n}",
+                "settings": {"comicScript": f"jade-and-haile-ep{n}:uncut"} if marked else {}}
+    projects = [{"id": f"p{i}", "name": n} for i, n in enumerate(JADE)]
+    projects += [uncut(1, 2), uncut(2, 1), uncut(3, 3, marked=False)]
+    # marked uncut but named like a regular episode (renamed in AutoManga): still uncut
+    projects.append({"id": "u4", "name": "Jade & Haile — Episode 4",
+                     "settings": {"comicScript": "jade-and-haile-ep4:uncut"}})
+    groups = auto_groups(projects)
+    assert set(groups) == {"Jade & Haile", "Jade & Haile (Uncut)"}
+    assert groups["Jade & Haile (Uncut)"] == ["u2", "u1", "u3", "u4"]
+    assert not any(i.startswith("u") for i in groups["Jade & Haile"])
+
+
+def test_auto_group_endpoint_makes_mature_uncut_collections(env):
+    c, storage, _ = env
+    for n in (1, 2):
+        storage.save_project({"name": f"Jade & Haile — Episode {n}", "panels": [], "composerPages": [_page(0)],
+                              "settings": {"comicScript": f"jade-and-haile-ep{n}"}})
+        storage.save_project({"name": f"Jade & Haile (Uncut) — Episode {n}", "panels": [], "composerPages": [_page(0)],
+                              "settings": {"comicScript": f"jade-and-haile-ep{n}:uncut", "contentRating": "mature"}})
+    out = c.post("/api/collections/auto-group").json()
+    assert sorted(x["name"] for x in out["created"]) == ["Jade & Haile", "Jade & Haile (Uncut)"]
+    cols = {x["name"]: x for x in out["collections"]}
+    assert cols["Jade & Haile (Uncut)"]["mature"] is True
+    assert cols["Jade & Haile"]["mature"] is False
+    assert all("(Uncut)" in e["name"] for e in cols["Jade & Haile (Uncut)"]["episodes"])
+    assert not any("(Uncut)" in e["name"] for e in cols["Jade & Haile"]["episodes"])
+    # stored mature, so it stays blurred even if an episode's rating changes
+    from backend.storage import collections as col_store
+    stored = {x["name"]: x for x in col_store.list_collections()}
+    assert stored["Jade & Haile (Uncut)"]["mature"] is True and "mature" not in stored["Jade & Haile"]
