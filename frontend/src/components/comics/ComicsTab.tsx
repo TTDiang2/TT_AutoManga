@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FiBookOpen, FiCheck, FiCopy, FiEye, FiFileText, FiGrid, FiLayers, FiPlay, FiPlus, FiRefreshCw, FiSave, FiShuffle, FiSquare, FiTerminal, FiZap } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { pinSeed } from './pinSeed';
-import { AiRewrite } from './AiRewrite';
+import { AiRewrite, type AiTarget } from './AiRewrite';
+import { OutlinePanel } from './OutlinePanel';
+import { parseOutline, targetAt, targetLabel, type OutlineEntry, type OutlineKind, type OutlineWords } from './outline';
 import { useComicsDrafts, openedDraft } from './scriptDrafts';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import type { Project } from '../../types';
@@ -109,6 +111,60 @@ const panelStem = (p: PlanPanel) => p.stem ?? `p${pad2(p.page)}-${pad2(p.n)}`;
 /** A pinned seed with a variant painted from the current prompt, not yet in the panel: "Apply pinned" copies it. */
 const pinnedPending = (p: PlanPanel) => p.seedPinned && !p.current && p.variants.some(v => v.seed === p.seed && v.same);
 
+/** The outline's open state and tab, per browser (storage may be off: private mode, blocked site data). */
+const OUTLINE_OPEN_KEY = 'automanga.comics.outline.open';
+const OUTLINE_MODE_KEY = 'automanga.comics.outline.mode';
+function readStored(key: string): string | null {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+function writeStored(key: string, value: string) {
+  try { window.localStorage.setItem(key, value); } catch { /* not kept: fine */ }
+}
+
+/** AI rewrite shortcuts in the editor: Mod+Shift+E the panel at the caret, Mod+Shift+L its scene. (Mod+Shift+S
+    is "save as" / screenshots and Mod+Shift+P print / private window in some browsers; E and L are free in
+    Chrome, Safari and Firefox on macOS.) */
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const SHORTCUTS: Record<'panel' | 'scene', { code: string; label: string }> = {
+  panel: { code: 'KeyE', label: IS_MAC ? '⌘⇧E' : 'Ctrl+Shift+E' },
+  scene: { code: 'KeyL', label: IS_MAC ? '⌘⇧L' : 'Ctrl+Shift+L' },
+};
+const shortcutOf = (e: React.KeyboardEvent): 'panel' | 'scene' | null => {
+  if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey) return null;
+  for (const k of ['panel', 'scene'] as const) {
+    const sc = SHORTCUTS[k];
+    if (e.code === sc.code || e.key.toLowerCase() === sc.code.slice(3).toLowerCase()) return k;
+  }
+  return null;
+};
+
+/** Scroll the editor so `offset` sits a few lines below its top. Lines wrap in the textarea, so the height of the
+    text before it is measured in a hidden copy of the editor; if that fails, the line number is used. */
+function scrollEditorTo(ed: HTMLTextAreaElement, offset: number) {
+  const cs = getComputedStyle(ed);
+  const lh = parseFloat(cs.lineHeight) || 20;
+  let top: number;
+  try {
+    const div = document.createElement('div');
+    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing',
+      'tabSize', 'textTransform', 'textIndent', 'paddingTop', 'paddingRight', 'paddingLeft'] as const) div.style[prop] = cs[prop];
+    Object.assign(div.style, {
+      position: 'absolute', visibility: 'hidden', left: '-10000px', top: '0', boxSizing: 'border-box', border: '0',
+      width: `${ed.clientWidth}px`, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: cs.wordBreak,
+    });
+    div.textContent = ed.value.slice(0, offset);
+    const mark = document.createElement('span');
+    mark.textContent = '\u200b';
+    div.appendChild(mark);
+    document.body.appendChild(div);
+    top = mark.offsetTop - (parseFloat(cs.paddingTop) || 0);
+    div.remove();
+  } catch {
+    top = (ed.value.slice(0, offset).split('\n').length - 1) * lh;
+  }
+  ed.scrollTop = Math.max(0, top - 3 * lh);
+}
+
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`);
@@ -163,7 +219,10 @@ export function ComicsTab() {
   const selectedRef = useRef<string | null>(selected);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
   // AI rewrite: the editor selection it opened on, and the LLM from Settings (endpoint + model)
-  const [ai, setAi] = useState<{ start: number; end: number } | null>(null);
+  const [ai, setAi] = useState<{ start: number; end: number; target?: AiTarget; seq: number } | null>(null);
+  const aiSeq = useRef(0);
+  // a run is going or a suggestion waits in the popover: the outline's AI buttons don't replace it then
+  const [aiLocked, setAiLocked] = useState(false);
   const [llm, setLlm] = useState<{ endpoint: string; model: string } | null>(null);
   useEffect(() => {
     fetch('/api/settings/').then(r => (r.ok ? r.json() : null))
@@ -171,6 +230,32 @@ export function ComicsTab() {
       .catch(() => setLlm(null));
   }, []);
   const llmReady = !!(llm?.endpoint && llm.model);
+
+  // the outline: parsed from the editor text 200 ms after the last keystroke, the caret's entry 150 ms after it moves
+  const [outlineText, setOutlineText] = useState(text);
+  useEffect(() => {
+    const timer = setTimeout(() => setOutlineText(text), 200);
+    return () => clearTimeout(timer);
+  }, [text]);
+  const outline = useMemo(() => parseOutline(outlineText), [outlineText]);
+  const [caretPos, setCaretPos] = useState(0);
+  const caretTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (caretTimer.current) clearTimeout(caretTimer.current); }, []);
+  const trackCaret = () => {
+    if (caretTimer.current) clearTimeout(caretTimer.current);
+    caretTimer.current = setTimeout(() => setCaretPos(editorRef.current?.selectionStart ?? 0), 150);
+  };
+  const [outlineOpen, setOutlineOpen] = useState(() => readStored(OUTLINE_OPEN_KEY) !== '0');
+  const [outlineMode, setOutlineMode] = useState<OutlineKind>(() => {
+    const m = readStored(OUTLINE_MODE_KEY);
+    return m === 'page' || m === 'panel' ? m : 'scene';
+  });
+  const toggleOutline = useCallback(() => setOutlineOpen(o => { writeStored(OUTLINE_OPEN_KEY, o ? '0' : '1'); return !o; }), []);
+  const pickMode = useCallback((m: OutlineKind) => { setOutlineMode(m); writeStored(OUTLINE_MODE_KEY, m); }, []);
+  const c = t.comics;
+  const words: OutlineWords = useMemo(() => ({
+    page: c.outlinePage, uncutPage: c.outlineUncutPage, noPlace: c.outlineNoPlace, panel: c.outlinePanel, scene: c.outlineScene,
+  }), [c]);
 
   const dirty = text !== savedText;
   // the plan was made from other text (typing, or the 600 ms check hasn't caught up): its line numbers
@@ -356,7 +441,55 @@ export function ComicsTab() {
 
   const openAi = () => {
     const ed = editorRef.current;
-    setAi({ start: ed?.selectionStart ?? 0, end: ed?.selectionEnd ?? 0 });
+    setAi({ start: ed?.selectionStart ?? 0, end: ed?.selectionEnd ?? 0, seq: ++aiSeq.current });
+  };
+
+  /** Select a block in the editor and scroll it into view. */
+  const selectRange = (start: number, end: number) => {
+    setCaretPos(start);
+    requestAnimationFrame(() => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      ed.focus();
+      ed.setSelectionRange(start, end);
+      scrollEditorTo(ed, start);
+    });
+  };
+
+  /** Open the AI popover on an outline entry (or the block of `kind` at the caret). */
+  const aiOn = (kind: OutlineKind, entry: OutlineEntry | null, anchor?: number) => {
+    if (!llmReady || aiLocked) return;
+    const at = anchor ?? entry?.startOffset ?? 0;
+    const target: AiTarget = entry
+      ? { kind, start: entry.startOffset, end: entry.endOffset, anchor: at, label: targetLabel({ kind, start: entry.startOffset, end: entry.endOffset, entry }, words) }
+      : { kind, start: at, end: at, anchor: at, label: '' };
+    setView('script');
+    if (entry) selectRange(entry.startOffset, entry.endOffset);
+    setAi({ start: at, end: at, target, seq: ++aiSeq.current });
+  };
+
+  // stable for the memoised outline panel: the latest handlers through a ref
+  const handlers = useRef({ aiOn, selectRange });
+  useEffect(() => { handlers.current = { aiOn, selectRange }; });
+  const onOutlinePick = useCallback((_kind: OutlineKind, e: OutlineEntry) => handlers.current.selectRange(e.startOffset, e.endOffset), []);
+  const onOutlineAi = useCallback((kind: OutlineKind, e: OutlineEntry) => handlers.current.aiOn(kind, e), []);
+  const onAiLock = useCallback((locked: boolean) => setAiLocked(locked), []);
+
+  /** The shortcut's block at the caret, in the live text. */
+  const aiAtCaret = (kind: 'panel' | 'scene') => {
+    const ed = editorRef.current;
+    const caret = ed?.selectionStart ?? 0;
+    const tgt = targetAt(parseOutline(text), caret, kind);
+    aiOn(kind, tgt?.entry ?? null, caret);
+  };
+
+  /** The Panels view's "AI rewrite": the plan panel's block in the script (by its line while the plan is current,
+      else by its id). */
+  const aiOnPlanPanel = (p: PlanPanel) => {
+    const o = parseOutline(text);
+    const entry = (!planStale && o.panels.find(x => x.line === p.line)) || o.panels.find(x => x.id === p.id) || null;
+    if (entry) aiOn('panel', entry);
+    else setError(`${p.id}: not found in the script; wait for the check to catch up`);
   };
 
   /** Back in the editor after the AI popover, the cursor at the block (selecting it after an accept). */
@@ -372,6 +505,7 @@ export function ComicsTab() {
   const acceptAi = (start: number, end: number, replacement: string) => {
     setText(text.slice(0, start) + replacement + text.slice(end));
     setAi(null);
+    setAiLocked(false);
     focusEditor(start, start + replacement.length);
   };
 
@@ -385,8 +519,7 @@ export function ComicsTab() {
       const at = lines.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
       ed.focus();
       ed.setSelectionRange(at, at + (lines[line - 1]?.length ?? 0));
-      const lh = parseFloat(getComputedStyle(ed).lineHeight) || 20;
-      ed.scrollTop = Math.max(0, (line - 4) * lh);
+      scrollEditorTo(ed, at);
     });
   };
 
@@ -441,6 +574,7 @@ export function ComicsTab() {
   }
 
   const progress = runIsHere && run ? paintProgress(run.lines) : null;
+  const shortcutHint = fill(c.aiShortcuts, { panel: SHORTCUTS.panel.label, scene: SHORTCUTS.scene.label });
   const projectId = (runIsHere && Boolean(run?.uncut) === uncut && run?.project_id)
     || (uncut ? current?.uncut_project_id : current?.project_id) || null;
   const elapsed = run ? Math.round(((run.ended ?? Math.max(now, run.started)) - run.started)) : 0;
@@ -579,7 +713,8 @@ export function ComicsTab() {
               {view === 'script' && (
                 <>
                   <button className="comics-save" onClick={openAi} disabled={!llmReady || !!ai}
-                    title={llmReady ? t.comics.aiRewriteHint : t.comics.aiNoLlm}>
+                    title={llmReady ? `${t.comics.aiRewriteHint}\n${shortcutHint}` : t.comics.aiNoLlm}
+                    aria-keyshortcuts={IS_MAC ? 'Meta+Shift+E Meta+Shift+L' : 'Control+Shift+E Control+Shift+L'}>
                     <FiZap size={13} /> {t.comics.aiRewrite}
                   </button>
                   <button onClick={() => save()} disabled={!dirty || scriptBusy}>
@@ -590,25 +725,40 @@ export function ComicsTab() {
             </div>
 
             {view === 'script' && (
-              <div className="comics-editor-wrap">
-                <textarea
-                  ref={editorRef}
-                  className="comics-editor"
-                  spellCheck={false}
-                  value={text}
-                  onChange={e => setText(e.target.value)}
-                  onKeyDown={e => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-                      e.preventDefault();
-                      if (dirty && !scriptBusy) save();   // the Save button's own check
-                    }
-                  }}
-                />
-                {ai && (
-                  <AiRewrite key={current.name} script={current.name} text={text} caret={ai} model={llm?.model ?? ''}
-                    onAccept={acceptAi}
-                    onClose={block => { setAi(null); focusEditor(block?.start ?? ai.start); }} />
-                )}
+              <div className={`comics-script ${outlineOpen ? 'with-outline' : ''}`}>
+                <OutlinePanel outline={outline} caret={caretPos} open={outlineOpen} onToggle={toggleOutline}
+                  mode={outlineMode} onMode={pickMode} words={words}
+                  aiBlocked={!llmReady ? c.aiNoLlm : aiLocked ? c.aiLocked : null}
+                  onPick={onOutlinePick} onAi={onOutlineAi} />
+                <div className="comics-editor-wrap">
+                  <textarea
+                    ref={editorRef}
+                    className="comics-editor"
+                    spellCheck={false}
+                    value={text}
+                    aria-label={current.name}
+                    onChange={e => setText(e.target.value)}
+                    onSelect={trackCaret}
+                    onKeyDown={e => {
+                      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 's') {
+                        e.preventDefault();
+                        if (dirty && !scriptBusy) save();   // the Save button's own check
+                        return;
+                      }
+                      const sc = shortcutOf(e);
+                      if (sc) {
+                        e.preventDefault();
+                        aiAtCaret(sc);
+                      }
+                    }}
+                  />
+                  {ai && (
+                    <AiRewrite key={`${current.name}:${ai.seq}`} script={current.name} text={text} caret={ai} model={llm?.model ?? ''}
+                      target={ai.target} words={words} onLockChange={onAiLock}
+                      onAccept={acceptAi}
+                      onClose={block => { setAi(null); setAiLocked(false); focusEditor(block?.start ?? ai.start); }} />
+                  )}
+                </div>
               </div>
             )}
             {view === 'log' && runIsHere && run && (
@@ -680,6 +830,11 @@ export function ComicsTab() {
                               {p.notice && <span className="comics-badge stale" title={p.notice}>SFW</span>}
                             </span>
                           </div>
+                          <button className="btn btn-ghost comics-panel-ai" onClick={() => aiOnPlanPanel(p)}
+                            disabled={!llmReady || aiLocked} title={!llmReady ? c.aiNoLlm : aiLocked ? c.aiLocked : c.aiPanelCardHint}
+                            aria-label={fill(c.outlineAi, { label: `${c.outlinePanel} ${p.id}` })}>
+                            <FiZap size={13} /> {c.aiPanelCard}
+                          </button>
                           <details className="comics-panel-prompt">
                             <summary>Prompt</summary>
                             <dl>

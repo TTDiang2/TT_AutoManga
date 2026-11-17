@@ -655,7 +655,14 @@ which paints with comic.js and rebuilds the project here. Names are
   is sent. Returns `{suggestion, original, plan: {ok, error, line}, model,
   durationMs}`: `plan` checks the text with the block replaced (`--uncut`
   when the script has uncut blocks) plus the same minor check on the new
-  block; a failing suggestion is still returned, flagged. LLM failures → 502
+  block; a failing suggestion is still returned, flagged.
+  `tighten_dialogue` and `enrich_description` must keep the block's
+  PAGE/PANEL marker lines (count, order, arguments), else `plan.ok` is false
+  with "the model changed the panel structure (expected N panels, got M)".
+  The prompt gives the header and context first, then the block between
+  `<<<BLOCK>>>` and `<<<END>>>`, then the task; the answer is read between
+  those markers when present and cut at any echoed prompt section
+  (`<<<CONTEXT_AFTER>>>`, ...), trailing blank lines trimmed to the block's. LLM failures → 502
   with a hint (endpoint must end in `/v1`; model crashed in LM Studio).
   Concurrent calls are allowed.
 - Images: `GET /api/comics/scripts/{name}/file/page_01.png` (or `draft_01`),

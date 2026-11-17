@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FiAlertTriangle, FiCheck, FiRefreshCw, FiX, FiZap } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
-import { findBlock, type AiBlock } from './aiBlock';
+import { resolveBlock, type AiBlock, type TargetKind } from './aiBlock';
+import type { OutlineKind, OutlineWords } from './outline';
 import './aiRewrite.css';
 
 export type AiAction = 'tighten_dialogue' | 'enrich_description' | 'draft_uncut' | 'custom';
@@ -14,11 +15,20 @@ interface RewriteResult {
   durationMs: number;
 }
 
+/** A block picked from the outline (or a shortcut): the popover starts on it. start/end/label describe it as it was
+    picked; the popover finds it again in the live text by kind around `anchor` (default start), so typing in the
+    editor meanwhile can't leave it on stale offsets, and its "change target" picks the panel / scene / page around
+    the same spot. */
+export interface AiTarget { kind: OutlineKind; start: number; end: number; label: string; anchor?: number }
+
 interface Props {
   script: string;
   text: string;                                 // the editor text now
   caret: { start: number; end: number };        // the editor selection when the popover opened
   model: string;                                // the configured LLM model, shown to the owner
+  target?: AiTarget;                            // opened on an outline entry (or a shortcut)
+  words: OutlineWords;                          // labels of outline targets
+  onLockChange?: (locked: boolean) => void;     // a run is going or a suggestion waits: don't replace the popover
   onAccept: (start: number, end: number, replacement: string) => void;
   onClose: (block: { start: number; end: number } | null) => void;   // focus goes back to the editor there
 }
@@ -29,10 +39,11 @@ function marked(lines: string[], other: string[]) {
   return lines.map(l => ({ l, changed: !!l.trim() && !set.has(l.trim()) }));
 }
 
-export function AiRewrite({ script, text, caret, model, onAccept, onClose }: Props) {
+export function AiRewrite({ script, text, caret, model, target, words, onLockChange, onAccept, onClose }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
-  const [page, setPage] = useState(false);
+  const [kind, setKind] = useState<TargetKind | null>(target?.kind ?? null);
+  const anchor = target ? (target.anchor ?? target.start) : caret.start;
   const [action, setAction] = useState<AiAction>('enrich_description');
   const [instruction, setInstruction] = useState('');
   const [removeTodo, setRemoveTodo] = useState(false);
@@ -42,12 +53,17 @@ export function AiRewrite({ script, text, caret, model, onAccept, onClose }: Pro
   // the run's block and the text it was cut from, fixed when the run starts
   const [ran, setRan] = useState<{ block: AiBlock; original: string } | null>(null);
   const [result, setResult] = useState<RewriteResult | null>(null);
+  // a suggestion that failed the check (a plan error, a changed panel structure) needs a second Accept
+  const [acceptFailing, setAcceptFailing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const live = useMemo(() => findBlock(text, caret.start, caret.end, page), [text, caret.start, caret.end, page]);
+  const live = useMemo(() => resolveBlock(text, caret, kind, anchor, words), [text, caret, kind, anchor, words]);
   const block = ran?.block ?? live;
   const busy = busySince !== null;
+  const locked = busy || !!result;
+  useEffect(() => { onLockChange?.(locked); }, [locked, onLockChange]);
+  useEffect(() => () => onLockChange?.(false), [onLockChange]);
   const actions: { id: AiAction; label: string; hint: string }[] = [
     { id: 'tighten_dialogue', label: c.aiTighten, hint: c.aiTightenHint },
     { id: 'enrich_description', label: c.aiEnrich, hint: c.aiEnrichHint },
@@ -91,6 +107,7 @@ export function AiRewrite({ script, text, caret, model, onAccept, onClose }: Pro
     abortRef.current = ctl;
     setRan({ block: b, original });
     setResult(null);
+    setAcceptFailing(false);
     setError(null);
     setBusySince(Date.now());
     setNow(Date.now());
@@ -115,17 +132,21 @@ export function AiRewrite({ script, text, caret, model, onAccept, onClose }: Pro
 
   const cancel = () => { abortRef.current?.abort(); abortRef.current = null; setBusySince(null); setRan(null); };
 
-  const discard = () => { setResult(null); setRan(null); setError(null); };
+  const discard = () => { setResult(null); setRan(null); setError(null); setAcceptFailing(false); };
 
   const accept = () => {
     if (!ran || !result) return;
     const { block: b, original } = ran;
     if (text.slice(b.start, b.end) !== original) { setError(c.aiChanged); return; }
+    if (!result.plan.ok && !acceptFailing) { setAcceptFailing(true); setError(c.aiAcceptFailing); return; }
     onAccept(b.start, b.end, result.suggestion);
   };
 
   const elapsed = busySince !== null ? Math.max(0, Math.floor((now - busySince) / 1000)) : 0;
-  const kindLabel = block ? { selection: c.aiBlockSelection, panel: c.aiBlockPanel, page: c.aiBlockPage }[block.kind] : '';
+  const kindNames: Record<TargetKind, string> = { selection: c.aiBlockSelection, panel: c.aiBlockPanel, scene: c.aiBlockScene, page: c.aiBlockPage };
+  const kindLabel = block ? block.label ?? kindNames[block.kind] : '';
+  const shownKind: TargetKind = kind ?? (block?.kind as TargetKind | undefined) ?? 'panel';
+  const kinds: TargetKind[] = [...(caret.start !== caret.end ? ['selection' as const] : []), 'panel', 'scene', 'page'];
   const origLines = (ran?.original ?? '').replace(/\r/g, '').replace(/\n+$/, '').split('\n');
   const suggLines = (result?.suggestion ?? '').replace(/\r/g, '').replace(/\n+$/, '').split('\n');
 
@@ -139,9 +160,12 @@ export function AiRewrite({ script, text, caret, model, onAccept, onClose }: Pro
         ) : (
           <span className="ai-rewrite-block">{c.aiNoBlock}</span>
         )}
-        {caret.start === caret.end && !ran && (
-          <label className="comics-check">
-            <input type="checkbox" checked={page} onChange={e => setPage(e.target.checked)} /> {c.aiWholePage}
+        {!ran && (
+          <label className="ai-rewrite-target" title={c.aiTargetHint}>
+            <select className="input" value={shownKind} aria-label={c.aiTarget}
+              onChange={e => setKind(e.target.value as TargetKind)}>
+              {kinds.map(k => <option key={k} value={k}>{kindNames[k]}</option>)}
+            </select>
           </label>
         )}
         <button className="btn btn-ghost btn-icon ai-rewrite-close" onClick={close} title={`${c.aiClose} (Esc)`}><FiX size={14} /></button>
@@ -204,7 +228,7 @@ export function AiRewrite({ script, text, caret, model, onAccept, onClose }: Pro
           <div className="ai-rewrite-foot">
             <button className="btn btn-ghost" onClick={discard}>{c.aiDiscard}</button>
             <button className="btn btn-secondary" onClick={run}><FiRefreshCw size={14} /> {c.aiRetry}</button>
-            <button className="btn btn-primary" onClick={accept}><FiCheck size={14} /> {c.aiAccept}</button>
+            <button className="btn btn-primary" onClick={accept}><FiCheck size={14} /> {acceptFailing ? c.aiAcceptAnyway : c.aiAccept}</button>
           </div>
         </>
       )}
