@@ -39,6 +39,40 @@ function marked(lines: string[], other: string[]) {
   return lines.map(l => ({ l, changed: !!l.trim() && !set.has(l.trim()) }));
 }
 
+const linesOf = (s: string) => s.replace(/\r/g, '').replace(/\n+$/, '').split('\n');
+
+/** Original and suggestion side by side, changed lines marked (the popover and the batch review). */
+export function RewriteDiff({ original, suggestion, meta }: { original: string; suggestion: string; meta?: string }) {
+  const { t } = useTranslation();
+  const c = t.comics;
+  const origLines = linesOf(original), suggLines = linesOf(suggestion);
+  return (
+    <div className="ai-rewrite-diff">
+      <div>
+        <div className="ai-rewrite-col-head">{c.aiOriginal}</div>
+        <pre>{marked(origLines, suggLines).map((x, i) => <div key={i} className={x.changed ? 'removed' : ''}>{x.l || ' '}</div>)}</pre>
+      </div>
+      <div>
+        <div className="ai-rewrite-col-head">{c.aiSuggestion}{meta && <span className="text-muted"> · {meta}</span>}</div>
+        <pre>{marked(suggLines, origLines).map((x, i) => <div key={i} className={x.changed ? 'added' : ''}>{x.l || ' '}</div>)}</pre>
+      </div>
+    </div>
+  );
+}
+
+/** A suggestion's check: passes, or the plan error / changed structure. */
+export function PlanStatus({ plan }: { plan: { ok: boolean; error: string | null; line: number | null } }) {
+  const { t } = useTranslation();
+  const c = t.comics;
+  return (
+    <div className={`ai-rewrite-plan ${plan.ok ? 'ok' : 'bad'}`}>
+      {plan.ok ? <><FiCheck size={13} /> {c.aiPlanOk}</> : (
+        <><FiAlertTriangle size={13} /> {c.aiPlanError}{plan.line != null && <b> · line {plan.line}</b>}: {(plan.error || '').replace(/^[^\n]*?:\d+: /, '')}</>
+      )}
+    </div>
+  );
+}
+
 export function AiRewrite({ script, text, caret, model, target, words, onLockChange, onAccept, onClose }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
@@ -147,8 +181,6 @@ export function AiRewrite({ script, text, caret, model, target, words, onLockCha
   const kindLabel = block ? block.label ?? kindNames[block.kind] : '';
   const shownKind: TargetKind = kind ?? (block?.kind as TargetKind | undefined) ?? 'panel';
   const kinds: TargetKind[] = [...(caret.start !== caret.end ? ['selection' as const] : []), 'panel', 'scene', 'page'];
-  const origLines = (ran?.original ?? '').replace(/\r/g, '').replace(/\n+$/, '').split('\n');
-  const suggLines = (result?.suggestion ?? '').replace(/\r/g, '').replace(/\n+$/, '').split('\n');
 
   return (
     <div className="ai-rewrite" ref={rootRef} role="dialog" aria-label={c.aiRewrite}>
@@ -210,21 +242,9 @@ export function AiRewrite({ script, text, caret, model, target, words, onLockCha
 
       {result && ran && (
         <>
-          <div className="ai-rewrite-diff">
-            <div>
-              <div className="ai-rewrite-col-head">{c.aiOriginal}</div>
-              <pre>{marked(origLines, suggLines).map((x, i) => <div key={i} className={x.changed ? 'removed' : ''}>{x.l || ' '}</div>)}</pre>
-            </div>
-            <div>
-              <div className="ai-rewrite-col-head">{c.aiSuggestion} <span className="text-muted">· {result.model} · {fill(c.aiTook, { s: Math.round(result.durationMs / 100) / 10 })}</span></div>
-              <pre>{marked(suggLines, origLines).map((x, i) => <div key={i} className={x.changed ? 'added' : ''}>{x.l || ' '}</div>)}</pre>
-            </div>
-          </div>
-          <div className={`ai-rewrite-plan ${result.plan.ok ? 'ok' : 'bad'}`}>
-            {result.plan.ok ? <><FiCheck size={13} /> {c.aiPlanOk}</> : (
-              <><FiAlertTriangle size={13} /> {c.aiPlanError}{result.plan.line != null && <b> · line {result.plan.line}</b>}: {(result.plan.error || '').replace(/^[^\n]*?:\d+: /, '')}</>
-            )}
-          </div>
+          <RewriteDiff original={ran.original} suggestion={result.suggestion}
+            meta={`${result.model} · ${fill(c.aiTook, { s: Math.round(result.durationMs / 100) / 10 })}`} />
+          <PlanStatus plan={result.plan} />
           <div className="ai-rewrite-foot">
             <button className="btn btn-ghost" onClick={discard}>{c.aiDiscard}</button>
             <button className="btn btn-secondary" onClick={run}><FiRefreshCw size={14} /> {c.aiRetry}</button>

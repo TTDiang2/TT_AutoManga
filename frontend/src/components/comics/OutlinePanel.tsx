@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef } from 'react';
-import { FiChevronDown, FiChevronRight, FiList, FiZap } from 'react-icons/fi';
+import { FiChevronDown, FiChevronRight, FiLayers, FiList, FiZap } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import { entryAt, entryLabel, listOf, targetLabel, type Outline, type OutlineEntry, type OutlineKind, type OutlinePage, type OutlinePanel as Panel, type OutlineScene, type OutlineWords } from './outline';
 
@@ -14,12 +14,14 @@ interface Props {
   aiBlocked: string | null;            // why the AI buttons are off (no LLM, a rewrite open), else null
   onPick: (kind: OutlineKind, entry: OutlineEntry) => void;
   onAi: (kind: OutlineKind, entry: OutlineEntry) => void;
+  onBatch: () => void;                 // "Batch AI…"
+  batchBlocked: string | null;         // why it is off (no LLM, a batch running elsewhere), else null
 }
 
 const name = (id: string) => (id ? id[0].toUpperCase() + id.slice(1) : id);
 
 /** The Script view's outline: the script's pages, scenes or panels; the one holding the caret is marked. */
-export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, onToggle, mode, onMode, words, aiBlocked, onPick, onAi }: Props) {
+export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, onToggle, mode, onMode, words, aiBlocked, onPick, onAi, onBatch, batchBlocked }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
   const listRef = useRef<HTMLUListElement>(null);
@@ -78,6 +80,12 @@ export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, o
               </button>
             ))}
           </div>
+        )}
+        {open && (
+          <button className="comics-outline-batch" onClick={onBatch} disabled={!!batchBlocked}
+            title={batchBlocked ?? c.batchOpenHint}>
+            <FiLayers size={12} /> {c.batchOpen}
+          </button>
         )}
       </div>
       {open && (

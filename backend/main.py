@@ -12,7 +12,7 @@ import uvicorn
 import json
 import time
 
-from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, comics_rewrite, fonts
+from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, comics_rewrite, comics_rewrite_batch, fonts
 from .api import auth as auth_api
 from .api import auth_google as auth_google_api
 from .api import training as training_api
@@ -154,6 +154,11 @@ async def lifespan(app: FastAPI):
     # Disk-touching maintenance runs at server startup, not at import time,
     # so importing the app (tests, CLI helpers) never deletes files.
     _cleanup_orphan_assets()
+    # a batch AI rewrite the last server left running carries on
+    try:
+        comics_rewrite_batch.resume()
+    except Exception:
+        logger.exception("could not resume the comics rewrite batch")
     yield
 
 
@@ -259,6 +264,7 @@ app.include_router(render.router)
 app.include_router(agent.router)
 app.include_router(comics.router)
 app.include_router(comics_rewrite.router)
+app.include_router(comics_rewrite_batch.router)
 app.include_router(fonts.router)
 app.include_router(training_api.router)
 app.include_router(collections_api.router)
