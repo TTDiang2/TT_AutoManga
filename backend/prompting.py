@@ -7,6 +7,7 @@ global character library (``data/characters.json``), matched by name
 ``description``) as the prompt block.
 """
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
