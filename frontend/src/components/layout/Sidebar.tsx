@@ -1,5 +1,6 @@
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useTheme, type ThemeChoice } from '../../hooks/useTheme';
 import type { TabId } from '../../types';
 import { 
   FiFileText, 
@@ -9,7 +10,10 @@ import {
   FiGrid, 
   FiSettings,
   FiUser,
-  FiBookOpen
+  FiBookOpen,
+  FiMonitor,
+  FiSun,
+  FiMoon
 } from 'react-icons/fi';
 
 const tabs: { id: TabId; icon: React.ReactNode }[] = [
@@ -23,9 +27,18 @@ const tabs: { id: TabId; icon: React.ReactNode }[] = [
   { id: 'settings', icon: <FiSettings size={20} /> },
 ];
 
+const THEMES: { id: ThemeChoice; label: string; icon: React.ReactNode }[] = [
+  { id: 'system', label: 'Theme: system', icon: <FiMonitor size={18} /> },
+  { id: 'light', label: 'Theme: light', icon: <FiSun size={18} /> },
+  { id: 'dark', label: 'Theme: dark', icon: <FiMoon size={18} /> },
+];
+
 export function Sidebar() {
   const { activeTab, setActiveTab } = useProjectStore();
   const { t } = useTranslation();
+  const { theme, setTheme } = useTheme();
+  const current = THEMES.find(x => x.id === theme) || THEMES[0];
+  const next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
 
   return (
     <aside className="sidebar">
@@ -42,6 +55,14 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+      <button
+        className="nav-item sidebar-theme"
+        onClick={() => setTheme(next.id)}
+        aria-label={`${current.label} (switch to ${next.id})`}
+      >
+        {current.icon}
+        <span className="nav-tooltip">{current.label}</span>
+      </button>
     </aside>
   );
 }

@@ -478,14 +478,14 @@ export function AssetTab() {
             <button
               className={`view-btn ${viewMode === 'generated' ? 'active' : ''}`}
               onClick={() => setViewMode('generated')}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: viewMode === 'generated' ? 'var(--accent-primary)' : 'transparent', color: viewMode === 'generated' ? 'white' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}
+              style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: viewMode === 'generated' ? 'var(--accent-primary)' : 'transparent', color: viewMode === 'generated' ? 'var(--accent-contrast)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}
             >
               Generated
             </button>
             <button
               className={`view-btn ${viewMode === 'archive' ? 'active' : ''}`}
               onClick={() => setViewMode('archive')}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: viewMode === 'archive' ? 'var(--accent-primary)' : 'transparent', color: viewMode === 'archive' ? 'white' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}
+              style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: viewMode === 'archive' ? 'var(--accent-primary)' : 'transparent', color: viewMode === 'archive' ? 'var(--accent-contrast)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}
             >
               Archive
             </button>
@@ -531,7 +531,7 @@ export function AssetTab() {
             <div style={{ flex: 1, overflow: 'auto' }}>
               <div
                 className={`group-item ${activeGroup === null ? 'active' : ''}`}
-                style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', background: activeGroup === null ? 'var(--accent-primary)' : 'transparent', color: activeGroup === null ? 'white' : 'inherit', fontSize: '12px', fontWeight: 600 }}
+                style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', background: activeGroup === null ? 'var(--accent-primary)' : 'transparent', color: activeGroup === null ? 'var(--accent-contrast)' : 'inherit', fontSize: '12px', fontWeight: 600 }}
                 onClick={() => { setActiveGroup(null); setCurrentFolder(null); }}
               >
                 All Folders
@@ -566,7 +566,7 @@ export function AssetTab() {
                           borderRadius: '6px',
                           cursor: 'pointer',
                           background: currentFolder === folder.id ? 'var(--accent-primary)' : 'transparent',
-                          color: currentFolder === folder.id ? 'white' : 'inherit',
+                          color: currentFolder === folder.id ? 'var(--accent-contrast)' : 'inherit',
                           minWidth: 0,
                           marginLeft: '12px',
                           marginBottom: '2px',
