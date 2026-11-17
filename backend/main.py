@@ -8,7 +8,7 @@ from pathlib import Path
 import uvicorn
 import json
 
-from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics
+from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,7 @@ app.include_router(composer_templates.router)
 app.include_router(render.router)
 app.include_router(agent.router)
 app.include_router(comics.router)
+app.include_router(fonts.router)
 
 
 @app.get("/api/health")

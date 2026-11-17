@@ -61,6 +61,17 @@ export function Canvas() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // a page wider than the column at the current zoom (1650 px comic pages) opens zoomed to fit its width
+  const pageWidth = currentPage?.width;
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box || !pageWidth) return;
+    const room = box.clientWidth - 48;   // the scroll area's padding
+    const { zoom: z, setZoom } = useComposerStore.getState();
+    if (pageWidth * z > room) setZoom(Math.floor((room / pageWidth) * 100) / 100);
+  }, [currentPageId, pageWidth]);
 
   const pageCoords = useCallback((e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -376,7 +387,10 @@ export function Canvas() {
 
   return (
     <>
-      <div className="composer-canvas-scroll">
+      <div className="composer-canvas-scroll" ref={scrollRef}>
+        {/* a transform doesn't change layout size: this box is the zoomed page's real footprint, so the
+            scroll area and centring follow the zoom */}
+        <div className="composer-canvas-sizer" style={{ width: currentPage.width * zoom, height: currentPage.height * zoom }}>
         <div
           ref={canvasRef}
           className={`composer-canvas ${activeTool === 'text' || activeTool === 'bubble' ? 'composer-canvas-place-mode' : ''}`}
@@ -445,6 +459,7 @@ export function Canvas() {
               )}
             </div>
           )}
+        </div>
         </div>
       </div>
       {imagePickerRequest && (

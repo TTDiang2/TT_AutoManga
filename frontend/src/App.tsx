@@ -16,6 +16,21 @@ function App() {
   const { activeTab, setSettings } = useProjectStore();
   const { t } = useTranslation();
 
+  // the server's lettering fonts (data/fonts), so the Composer draws text the way the export does
+  useEffect(() => {
+    fetch('/api/fonts')
+      .then(res => res.json())
+      .then((data: { fonts: { family: string; url: string }[] }) => {
+        const css = data.fonts.map(f => `@font-face { font-family: "${f.family}"; src: url("${f.url}"); }`).join('\n');
+        if (!css) return;
+        const style = document.createElement('style');
+        style.dataset.userFonts = '';
+        style.textContent = css;
+        document.head.appendChild(style);
+      })
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     fetch('/api/settings/')
       .then(res => res.json())

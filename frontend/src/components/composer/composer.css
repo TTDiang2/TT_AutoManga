@@ -183,7 +183,7 @@
 
 .composer-tool-btn.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
   border-color: var(--accent-primary);
 }
 
@@ -240,9 +240,20 @@
 
 .composer-canvas {
   background: white;
+  /* the page is artwork, not UI: its text stays dark in the dark theme, and
+     unnamed text uses the "default" lettering font when data/fonts has one */
+  color: #111111;
+  font-family: "default", 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   box-shadow: var(--shadow-elevated);
   position: relative;
-  transform-origin: top center;
+  transform-origin: top left;
+}
+
+.composer-canvas-sizer {
+  /* keep the zoomed page's width: a page wider than the column (1650 px comic
+     pages) was squeezed by the flex row while its height stayed */
+  flex-shrink: 0;
+  margin: 0 auto;
 }
 
 /* === Canvas Elements === */
@@ -362,7 +373,7 @@
   height: 36px;
   border-radius: 50%;
   border: 1.5px solid #3B82F6;
-  background: white;
+  background: var(--bg-primary);
   color: #3B82F6;
   cursor: pointer;
   display: flex;
@@ -664,16 +675,16 @@
 
 .composer-prop-btn.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
   border-color: var(--accent-primary);
 }
 
 .composer-prop-delete {
   margin-top: var(--space-sm);
   padding: var(--space-sm);
-  border: 1px solid #FCA5A5;
+  border: 1px solid rgba(239, 68, 68, 0.45);
   border-radius: var(--radius-sm);
-  background: #FEF2F2;
+  background: rgba(239, 68, 68, 0.08);
   color: #EF4444;
   cursor: pointer;
   font-size: 11px;
@@ -686,7 +697,7 @@
 }
 
 .composer-prop-delete:hover {
-  background: #FEE2E2;
+  background: rgba(239, 68, 68, 0.16);
 }
 
 .composer-no-selection {
@@ -903,7 +914,7 @@
 
 .composer-bubble-pill.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
   border-color: var(--accent-primary);
 }
 
@@ -957,7 +968,7 @@
   width: auto;
   height: 30px;
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
   border: none;
   border-radius: var(--radius-sm);
   font-size: 12px;
@@ -991,7 +1002,7 @@
   border: none;
   border-radius: var(--radius-sm);
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
