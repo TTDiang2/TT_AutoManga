@@ -1,6 +1,8 @@
 """Native CJK vertical typesetting + lettering discipline rules."""
 import math
 
+import pytest
+
 from backend.assembly import _apply_dynamic_corners, _make_bubble, classify_bubble
 from backend.render.vtext import CHAR_ADV, COL_ADV, layout_vertical, to_vertical_punctuation
 
@@ -73,6 +75,9 @@ def test_punctuation_maps_with_real_resolved_font():
     # forms come from a CJK fallback (msyh / Hiragino / Noto carry U+FE10)
     from backend.render.fonts import get_font_chain
     font = get_font_chain(20)
+    # a bare Linux CI runner has no CJK font at all: nothing to map with there
+    if not any(0xFE10 in c for c in font._cmaps):
+        pytest.skip("no installed font carries the vertical punctuation forms")
     out = to_vertical_punctuation("你好，世界！……", font)
     assert "\uFE10" in out and "\uFE15" in out and "\uFE19" in out
 

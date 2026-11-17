@@ -330,7 +330,9 @@ def _is_our_process(run: Dict[str, Any]) -> bool:
     key = (int(run["pid"]), run["id"])
     if key not in _verified:
         try:
-            out = subprocess.run(["ps", "-o", "command=", "-p", str(key[0])],
+            # -ww: Linux ps cuts the command line to 80 columns when not on a
+            # terminal, which would hide the log path
+            out = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(key[0])],
                                  capture_output=True, text=True, timeout=5).stdout
         except Exception:
             return True   # can't tell: don't declare a live run dead (ask again next time)
