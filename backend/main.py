@@ -1,15 +1,18 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from urllib.parse import urlsplit
 from pathlib import Path
 import uvicorn
 import json
 import time
 
 from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
+from .api import auth as auth_api
+from .core import auth as auth_core
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 logger = logging.getLogger(__name__)
@@ -134,6 +137,57 @@ app = FastAPI(title="AutoManga API", version="1.0.0", lifespan=lifespan)
 # vite dev server proxies /api. Anything else — including a malicious page in
 # the user's browser — gets no cross-origin access to the API.
 
+_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+_LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
+
+
+def _cross_origin(request: Request) -> bool:
+    """A mutating request whose Origin host differs from Host (CSRF). The
+    vite dev server (localhost:5173 proxying to :5180) is allowed for local
+    requests."""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return False
+    try:
+        parts = urlsplit(origin)
+        origin_host, origin_name = parts.netloc.lower(), (parts.hostname or "")
+    except ValueError:
+        return True
+    if origin_host and origin_host == request.headers.get("host", "").lower():
+        return False
+    return not (auth_core.is_local(request) and origin_name in _LOOPBACK_NAMES)
+
+
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    """Login gate for /api (see backend/core/auth.py). The SPA shell and
+    /assets are public; local callers (loopback, no forwarding headers) pass;
+    everyone else needs a valid am_session cookie."""
+    path = request.url.path
+    if not (path == "/api" or path.startswith("/api/")):
+        return await call_next(request)
+    if request.method in _MUTATING and _cross_origin(request):
+        return JSONResponse({"detail": "cross-origin request refused"},
+                            status_code=403)
+    if (request.method, path.rstrip("/") or "/") in auth_api.PUBLIC_PATHS \
+            or path == "/api/health" or auth_core.is_local(request):
+        return await call_next(request)
+    data = auth_core.load_auth()
+    if data is None:
+        return JSONResponse({"detail": "login is not configured on this server"},
+                            status_code=503)
+    claims = auth_core.read_token(request.cookies.get(auth_core.COOKIE_NAME), data)
+    if claims is None:
+        return JSONResponse({"detail": "authentication required"},
+                            status_code=401)
+    response = await call_next(request)
+    if auth_core.needs_refresh(claims) and \
+            auth_core.COOKIE_NAME not in response.headers.get("set-cookie", ""):
+        auth_core.set_session_cookie(response, request, data)  # rolling refresh
+    return response
+
+
+app.include_router(auth_api.router)
 app.include_router(storyboard.router)
 app.include_router(prompt.router)
 app.include_router(assets.router)

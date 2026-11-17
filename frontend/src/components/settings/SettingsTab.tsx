@@ -3,6 +3,9 @@ import { FiSave, FiRefreshCw, FiCheck, FiEye, FiEyeOff, FiX } from 'react-icons/
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { AppSettings } from '../../types';
+import { changePassword, fetchAuthStatus, logout, logoutAll } from '../../auth';
+import type { AuthStatus } from '../../auth';
+import { SET_PASSWORD_CMD } from '../auth/LoginScreen';
 
 export function SettingsTab() {
   const { settings, setSettings } = useProjectStore();
@@ -761,6 +764,8 @@ export function SettingsTab() {
             </div>
           </div>
         </div>
+
+        <AccessSection />
       </div>
 
       <style>{`
@@ -865,6 +870,145 @@ export function SettingsTab() {
         .toggle-switch input:checked + .toggle-slider:before {
           transform: translateX(24px);
         }
+      `}</style>
+    </div>
+  );
+}
+
+/** Settings → Access: the login gate (backend/core/auth.py). */
+function AccessSection() {
+  const { t } = useTranslation();
+  const a = t.auth;
+  const [status, setStatus] = useState<AuthStatus | null>(null);
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirmNext, setConfirmNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const refresh = () => { fetchAuthStatus().then(setStatus).catch(() => setStatus(null)); };
+  useEffect(refresh, []);
+
+  if (!status) return null;
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (next !== confirmNext) { setMsg({ ok: false, text: a.mismatch }); return; }
+    if (next.length < 8) { setMsg({ ok: false, text: a.tooShort }); return; }
+    setBusy(true);
+    const r = await changePassword(current, next);
+    setBusy(false);
+    if (r.ok) {
+      setCurrent(''); setNext(''); setConfirmNext('');
+      setMsg({ ok: true, text: a.passwordChanged });
+    } else {
+      setMsg({ ok: false, text: r.reason === 'wrong' ? a.wrongCurrent
+        : r.reason === 'rate' ? a.rateLimited.replace('{s}', String(r.retryAfter ?? 60))
+        : r.detail || a.error });
+    }
+  };
+
+  const signOutAll = async () => {
+    if (!confirm(a.signOutAllConfirm)) return;
+    const r = await logoutAll();
+    if (r.ok) {
+      setMsg({ ok: true, text: a.signedOutAll });
+      if (!status.local) window.location.reload();
+    } else setMsg({ ok: false, text: r.detail || a.error });
+  };
+
+  const signOut = async () => {
+    await logout();
+    window.location.reload();
+  };
+
+  return (
+    <div className="settings-section card">
+      <h4>{a.accessTitle}</h4>
+      <p className="text-sm text-secondary mb-md">{a.accessDesc}</p>
+
+      {status.local && <p className="access-note">{a.localNote}</p>}
+      {!status.local && status.authenticated && <p className="access-note">{a.remoteNote}</p>}
+
+      {!status.configured ? (
+        <div className="form-group">
+          <p className="text-sm text-secondary mb-sm">{a.notConfigured}</p>
+          <code className="access-code">{SET_PASSWORD_CMD}</code>
+        </div>
+      ) : (
+        <>
+          <form onSubmit={submit} className="access-form">
+            <input type="text" name="username" autoComplete="username" value="automanga"
+                   readOnly hidden />
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="access-current">{a.currentPassword}</label>
+                <input id="access-current" className="input" type="password"
+                       autoComplete="current-password" value={current} required
+                       onChange={(e) => setCurrent(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="access-new">{a.newPassword}</label>
+                <input id="access-new" className="input" type="password"
+                       autoComplete="new-password" minLength={8} value={next} required
+                       onChange={(e) => setNext(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label htmlFor="access-confirm">{a.confirmPassword}</label>
+                <input id="access-confirm" className="input" type="password"
+                       autoComplete="new-password" minLength={8} value={confirmNext} required
+                       onChange={(e) => setConfirmNext(e.target.value)} />
+              </div>
+            </div>
+            <div className="access-actions">
+              <button type="submit" className="btn btn-primary"
+                      disabled={busy || !current || !next || !confirmNext}>
+                {a.changePassword}
+              </button>
+              {!status.local && status.authenticated && (
+                <button type="button" className="btn btn-secondary" onClick={signOut}>
+                  {a.signOut}
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={signOutAll}>
+                {a.signOutAll}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+      {msg && (
+        <p className={`access-msg ${msg.ok ? 'access-msg--ok' : 'access-msg--err'}`} role="status">
+          {msg.text}
+        </p>
+      )}
+      <style>{`
+        .access-note {
+          font-size: 13px;
+          color: var(--text-primary);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          padding: var(--space-sm) var(--space-md);
+          margin-bottom: var(--space-md);
+        }
+        .access-code {
+          display: block;
+          padding: var(--space-sm) var(--space-md);
+          border-radius: var(--radius-sm);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-default);
+          color: var(--text-primary);
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 12px;
+          word-break: break-all;
+          user-select: all;
+        }
+        .access-form .input { width: 100%; }
+        .access-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+        .access-msg { font-size: 13px; margin-top: var(--space-md); }
+        .access-msg--ok { color: var(--success); }
+        .access-msg--err { color: var(--error); }
       `}</style>
     </div>
   );

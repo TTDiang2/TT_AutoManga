@@ -33,6 +33,42 @@ typed MCP tools (any MCP client; `render_page_preview` returns image
 content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
 (agentskills.io format).
 
+### Access (login gate)
+
+`/api/*` is behind one password (`backend/core/auth.py`, middleware
+`auth_gate` in `backend/main.py`). **Local callers are exempt**: a request
+whose TCP peer is `127.0.0.1`/`::1` and that carries no `X-Forwarded-For`,
+`Forwarded` or `X-Real-IP` header never needs a session. That covers the
+MCP tools, `agent_cli`, and the Comics converter (`automanga.js`, spawned by
+`/api/comics` with `AUTOMANGA_URL=http://127.0.0.1:<port>`). Keep calling
+`http://127.0.0.1:5180` directly, and don't add forwarding headers.
+Everyone else needs the `am_session` cookie, which is what browsers get through
+the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
+`192.168.1.11`, which is never treated as local).
+
+- Set or change the password on the server:
+  `.venv/bin/python -m backend.core.auth set-password`. Add `--stdin` to read
+  it from the first line of stdin. `logout-all` signs every device out, and
+  `status` shows whether a password is set. The password lives in
+  `data/auth.json` (chmod 600) as a scrypt hash, a 32-byte secret and a
+  version. Changing the password or running `logout-all` bumps the version.
+- Endpoints:
+  - `GET /api/auth/status` returns `{configured, authenticated, local}`.
+  - `POST /api/auth/login {password}` logs in. It allows 5 failures per
+    15 min per IP (then 429 with `Retry-After`) and 30 per hour in total.
+  - `POST /api/auth/logout` signs this device out.
+  - `POST /api/auth/logout-all` and
+    `POST /api/auth/password {current, new}` need a session or a local
+    caller.
+- Responses from the gate:
+  - remote without a session: 401 `authentication required`;
+  - remote while no password is set: 503;
+  - a POST/PUT/PATCH/DELETE whose `Origin` host differs from `Host`: 403,
+    local callers included (CSRF).
+  - Always public: the SPA shell, `/assets` and `/api/health`.
+- `AUTOMANGA_DATA_DIR=<dir>` relocates `data/` (settings, projects, assets,
+  auth) for a throwaway second instance.
+
 ## 2. Units & conventions (read before writing any geometry)
 
 - All element coordinates (`x`, `y`, `width`, `height`) are **percentages of
@@ -62,6 +98,24 @@ content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
   renders the tail triangle **below** the bubble pointing down; `"bottom"`
   renders it **above** pointing up. To point a tail at a character below the
   bubble, use `"top"`.
+- **Optional bubble lettering fields** (absent = the behaviour above,
+  unchanged):
+  - `tailTip: {x, y}` — a pointed tail aimed at that point, in fractions of
+    the bubble's own box (unrotated; may be <0 or >1, e.g. `{x: 0.3, y: 1.8}`
+    = below the bubble, left of centre). Overrides `tailPosition`; thought
+    bubbles get three circles; narration has no tail. Validated to -20..20.
+    One geometry in `backend/render/tails.py` and
+    `frontend/src/components/composer/tailGeometry.ts`, both checked against
+    `backend/tests/fixtures/tail_cases.json`.
+  - `textAlign: "left" | "center" | "right"` — narration aligns to the box's
+    padded edge, other shapes to the edge of the centred text block.
+  - `markup: "stars"` — `*word*` is set as emphasis (bold, sheared italic;
+    horizontal text only). Opt-in: without it stars are drawn literally.
+- **Glyph fallback**: the server renderer draws text run by run through a
+  font chain (`fonts.get_font_chain`: the lettering font, then symbol fonts —
+  Arial Unicode, Apple Symbols, Segoe UI Symbol, DejaVu — then the CJK/Latin
+  system fallbacks), so ♪ or CJK the lettering font lacks no longer render
+  as boxes. Needs `fonttools` (in requirements.txt).
 
 ## 3. Data model (contract)
 
@@ -323,6 +377,40 @@ If you don't want to write panels yourself, `POST /api/agent/storyboard`
 OpenAI-compatible LLM and stores the resulting panels. You lose creative
 control over scene wording — most agents should write panels directly
 (step 2 of the golden path) and skip this.
+
+### 9b. Comics scripts (the Comics tab, `/api/comics`)
+
+`.comic` scripts live in the Comics repo (`$COMICS_DIR`, default
+`~/Projects/Comics`, `scripts/<name>.comic`); a run calls its `automanga.js`,
+which paints with comic.js and rebuilds the project here. Names are
+`[A-Za-z0-9][A-Za-z0-9_-]*`.
+
+- `GET/PUT /api/comics/scripts[/{name}]` list, read, save (`{text}`; 409
+  while that script is being converted).
+- `POST /api/comics/scripts/{name}/plan {text?, face?}` → `comic.js --plan`
+  (`--stdin` when `text` is given, so unsaved text can be checked; the script
+  need not exist then). Read-only, allowed during a run, 20 s timeout. Returns
+  `{ok:true, panels:[{id, page, n, line, seedLine, seed, seedPinned, gen,
+  model, face, prompt, negative, fix, painted, current, prev, mtime,
+  variants:[{seed, same}]}]}` or, for a script error, `{ok:false, error,
+  line}` (HTTP 200 either way). `current` = painted from this prompt/seed;
+  `same` = the variant was painted from the current prompt, so pinning its
+  seed reuses the picture.
+- `POST /api/comics/runs {script, mode, face?, panels?, force?, variants?}`,
+  one run at a time (409), detached; poll `GET /api/comics/runs/current?since=N`,
+  stop with `POST /api/comics/runs/current/stop`. Modes: `paint`,
+  `no-paint`, `dry-run`, `repaint` (`--panels a,b [--force]`; without
+  `force` only stale panels are painted and a variant pinned with
+  `PANEL seed=` is copied in: the log says `from variant seed=`), `variants`
+  (`--panels a,b --variants N`, N 2-8: paints seeds into `out/<name>/variants/`
+  and imports nothing). `panels` are ids like `"1.2"`.
+- Images: `GET /api/comics/scripts/{name}/file/page_01.png` (or `draft_01`),
+  `/panel/p01-02.png` (`p01-02.prev.png` = the one it replaced),
+  `/variant/p01-02_seed4301.png`.
+
+Pick a variant: `variants` run → set the seed in the script (`seed: N` line if
+the panel has one, else `PANEL … seed=N`) → `PUT` the script → `repaint`
+without force.
 
 ## 10. Making a comic a stranger can READ (craft rules)
 
