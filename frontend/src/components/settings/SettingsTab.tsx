@@ -1,11 +1,34 @@
 import { useState, useEffect } from 'react';
 import { FiSave, FiRefreshCw, FiCheck, FiEye, FiEyeOff, FiX } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
-import { useTranslation } from '../../hooks/useTranslation';
+import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { AppSettings } from '../../types';
 import { changePassword, fetchAuthStatus, logout, logoutAll } from '../../auth';
 import type { AuthStatus } from '../../auth';
 import { SET_PASSWORD_CMD } from '../auth/LoginScreen';
+import { IpAdapterSection, TrainingSection } from './ReferenceTrainingSettings';
+import type { IpAdapterSettings, TrainingSettings } from './ReferenceTrainingSettings';
+
+const DEFAULT_IPADAPTER: IpAdapterSettings = {
+  ipadapterPreset: 'PLUS (high strength)',
+  ipadapterWeightType: 'prompt is more important',
+  ipadapterEnd: 0.7,
+};
+const DEFAULT_TRAINING: Omit<TrainingSettings, 'host' | 'baseModel'> = {
+  toolkitDir: '~/ai-toolkit', python: 'venv/bin/python',
+  loraFolder: 'Comics', sampling: false, resolution: [512, 768], cacheTextEmbeddings: false,
+};
+
+/** A FastAPI error body as one line: {detail: "..."} or a 422's [{loc, msg}]. */
+function errorText(body: unknown, status: number): string {
+  const detail = (body as { detail?: unknown } | null)?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d: { loc?: unknown[]; msg?: string }) =>
+      `${(d.loc || []).slice(1).join('.')}: ${String(d.msg || '').replace(/^Value error, /, '')}`).join('; ');
+  }
+  return `HTTP ${status}`;
+}
 
 export function SettingsTab() {
   const { settings, setSettings } = useProjectStore();
@@ -16,6 +39,10 @@ export function SettingsTab() {
   const [isTestingSwarmUI, setIsTestingSwarmUI] = useState(false);
   const [swarmUIStatus, setSwarmUIStatus] = useState<boolean | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [ipadapter, setIpadapter] = useState<IpAdapterSettings>(DEFAULT_IPADAPTER);
+  // null until the server sent it: never save placeholder trainer settings
+  const [training, setTraining] = useState<TrainingSettings | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -49,6 +76,13 @@ export function SettingsTab() {
       };
       setLocalSettings(loadedSettings);
       setSettings(loadedSettings);
+      setIpadapter({
+        ipadapterPreset: loadedSwarmui.ipadapterPreset || DEFAULT_IPADAPTER.ipadapterPreset,
+        ipadapterWeightType: loadedSwarmui.ipadapterWeightType || DEFAULT_IPADAPTER.ipadapterWeightType,
+        ipadapterEnd: typeof loadedSwarmui.ipadapterEnd === 'number'
+          ? loadedSwarmui.ipadapterEnd : DEFAULT_IPADAPTER.ipadapterEnd,
+      });
+      setTraining(data.training ? { host: '', baseModel: '', ...DEFAULT_TRAINING, ...data.training } : null);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -56,18 +90,25 @@ export function SettingsTab() {
 
   const handleSave = async () => {
     setIsSaving(true);
+    setSaveError('');
     try {
-      await fetch('/api/settings/', {
+      const response = await fetch('/api/settings/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           api: localSettings.api,
-          swarmui: localSettings.swarmui,
+          swarmui: { ...localSettings.swarmui, ...ipadapter },
           defaults: localSettings.defaults,
+          ...(training ? { training } : {}),
           language: localSettings.language,
         }),
       });
-      
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setSaveError(fill(t.settings.saveFailed, { detail: errorText(body, response.status) }));
+        return;
+      }
+
       setSettings(localSettings);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
@@ -123,6 +164,7 @@ export function SettingsTab() {
           </button>
         </div>
       </div>
+      {saveError && <p className="settings-save-error mb-md" role="alert">{saveError}</p>}
 
       <div className="settings-sections">
         <div className="settings-section card">
@@ -680,6 +722,10 @@ export function SettingsTab() {
           </div>
         </div>
 
+        <IpAdapterSection value={ipadapter} onChange={setIpadapter} />
+
+        {training && <TrainingSection value={training} onChange={setTraining} />}
+
         <div className="settings-section card">
           <h4>Default Settings</h4>
           <p className="text-sm text-secondary mb-md">
@@ -777,6 +823,10 @@ export function SettingsTab() {
         }
         .settings-section {
           padding: var(--space-lg);
+        }
+        .settings-save-error {
+          color: var(--error, #ef4444);
+          font-size: 13px;
         }
         .settings-section h4 {
           font-size: 16px;

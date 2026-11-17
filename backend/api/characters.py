@@ -3,7 +3,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+import base64
+import binascii
 import json
+import logging
 import math
 import re
 import threading
@@ -11,6 +14,8 @@ import threading
 from ..core.config import atomic_write_json
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
+
+logger = logging.getLogger(__name__)
 
 CHARACTERS_FILE = Path(__file__).parent.parent.parent / "data" / "characters.json"
 
@@ -82,6 +87,50 @@ def edit_characters():
         characters = _load_characters()
         yield characters
         _save_characters(characters)
+
+
+_DATA_URL_RE = re.compile(r"data:image/(png|jpeg|jpg|webp);base64,", re.I)
+
+
+def migrate_character_images(characters: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Move data-URL sheets (``image``) into the asset store (kind
+    "character") and keep their /api/assets/file/<id> URL instead, in place.
+    Idempotent: asset URLs are left alone. A data URL that does not decode
+    stays as it is (counted in ``failed``)."""
+    from ..storage import asset_store as asset_store_mod
+    store = asset_store_mod.asset_store
+    migrated = failed = 0
+    for c in characters:
+        img = c.get("image") if isinstance(c, dict) else None
+        if not isinstance(img, str) or not img.startswith("data:"):
+            continue
+        m = _DATA_URL_RE.match(img)
+        try:
+            if not m:
+                raise ValueError("not a base64 PNG/JPEG/WebP data URL")
+            data = base64.b64decode(img[m.end():], validate=False)
+            if not data:
+                raise ValueError("empty image")
+        except (ValueError, binascii.Error) as e:
+            logger.warning("character %s: image not migrated (%s)", c.get("id"), e)
+            failed += 1
+            continue
+        entry = store.save_bytes(data, ext=m.group(1).lower(), kind="character",
+                                 meta={"character_id": c.get("id")})
+        c["image"] = store.url_for(entry["asset_id"])
+        migrated += 1
+    return {"migrated": migrated, "failed": failed}
+
+
+@router.post("/migrate-images")
+async def migrate_images():
+    """Convert every library character's data-URL sheet into an asset (the
+    Characters tab's "move photos out of characters.json" button)."""
+    with edit_characters() as characters:
+        result = migrate_character_images(characters)
+    if result["migrated"]:
+        logger.info("characters: %d image(s) moved to the asset store", result["migrated"])
+    return {"success": True, **result}
 
 
 @router.get("/")

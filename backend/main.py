@@ -93,11 +93,32 @@ def _cleanup_orphan_assets() -> None:
                             referenced.add(v.rsplit("/", 1)[-1])
                         elif not v.startswith("/api/") and Path(v).exists():
                             referenced_paths.add(str(Path(v).resolve()))
+            # per-project character overrides may carry their own sheet
+            for ch in (proj.get("settings") or {}).get("characters") or []:
+                img = ch.get("image") if isinstance(ch, dict) else None
+                if isinstance(img, str) and img.startswith("/api/assets/file/"):
+                    referenced.add(img.rsplit("/", 1)[-1])
         except Exception as e:
             logger.warning(
                 "orphan cleanup aborted: %s has unexpected content (%s); "
                 "keeping all assets", meta_file, e)
             return
+
+    # character sheets in the library (data/characters.json) are references
+    # too; an unreadable library aborts the cleanup like a bad project.json
+    from .api import characters as characters_mod
+    try:
+        with characters_mod.CHARACTERS_LOCK:
+            library = characters_mod._load_characters()
+        for ch in library:
+            img = ch.get("image") if isinstance(ch, dict) else None
+            if isinstance(img, str) and img.startswith("/api/assets/file/"):
+                referenced.add(img.rsplit("/", 1)[-1])
+    except Exception as e:
+        logger.warning(
+            "orphan cleanup aborted: %s is unreadable (%s); keeping all assets",
+            characters_mod.CHARACTERS_FILE, e)
+        return
 
     from .storage import asset_store as asset_store_mod
     asset_store = asset_store_mod.asset_store

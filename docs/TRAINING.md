@@ -33,7 +33,11 @@ job), `backend/training_templates/sdxl_lora.yaml.tmpl` (the recipe),
    rebooting or sleeping: disable suspend while on AC (and keep it on AC).
    `loginctl show-user pless84 -p Linger` is `yes` on the Razer.
 
-## Settings (`data/settings.json` → `training`)
+## Settings (`data/settings.json` → `training`, or Settings tab → "LoRA training")
+
+The Settings tab edits all of them but `os`; the server checks them (host is
+`user@host`, paths have no spaces or quotes, `loraFolder` is a plain folder
+name or path without `..`, each resolution a multiple of 64 in 256-1536).
 
 | key | default | |
 |---|---|---|
@@ -44,15 +48,19 @@ job), `backend/training_templates/sdxl_lora.yaml.tmpl` (the recipe),
 | `baseModel` | `/home/pless84/models/arthemyComics_v80.safetensors` | |
 | `loraFolder` | `Comics` | under `~/SwarmUI/Models/Lora` on the Mac |
 | `sampling` | `false` | ai-toolkit preview images; on 8 GB they OOM (see below) |
+| `resolution` | `[512, 768]` | dataset buckets (`datasets[].resolution`); 1024 OOMs on 8 GB with full-size images (see below) |
+| `cacheTextEmbeddings` | `false` | ai-toolkit `train.cache_text_embeddings`: captions encoded once before training (opt-in, not yet tried on the 3070) |
 
 ## Recipe
 
 The sf_* LoRAs' config (`~/ai-toolkit/output/sf_mara/config.yaml`) verbatim:
 LoRA linear/alpha 16, UNet only, fp16 saves every 500 (keep 3), captions from
-`.txt` with 0.05 dropout, latents cached to disk, buckets 768/1024, batch 1,
+`.txt` with 0.05 dropout, latents cached to disk, batch 1,
 1500 steps, gradient checkpointing, ddpm, adamw8bit, lr 1e-4, bf16, SDXL
 `low_vram`. Per job: name, trigger, dataset folder, base model, steps,
-sample prompts, and `disable_sampling` (from `sampling`).
+sample prompts, `disable_sampling` (from `sampling`), the buckets (from
+`resolution`; the sf_* recipe's 768/1024 only fit because its images were
+432x1024 sprites) and `cache_text_embeddings` (from `cacheTextEmbeddings`).
 
 ## On the trainer
 
@@ -92,6 +100,12 @@ character's lora.
 - **`CUDA out of memory` in `vae.decode` during `sample`**: the preview
   sampling at 832x1216 doesn't fit next to the model in 8 GB. Keep
   `sampling: false`.
+- **"OOM during training step 3 times in a row"** (at step 5 on the 8 GB RTX
+  3070): the dataset was full-size comic panels (~1 MP: 832x1216, 1344x768,
+  1024x1024) trained in the 1024 bucket. The earlier smoke run only fit
+  because its images were 432x1024 sprites. Keep `resolution` at
+  `[512, 768]` (the default) on 8 GB; 1024 needs a bigger GPU for full-size
+  images. `cacheTextEmbeddings` may free a little more (untested here).
 - **Job failed "process is gone without an exit code"**: the trainer
   rebooted or the process was killed. On 2026-11-17 the Razer reset itself
   (no shutdown in the journal, "uncleanly shut down") while caching latents,

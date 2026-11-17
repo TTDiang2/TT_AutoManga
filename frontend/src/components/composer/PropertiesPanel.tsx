@@ -354,7 +354,7 @@ function CornerProps({
       <div className="composer-corner-grid">
         {order.map(key => (
           <div key={key} className="composer-corner-row">
-            <span className="composer-corner-key">{labels[key]}</span>
+            <span className="composer-corner-key" title={labels[key]}>{labels[key]}</span>
             <input
               className="composer-prop-input"
               type="number"

@@ -11,8 +11,33 @@ def _norm_endpoint(url: str) -> str:
 
 
 class OpenAIClient:
+    """An OpenAI-compatible chat client configured from settings.api.
+
+    Request handlers must not reconfigure the shared module-level ``client``:
+    two concurrent requests (a batch enhance awaiting each scene, a
+    storyboard on another endpoint) would then send with each other's
+    endpoint, key and model. ``for_request`` builds a request-local client
+    instead."""
+
     def __init__(self):
         self.reload_from_settings()
+
+    @classmethod
+    def for_request(cls, endpoint: Optional[str] = None, api_key: Optional[str] = None,
+                    model: Optional[str] = None, temperature: Optional[float] = None,
+                    thinking: Optional[bool] = None) -> "OpenAIClient":
+        """A fresh client from the current settings with this request's
+        overrides applied (the stored key still only goes to the stored
+        endpoint, see apply_request_endpoint). Nothing shared is mutated."""
+        c = cls()
+        c.apply_request_endpoint(endpoint, api_key)
+        if model:
+            c.update_config(model=model)
+        if temperature is not None:
+            c.update_config(temperature=temperature)
+        if thinking is not None:
+            c.update_config(thinking=thinking)
+        return c
 
     def reload_from_settings(self):
         self.endpoint = settings.api.endpoint

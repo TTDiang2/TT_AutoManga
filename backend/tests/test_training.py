@@ -160,7 +160,8 @@ def test_render_config_keeps_the_sf_recipe():
                  "      save_every: 500", "      max_step_saves_to_keep: 3",
                  "    - folder_path: \"/h/ds\"", "      caption_ext: txt",
                  "      caption_dropout_rate: 0.05", "      cache_latents_to_disk: true",
-                 "      - 768", "      - 1024", "      batch_size: 1", "      steps: 1500",
+                 "      resolution: [512, 768]", "      batch_size: 1", "      steps: 1500",
+                 "      cache_text_embeddings: false",
                  "      train_unet: true", "      train_text_encoder: false",
                  "      gradient_checkpointing: true", "      noise_scheduler: ddpm",
                  "      optimizer: adamw8bit", "      lr: 0.0001", "      dtype: bf16",
@@ -173,6 +174,19 @@ def test_render_config_keeps_the_sf_recipe():
         name="n", trigger="t", folder_path="/f", base_model="/b", steps=10, prompts=["p"],
         sampling=True).splitlines()
     assert "{{" not in text
+
+
+def test_render_config_carries_the_configured_resolution():
+    """settings training.resolution: 1024 OOMs on the 8 GB 3070 with
+    full-size panels, so the buckets are a setting (default [512, 768])."""
+    text = tr.render_config(name="n", trigger="t", folder_path="/f", base_model="/b", steps=10,
+                            prompts=["p"], resolution=[512, 768, 1024],
+                            cache_text_embeddings=True)
+    assert "      resolution: [512, 768, 1024]" in text.splitlines()
+    assert "      cache_text_embeddings: true" in text.splitlines()
+    assert "      resolution: [512, 768]" in tr.render_config(
+        name="n", trigger="t", folder_path="/f", base_model="/b", steps=10,
+        prompts=["p"]).splitlines()
 
 
 def test_log_lines_keeps_the_last_tqdm_redraw():
@@ -339,6 +353,19 @@ def test_job_pipeline_end_to_end(client, env):
     assert char["lora"] == {"name": "Comics/am_nova", "weight": 0.8, "trigger": "amnova"}
     poll_calls = [c for c in _calls(env) if "AMSTAT" in c]
     assert "tail -c +1 " in poll_calls[0] and "tail -c +1 " not in poll_calls[1]
+
+
+def test_job_config_carries_the_settings_resolution(client, env):
+    """the written config.yaml uses settings.training.resolution (and the
+    text-embedding cache switch), not the recipe's 768/1024."""
+    config.settings.training.resolution = [640, 896]
+    config.settings.training.cacheTextEmbeddings = True
+    _dataset(client, n=15)
+    assert client.post("/api/training/jobs", json={"slug": "nova"}).status_code == 200
+    _wait_worker()
+    cfg = (env.remote / "written.yaml").read_text().splitlines()
+    assert "      resolution: [640, 896]" in cfg
+    assert "      cache_text_embeddings: true" in cfg
 
 
 def test_job_fails_on_missing_base_model(client, env):

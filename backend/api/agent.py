@@ -195,14 +195,12 @@ async def agent_storyboard(req: StoryboardRequest):
         raise HTTPException(status_code=400, detail="Text cannot be empty")
     project = _load_or_404(req.project_id)
 
-    llm_client.reload_from_settings()
-    # masked echoes are ignored; the stored key is only sent to the stored
-    # endpoint (a foreign endpoint needs the request's own api_key)
-    llm_client.apply_request_endpoint(req.endpoint, req.api_key)
-    if req.model:
-        llm_client.update_config(model=req.model)
+    # a request-local client; masked echoes are ignored and the stored key is
+    # only sent to the stored endpoint (a foreign endpoint needs the
+    # request's own api_key)
+    llm = llm_client.for_request(req.endpoint, req.api_key, model=req.model)
 
-    result = await llm_client.generate_storyboard(req.text, req.detail_level)
+    result = await llm.generate_storyboard(req.text, req.detail_level)
     if result.get("error"):
         raise HTTPException(status_code=502,
                             detail=f"LLM: {result['error']}")

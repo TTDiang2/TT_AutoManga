@@ -116,6 +116,13 @@ class TrainingConfig(BaseModel):
     # on the 8 GB RTX 3070 the 832x1216 VAE decode next to the low_vram
     # model runs out of CUDA memory and kills the job.
     sampling: bool = False
+    # ai-toolkit dataset buckets (datasets[].resolution): each a multiple of
+    # 64 in 256..1536. 1024 ran out of CUDA memory at step 5 on the 8 GB RTX
+    # 3070 with full-size (~1 MP) comic panels; 432x1024 sprites were fine.
+    resolution: List[int] = [512, 768]
+    # ai-toolkit train.cache_text_embeddings: encode the captions once
+    # (before training) instead of every step; opt-in, off = the sf_* recipe
+    cacheTextEmbeddings: bool = False
 
 
 class AppSettings(BaseModel):
