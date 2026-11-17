@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { findBlock } from './aiBlock';
+import { findBlock, resolveBlock } from './aiBlock';
+import type { OutlineWords } from './outline';
 
 const SCRIPT = [
   'title: T',            // 1
@@ -71,5 +72,41 @@ describe('findBlock', () => {
     expect(b).toMatchObject({ kind: 'panel', firstLine: 6, lastLine: 10 });
     expect(slice(crlf, b)).toBe('PANEL h=1.2\r\ncast: kim\r\nKim sits.\r\nKIM: Hi.\r\n\r\n');
     expect(findBlock(crlf, offsetOfLine(crlf, 12), offsetOfLine(crlf, 12))).toMatchObject({ uncut: true, todo: true });
+  });
+});
+
+const WORDS: OutlineWords = { page: 'Page {n}', uncutPage: 'Uncut page {n}', noPlace: 'No place', panel: 'Panel', scene: 'Scene' };
+
+describe('resolveBlock (the popover target and its "change target")', () => {
+  const caretAt = (line: number) => { const o = offsetOfLine(SCRIPT, line); return { start: o, end: o }; };
+
+  it('keeps the popover\'s own detection without a kind', () => {
+    expect(resolveBlock(SCRIPT, caretAt(8), null, 0, WORDS)).toEqual(findBlock(SCRIPT, offsetOfLine(SCRIPT, 8), offsetOfLine(SCRIPT, 8)));
+    const sel = { start: offsetOfLine(SCRIPT, 8), end: offsetOfLine(SCRIPT, 9) };
+    expect(resolveBlock(SCRIPT, sel, 'selection', sel.start, WORDS)).toMatchObject({ kind: 'selection', firstLine: 8, lastLine: 8 });
+  });
+
+  it('re-targets the panel, scene and page around the same anchor, with labels and uncut flags', () => {
+    const caret = caretAt(8), anchor = caret.start;
+    const panel = resolveBlock(SCRIPT, caret, 'panel', anchor, WORDS);
+    expect(panel).toMatchObject({ kind: 'panel', firstLine: 6, lastLine: 10, label: 'Panel 1.1', uncut: false });
+    const scene = resolveBlock(SCRIPT, caret, 'scene', anchor, WORDS);
+    // 1.1 and 1.u1 share no place (none set): one scene of the regular page; the uncut page is a scene of its own
+    expect(scene).toMatchObject({ kind: 'scene', firstLine: 6, lastLine: 13, label: 'Scene: No place · 1.1–1.u1', todo: true });
+    const page = resolveBlock(SCRIPT, caret, 'page', anchor, WORDS);
+    expect(page).toMatchObject({ kind: 'page', firstLine: 3, lastLine: 13, label: 'Page 1' });
+    const uncut = resolveBlock(SCRIPT, caretAt(16), 'scene', offsetOfLine(SCRIPT, 16), WORDS);
+    expect(uncut).toMatchObject({ firstLine: 15, lastLine: 17, uncut: true, label: 'Scene: No place · u1.1' });
+  });
+
+  it('finds the target again after an edit above it', () => {
+    const edited = 'title: T\n// a new comment line\n' + SCRIPT.slice('title: T\n'.length);
+    const anchor = offsetOfLine(edited, 9);   // Kim sits., one line further down now
+    const b = resolveBlock(edited, { start: anchor, end: anchor }, 'panel', anchor, WORDS)!;
+    expect(edited.slice(b.start, b.end).startsWith('PANEL h=1.2\n')).toBe(true);
+  });
+
+  it('is null in the script header', () => {
+    for (const k of ['panel', 'scene', 'page'] as const) expect(resolveBlock(SCRIPT, caretAt(1), k, 0, WORDS)).toBeNull();
   });
 });

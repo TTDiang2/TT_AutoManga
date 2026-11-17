@@ -92,6 +92,19 @@ _MARKER_RE = re.compile(r"^\s*(PAGE|PANEL)\b")
 _UNCUT_MARK_RE = re.compile(r"^(\s*(?:PAGE|PANEL)\s+(?:\d+\s+)?uncut)(\s+todo\b)?")
 _PANEL_RATING_RE = re.compile(r"^\s*rating\s*:", re.I)
 _HEADER_RATING_RE = re.compile(r"^\s*rating\s*:\s*(\S+)", re.I)
+# the prompt's own section markers: distinctive, so an answer that echoes a section can be cut there
+SEC_HEADER, SEC_BEFORE, SEC_AFTER, SEC_BLOCK, SEC_END = (
+    "<<<SCRIPT_HEADER>>>", "<<<CONTEXT_BEFORE>>>", "<<<CONTEXT_AFTER>>>", "<<<BLOCK>>>", "<<<END>>>")
+# a line opening one of the prompt's sections (these markers, the older plain labels, or a TASK/instruction line)
+_SECTION_RE = re.compile(
+    r"^\s*(?:<<<\s*/?\s*(?:SCRIPT_HEADER|CONTEXT_BEFORE|CONTEXT_AFTER|BLOCK|END)\b[^>\n]*>>>"
+    r"|<<<BLOCK\b|BLOCK>>>"
+    r"|SCRIPT HEADER:|CONTEXT (?:BEFORE|AFTER) THE BLOCK\b|BLOCK TO REWRITE\b"
+    r"|TASK: (?:Tighten|Enrich|Draft|Follow)\b|AUTHOR'S (?:EXTRA )?INSTRUCTION:)")
+_BLOCK_START_RE = re.compile(r"^[ \t]*<<<BLOCK>>>[^\n]*\n?", re.M)
+_BLOCK_END_RE = re.compile(r"^[ \t]*<<<END>>>", re.M)
+# actions that must keep the block's PAGE/PANEL marker lines as they are
+STRUCTURE_KEPT = ("tighten_dialogue", "enrich_description")
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)(?:\n```|\Z)", re.S)
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 _CHATTER_RE = re.compile(r"^(here(?:'s| is| are)|sure\b|okay\b|ok\b|certainly|below is|the rewritten|rewritten)", re.I)
@@ -261,17 +274,19 @@ def _build_messages(lines: List[str], first_page: int, lo: int, hi: int, block: 
     before_from = max(first_page, lo - CONTEXT_LINES)
     before = lines[before_from:lo] if lo > first_page else []
     after = lines[hi + 1:hi + 1 + CONTEXT_LINES]
-    parts = ["SCRIPT HEADER:", "\n".join(header) or "(none)", ""]
+    # the context first (read-only), then the block, then the task last
+    parts = [f"{SEC_HEADER} (the script's header; read only)", "\n".join(header) or "(none)", ""]
     if before:
-        parts += ["CONTEXT BEFORE THE BLOCK (for continuity; do not return it):", "\n".join(before), ""]
-    parts += [f"BLOCK TO REWRITE (script lines {lo + 1}-{hi + 1}{', an uncut block: mature, adults only' if uncut_block else ''}):",
-              "<<<BLOCK", block.strip("\n"), "BLOCK>>>", ""]
+        parts += [f"{SEC_BEFORE} (the script just before the block; read only, never return it)", "\n".join(before), ""]
     if after:
-        parts += ["CONTEXT AFTER THE BLOCK (for continuity; do not return it):", "\n".join(after), ""]
+        parts += [f"{SEC_AFTER} (the script just after the block; read only, never return it)", "\n".join(after), ""]
+    parts += [f"{SEC_BLOCK} (script lines {lo + 1}-{hi + 1}{', an uncut block: mature, adults only' if uncut_block else ''})",
+              block.strip("\n"), SEC_END, ""]
     parts += ["TASK: " + ACTION_PROMPTS[action]]
     if instruction:
         parts += [("AUTHOR'S INSTRUCTION: " if action == "custom" else "AUTHOR'S EXTRA INSTRUCTION: ") + instruction]
-    parts += ["", "Return only the rewritten block, starting with its first line."]
+    parts += ["", f"Return only the rewritten block, between a {SEC_BLOCK} line and an {SEC_END} line: nothing of the "
+              "header or the context, nothing after it."]
     return [{"role": "user", "content": "\n".join(parts).replace("\r", "")}]
 
 
@@ -279,11 +294,26 @@ def _clean(answer: str, original: str) -> str:
     """The model's answer as a drop-in replacement for original: no think block, fences or chatter, and the
     original's leading/trailing whitespace and line endings."""
     s = _THINK_RE.sub("", answer or "").replace("\r\n", "\n")
+    m = _BLOCK_START_RE.search(s)
+    if m:
+        # the answer as asked for: between <<<BLOCK>>> and <<<END>>> (or the end)
+        s = s[m.end():]
+        e = _BLOCK_END_RE.search(s)
+        if e:
+            s = s[:e.start()]
     m = _FENCE_RE.search(s)
     if m:
         s = m.group(1)
-    s = s.replace("<<<BLOCK", "").replace("BLOCK>>>", "")
     body = s.strip("\n").split("\n")
+    # an echoed prompt section (the context after the block, say) ends the answer; a marker line before any
+    # content is dropped
+    while body and (not body[0].strip() or _SECTION_RE.match(body[0])):
+        body = body[1:]
+    cut = next((i for i, l in enumerate(body) if _SECTION_RE.match(l)), None)
+    if cut is not None:
+        body = body[:cut]
+    while body and not body[-1].strip():
+        body = body[:-1]
     orig_lines = [l for l in original.replace("\r\n", "\n").split("\n") if l.strip()]
     starts_marker = bool(orig_lines and _MARKER_RE.match(orig_lines[0]))
     if starts_marker:
@@ -301,6 +331,27 @@ def _clean(answer: str, original: str) -> str:
     trail = trail[trail.find("\n"):] if "\n" in trail else ""
     out = lead + core + trail
     return out.replace("\n", "\r\n") if "\r\n" in original else out
+
+
+def _markers(block: str) -> List[str]:
+    """The block's PAGE/PANEL marker lines, whitespace normalised."""
+    return [" ".join(l.split()) for l in block.replace("\r\n", "\n").split("\n") if _MARKER_RE.match(l)]
+
+
+def _structure_error(original: str, suggestion: str) -> Optional[str]:
+    """None when the suggestion has the original's PAGE/PANEL marker lines, in order and with their arguments."""
+    want, got = _markers(original), _markers(suggestion)
+    if want == got:
+        return None
+    n = sum(1 for l in want if l.startswith("PANEL"))
+    m = sum(1 for l in got if l.startswith("PANEL"))
+    msg = f"the model changed the panel structure (expected {n} panel{'s' if n != 1 else ''}, got {m})"
+    if len(want) == len(got):
+        i = next(i for i, (a, b) in enumerate(zip(want, got)) if a != b)
+        msg += f": \"{want[i]}\" became \"{got[i]}\""
+    elif n == m:
+        msg += f": expected {len(want)} PAGE/PANEL lines, got {len(got)}"
+    return msg
 
 
 def _fix_todo(suggestion: str, original: str, remove: bool) -> str:
@@ -405,6 +456,11 @@ async def rewrite_block(name: str, req: RewriteRequest):
     new_lines = new_text.split("\n")
     plan = await asyncio.to_thread(cm._run_plan, path, new_text, False, _has_uncut(new_lines))
     status = _plan_status(plan)
+    if req.action in STRUCTURE_KEPT:
+        # a duplicated or dropped panel is valid script, so the plan can't catch it: compare the markers
+        broken = _structure_error(original, suggestion)
+        if broken:
+            status = {"ok": False, "error": broken, "line": lo + 1}
     if status["ok"] and guarded:
         n_lo, n_hi = _block_lines(new_text, start, start + len(suggestion))
         refused = await asyncio.to_thread(_minor_check, path, new_text, n_lo, n_hi)

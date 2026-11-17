@@ -2,7 +2,9 @@
     (from its PANEL line to the line before the next PANEL/PAGE), or its whole PAGE. Offsets are string indices
     (UTF-16 code units), as the server takes them. Works on CRLF text (lines keep their \r). */
 
-export type BlockKind = 'selection' | 'panel' | 'page';
+import { parseOutline, targetAt, targetLabel, type OutlineKind, type OutlineWords } from './outline';
+
+export type BlockKind = 'selection' | 'panel' | 'scene' | 'page';
 
 export interface AiBlock {
   start: number;
@@ -12,6 +14,7 @@ export interface AiBlock {
   lastLine: number;
   uncut: boolean;      // every line is inside a PAGE uncut / PANEL uncut block (Draft uncut scene is offered)
   todo: boolean;       // it holds an uncut todo marker
+  label?: string;      // an outline target's label ("Scene: Cafe, day · 2.1–3.4")
 }
 
 const MARKER = /^\s*(PAGE|PANEL)\b/;
@@ -83,4 +86,15 @@ export function findBlock(text: string, selStart: number, selEnd: number, page =
   const panel = panels.find(p => p.line <= line && line <= p.end);
   if (panel && !page) return describe(offsetOf(panel.line), offsetOf(panel.end + 1), 'panel');
   return describe(offsetOf(pg.line), offsetOf(pg.end + 1), 'page');
+}
+
+export type TargetKind = OutlineKind | 'selection';
+
+/** The block the popover works on: `kind` null = its own detection (the selection, else the panel at the caret, else
+    the page); else that outline block around `anchor`. */
+export function resolveBlock(text: string, caret: { start: number; end: number }, kind: TargetKind | null, anchor: number, words: OutlineWords): AiBlock | null {
+  if (kind === null || kind === 'selection') return findBlock(text, caret.start, caret.end);
+  const t = targetAt(parseOutline(text), anchor, kind);
+  const b = t && findBlock(text, t.start, t.end);
+  return b ? { ...b, kind, label: targetLabel(t, words) } : null;
 }

@@ -143,3 +143,9 @@
 .ai-rewrite-plan.ok { color: var(--text-secondary); }
 .ai-rewrite-plan.ok svg { color: var(--success); }
 .ai-rewrite-plan.bad { color: var(--error); }
+
+.ai-rewrite-target select {
+  height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+}

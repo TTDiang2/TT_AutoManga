@@ -339,3 +339,89 @@ def test_structure_and_uncut_lines():
         (28, len(lines) - 1, False, False)]
     assert not rw._line_uncut(6, pages, panels)       # layout of a regular page
     assert rw._line_uncut(16, pages, panels) and rw._line_uncut(23, pages, panels) and rw._line_uncut(26, pages, panels)
+
+
+# ---------------------------------------------------------------------------
+# echoed prompt sections and the panel structure (a live cydonia answer to tighten_dialogue on
+# rooftop-static 1.2 returned the block followed by the "CONTEXT AFTER" section, i.e. the next panels)
+# ---------------------------------------------------------------------------
+
+_REWRITTEN = ("PANEL\nplace: diner, evening\ncast: kim(casual)\nshot: medium\nKim sits in a booth.\n"
+              "KIM: I waited. Forever.")
+_ECHO = "PANEL uncut todo\ncast: kim(casual)\n// TODO: describe the panel\n\nPANEL uncut\ncast: kim(casual), li\nTwo at the counter.\n"
+
+
+@pytest.mark.parametrize("heading", [
+    "<<<CONTEXT_AFTER>>> (the script just after the block; read only, never return it)",
+    "CONTEXT AFTER THE BLOCK (for continuity; do not return it):",   # the older prompt's label
+    "<<<END>>>",
+])
+def test_echoed_context_is_cut(client, repo, llm, heading):
+    start, end = _span(SCRIPT, 9, 15)
+    llm.answer = f"{_REWRITTEN}\n\n\n{heading}\n{_ECHO}"
+    r = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "tighten_dialogue"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    # cut at the heading; the trailing blank lines trimmed back to the original block's one blank line
+    assert d["suggestion"] == _REWRITTEN + "\n\n"
+    assert d["plan"]["ok"] is True
+    assert _calls(repo)[-1]["text"].count("PANEL uncut todo") == 1   # the next panels are not duplicated
+
+
+def test_answer_between_block_markers(client, repo, llm):
+    start, end = _span(SCRIPT, 9, 15)
+    llm.answer = f"Sure, here it is:\n<<<BLOCK>>> (script lines 9-15)\n{_REWRITTEN}\n<<<END>>>\n\n<<<CONTEXT_AFTER>>>\n{_ECHO}"
+    d = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "tighten_dialogue"}).json()
+    assert d["suggestion"] == _REWRITTEN + "\n\n" and d["plan"]["ok"] is True
+
+
+def test_prompt_puts_context_first_and_task_last(client, repo, llm):
+    start, end = _span(SCRIPT, 9, 15)
+    llm.answer = _REWRITTEN
+    _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "tighten_dialogue"})
+    user = llm.sent[0]["messages"][1]["content"]
+    i_head, i_after, i_block, i_end, i_task = (user.index(rw.SEC_HEADER), user.index(rw.SEC_AFTER),
+                                               user.index(rw.SEC_BLOCK), user.index(rw.SEC_END), user.index("TASK:"))
+    assert i_head < i_after < i_block < i_end < i_task
+    assert "KIM: I have been waiting" in user[i_block:i_end] and "PANEL uncut todo" in user[i_after:i_block]
+    assert user.rstrip().endswith("nothing after it.")
+
+
+def test_duplicated_panels_fail_the_structure_check(client, repo, llm):
+    # the echo without any heading: valid script (the plan passes), but the next panels would be doubled
+    start, end = _span(SCRIPT, 9, 15)
+    llm.answer = f"{_REWRITTEN}\n\n{_ECHO}"
+    d = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "tighten_dialogue"}).json()
+    assert d["plan"] == {"ok": False, "line": 9,
+                         "error": "the model changed the panel structure (expected 1 panel, got 3)"}
+    # a changed marker argument too
+    llm.answer = _REWRITTEN.replace("PANEL", "PANEL h=1.2", 1)
+    d = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "enrich_description"}).json()
+    assert d["plan"]["ok"] is False
+    assert d["plan"]["error"] == ('the model changed the panel structure (expected 1 panel, got 1): '
+                                  '"PANEL" became "PANEL h=1.2"')
+    # same markers, other whitespace: fine
+    llm.answer = _REWRITTEN.replace("PANEL", "PANEL  ", 1)
+    assert _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "enrich_description"}).json()["plan"]["ok"]
+
+
+def test_custom_and_draft_uncut_may_change_the_structure(client, repo, llm):
+    start, end = _span(SCRIPT, 9, 15)
+    llm.answer = f"{_REWRITTEN}\n\nPANEL\ncast: kim(casual)\nKim leaves.\n\n<<<CONTEXT_AFTER>>>\n{_ECHO}"
+    d = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "custom", "instruction": "split it"}).json()
+    assert d["plan"]["ok"] is True
+    assert d["suggestion"].endswith("Kim leaves.\n\n") and "PANEL uncut" not in d["suggestion"]   # the cut still applies
+    start, end = _span(SCRIPT, 16, 19)
+    llm.answer = "PANEL uncut\ncast: kim(wearing a robe)\nKim.\n\nPANEL uncut\ncast: kim\nKim again.\n<<<CONTEXT_AFTER>>>\nPANEL uncut\n"
+    d = _post(client, {"text": SCRIPT, "start": start, "end": end, "action": "draft_uncut"}).json()
+    assert d["plan"]["ok"] is True and d["suggestion"].count("PANEL uncut") == 2
+
+
+def test_clean_unit():
+    orig = "PANEL\nKIM: Hi.\n\n"
+    assert rw._clean("PANEL\nKIM: Yo.\n\n   \n\nCONTEXT BEFORE THE BLOCK (x):\nPAGE\n", orig) == "PANEL\nKIM: Yo.\n\n"
+    # a marker line before any content is dropped, not the whole answer
+    assert rw._clean("<<<BLOCK>>>\nPANEL\nKIM: Yo.", orig) == "PANEL\nKIM: Yo.\n\n"
+    assert rw._clean("<<<SCRIPT_HEADER>>>\nPANEL\nKIM: Yo.", orig) == "PANEL\nKIM: Yo.\n\n"
+    assert rw._structure_error("PAGE 2\nlayout: 1\nPANEL\n", "PAGE 2\nPANEL\nPANEL\n").startswith(
+        "the model changed the panel structure (expected 1 panel, got 2)")
