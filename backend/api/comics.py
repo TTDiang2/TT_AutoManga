@@ -5,8 +5,9 @@ The Comics repo (COMICS_DIR, default ~/Projects/Comics) holds the scripts in
 scripts/*.comic and the converter; its output lands in out/<name>/. This
 router lists and edits the scripts, runs one conversion at a time (SwarmUI
 paints one panel at a time anyway) detached from the server, serves its log
-incrementally, and serves the page
-PNGs comic.js renders. Script names are restricted to [a-z0-9_-] so no
+incrementally, and serves the page PNGs, panels and seed variants comic.js
+renders. /plan asks comic.js for its plan of a script (saved or unsaved
+text) without painting, for live checking and the panel view. Script names are restricted to [a-z0-9_-] so no
 request can reach outside the repo.
 """
 import json
@@ -24,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from ..core.config import DATA_DIR, atomic_write_json
 
@@ -35,7 +36,11 @@ router = APIRouter(prefix="/api/comics", tags=["comics"])
 COMICS_DIR = Path(os.environ.get("COMICS_DIR", Path.home() / "Projects" / "Comics")).expanduser()
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,80}$")
 _PAGE_FILE_RE = re.compile(r"^(page|draft)_\d{2}\.png$")
-_MODES = {"paint": [], "no-paint": ["--no-paint"], "dry-run": ["--dry-run"]}
+_PANEL_FILE_RE = re.compile(r"^p\d{2}-\d{2}(\.prev)?\.png$")
+_VARIANT_FILE_RE = re.compile(r"^p\d{2}-\d{2}_seed\d{1,12}\.png$")
+_PANEL_ID_RE = re.compile(r"^\d+\.\d+$")
+_MODES = ("paint", "no-paint", "dry-run", "repaint", "variants")
+_PLAN_TIMEOUT = 20          # seconds for comic.js --plan
 _LOG_LIMIT = 5000           # max lines returned per poll
 
 
@@ -60,6 +65,12 @@ def _node() -> str:
     if not found:
         raise HTTPException(status_code=500, detail="node is not installed (needed to run the converter)")
     return found
+
+
+def _node_env(node: str) -> Dict[str, str]:
+    env = dict(os.environ)
+    env["PATH"] = os.pathsep.join([str(Path(node).parent), env.get("PATH", "")])
+    return env
 
 
 def _summary(path: Path) -> Dict[str, Any]:
@@ -143,6 +154,16 @@ async def list_pages(name: str):
                        "mtime": int((out / f).stat().st_mtime)} for f in pages]}
 
 
+def _png(name: str, file: str, pattern: "re.Pattern[str]", sub: str, what: str) -> FileResponse:
+    _script_path(name)
+    if not pattern.fullmatch(file):
+        raise HTTPException(status_code=400, detail=f"not a {what} file")
+    path = _out_dir(name) / sub / file
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"{what} not painted")
+    return FileResponse(path, media_type="image/png")
+
+
 @router.get("/scripts/{name}/file/{file}")
 async def page_file(name: str, file: str):
     _script_path(name)
@@ -152,6 +173,59 @@ async def page_file(name: str, file: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="page not rendered")
     return FileResponse(path, media_type="image/png")
+
+
+@router.get("/scripts/{name}/panel/{file}")
+async def panel_file(name: str, file: str):
+    """A painted panel (p01-02.png) or the one it replaced (p01-02.prev.png)."""
+    return _png(name, file, _PANEL_FILE_RE, "panels", "panel")
+
+
+@router.get("/scripts/{name}/variant/{file}")
+async def variant_file(name: str, file: str):
+    """A seed variant painted with --variants (p01-02_seed4301.png)."""
+    return _png(name, file, _VARIANT_FILE_RE, "variants", "variant")
+
+
+class PlanRequest(BaseModel):
+    text: Optional[str] = None   # unsaved editor text; None plans the saved script
+    face: bool = False           # as a run with the face pass would key the panels
+
+
+@router.post("/scripts/{name}/plan")
+def plan_script(name: str, req: PlanRequest):
+    """comic.js --plan: every panel's prompt, seed, cache state and variants,
+    or {ok: false, error, line} for a script error. Read-only, so it is
+    allowed while a run is going. A plain def: FastAPI runs it in a thread,
+    so the wait for node doesn't block the server."""
+    path = _script_path(name)
+    if req.text is None and not path.exists():
+        raise HTTPException(status_code=404, detail="script not found")
+    if not (COMICS_DIR / "comic.js").exists():
+        raise HTTPException(status_code=404, detail=f"no comic.js in {COMICS_DIR}")
+    node = _node()
+    args = [node, str(COMICS_DIR / "comic.js"), str(path), "--plan"]
+    if req.text is not None:
+        args.append("--stdin")
+    if req.face:
+        args.append("--face")
+    try:
+        proc = subprocess.run(args, cwd=str(COMICS_DIR), env=_node_env(node),
+                              input=req.text if req.text is not None else "",
+                              capture_output=True, text=True, timeout=_PLAN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail=f"comic.js --plan took over {_PLAN_TIMEOUT}s")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"could not run comic.js: {e}")
+    lines = [l for l in proc.stdout.splitlines() if l.strip()]
+    try:
+        plan = json.loads(lines[-1])
+        if not isinstance(plan, dict) or "ok" not in plan:
+            raise ValueError("no ok field")
+    except (IndexError, ValueError):
+        tail = (proc.stderr or proc.stdout or "").strip()[-500:]
+        raise HTTPException(status_code=500, detail=f"comic.js --plan failed (exit {proc.returncode}): {tail}")
+    return plan
 
 
 # ---------------------------------------------------------------------------
@@ -332,8 +406,39 @@ def _running_run() -> Optional[Dict[str, Any]]:
 
 class StartRunRequest(BaseModel):
     script: str
-    mode: str = "paint"      # paint | no-paint | dry-run
+    mode: str = "paint"      # paint | no-paint | dry-run | repaint | variants
     face: bool = False
+    panels: List[str] = []   # repaint / variants: panel ids, "1.2"
+    force: bool = False      # repaint: paint even a current panel (else only stale ones, or a pinned variant)
+    variants: Optional[int] = Field(default=None, ge=2, le=8)
+
+    @field_validator("panels")
+    @classmethod
+    def _panel_ids(cls, v: List[str]) -> List[str]:
+        bad = [p for p in v if not _PANEL_ID_RE.fullmatch(p)]
+        if bad:
+            raise ValueError(f"panel ids look like 1.2, not {bad[0]!r}")
+        return v
+
+
+def _mode_args(req: StartRunRequest) -> List[str]:
+    """automanga.js arguments for a run mode."""
+    if req.mode not in _MODES:
+        raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(_MODES)}")
+    if req.mode in ("repaint", "variants") and not req.panels:
+        raise HTTPException(status_code=400, detail=f"{req.mode} needs panels")
+    if req.mode == "paint":
+        return []
+    if req.mode == "no-paint":
+        return ["--no-paint"]
+    if req.mode == "dry-run":
+        return ["--dry-run"]
+    panels = ["--panels", ",".join(req.panels)]
+    if req.mode == "repaint":
+        return panels + (["--force"] if req.force else [])
+    if req.variants is None:
+        raise HTTPException(status_code=400, detail="variants needs a count (2-8)")
+    return panels + ["--variants", str(req.variants)]
 
 
 @router.post("/runs")
@@ -341,13 +446,12 @@ async def start_run(req: StartRunRequest):
     path = _script_path(req.script)
     if not path.exists():
         raise HTTPException(status_code=404, detail="script not found")
-    if req.mode not in _MODES:
-        raise HTTPException(status_code=400, detail=f"mode must be one of {sorted(_MODES)}")
+    mode_args = _mode_args(req)
     busy = _running_run()
     if busy:
         raise HTTPException(status_code=409, detail=f"already converting {busy['script']}")
     node = _node()
-    args = [node, str(COMICS_DIR / "automanga.js"), str(path), *_MODES[req.mode]]
+    args = [node, str(COMICS_DIR / "automanga.js"), str(path), *mode_args]
     if req.face:
         args.append("--face")
 
@@ -364,8 +468,7 @@ async def start_run(req: StartRunRequest):
              f"echo $? > {q(str(exit_file) + '.tmp')}; "
              f"mv -f {q(str(exit_file) + '.tmp')} {q(str(exit_file))}")
 
-    env = dict(os.environ)
-    env["PATH"] = os.pathsep.join([str(Path(node).parent), env.get("PATH", "")])
+    env = _node_env(node)
     env.setdefault("AUTOMANGA_URL", f"http://127.0.0.1:{os.environ.get('AUTOMANGA_PORT', '5180')}")
     try:
         proc = subprocess.Popen(["/bin/sh", "-c", shell], cwd=str(COMICS_DIR), env=env,
