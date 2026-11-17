@@ -14,6 +14,7 @@ Uncut editions: a script's PAGE uncut / PANEL uncut blocks make a second comic
 (comic.js --uncut, out/<name>-uncut/, its own AutoManga project). Runs and
 plans take ``uncut: true``; the file endpoints take ``?uncut=1``.
 """
+import asyncio
 import json
 import logging
 import os
@@ -23,11 +24,12 @@ import shutil
 import signal
 import subprocess
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -160,6 +162,83 @@ async def save_script(name: str, req: SaveScriptRequest):
     tmp.write_text(req.text, encoding="utf-8")
     tmp.replace(path)
     return _summary(path)
+
+
+UPLOAD_MAX_FILES = 20
+UPLOAD_MAX_BYTES = 1024 * 1024
+_UPLOAD_EXT = (".comic", ".txt")
+
+
+def upload_name(filename: str) -> Optional[str]:
+    """The script name for an uploaded file: its base name without .comic/.txt, spaces and other characters a
+    name can't hold turned into "-" ("Rooftop Static.comic" -> "rooftop-static"); None when nothing is left."""
+    base = re.split(r"[\\/]", filename or "")[-1]
+    for ext in _UPLOAD_EXT:
+        if base.lower().endswith(ext):
+            base = base[: -len(ext)]
+            break
+    base = unicodedata.normalize("NFKD", base).encode("ascii", "ignore").decode()   # "é" -> "e"
+    name = re.sub(r"[^a-z0-9_-]+", "-", base.strip().lower()).strip("-_")[:81]
+    return name if _NAME_RE.fullmatch(name) else None
+
+
+@router.post("/scripts/upload")
+async def upload_scripts(files: List[UploadFile] = File(...), overwrite: bool = Form(False)):
+    """Add .comic files to the Comics repo's scripts/. Each file gets its own result:
+    {file, name, status: saved|replaced|exists|busy|invalid, error?, plan?}. An existing script is only replaced
+    with overwrite (status "exists" otherwise, nothing written), never while it is being converted ("busy").
+    A saved script is checked with comic.js --plan; a script error still saves (fix it in the editor)."""
+    if len(files) > UPLOAD_MAX_FILES:
+        raise HTTPException(status_code=400, detail=f"at most {UPLOAD_MAX_FILES} files at a time")
+    running = _running_run()
+    results: List[Dict[str, Any]] = []
+    taken: set = set()
+    for f in files:
+        res: Dict[str, Any] = {"file": f.filename or "", "name": None}
+        results.append(res)
+        if not (f.filename or "").lower().endswith(_UPLOAD_EXT):
+            res.update(status="invalid", error="not a .comic file")
+            continue
+        name = upload_name(f.filename or "")
+        if not name:
+            res.update(status="invalid", error="no usable name: use letters, digits, - and _")
+            continue
+        res["name"] = name
+        if name in taken:
+            res.update(status="invalid", error=f"two files would both be {name}.comic")
+            continue
+        taken.add(name)
+        raw = await f.read(UPLOAD_MAX_BYTES + 1)
+        if len(raw) > UPLOAD_MAX_BYTES:
+            res.update(status="invalid", error="larger than 1 MB")
+            continue
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            res.update(status="invalid", error="not UTF-8 text")
+            continue
+        if "\x00" in text or not text.strip():
+            res.update(status="invalid", error="empty or not a text file")
+            continue
+        path = _script_path(name)
+        existed = path.exists()
+        if running and running["script"] == name:
+            res.update(status="busy", error="this script is being converted; upload it when the run ends")
+            continue
+        if existed and not overwrite:
+            res.update(status="exists", error=f"{name}.comic already exists")
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".comic.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+        res["status"] = "replaced" if existed else "saved"
+        try:
+            plan = await asyncio.to_thread(_run_plan, path, None)
+            res["plan"] = {"ok": bool(plan.get("ok")), "error": plan.get("error"), "line": plan.get("line")}
+        except HTTPException as e:
+            res["plan"] = {"ok": False, "error": str(e.detail), "line": None}
+    return {"results": results}
 
 
 @router.get("/scripts/{name}/pages")

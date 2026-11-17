@@ -241,3 +241,62 @@ def test_summary_counts_uncut_slots_and_serves_uncut_files(client, repo):
     assert client.get("/api/comics/scripts/u/panel/u01-02.png").status_code == 404
     assert client.get("/api/comics/scripts/u/panel/p01-u01.png?uncut=1").status_code == 404
     assert client.get("/api/comics/scripts/u/panel/x01-02.png?uncut=1").status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# upload
+# ---------------------------------------------------------------------------
+
+def _upload(client, files, **form):
+    return client.post("/api/comics/scripts/upload", files=[("files", f) for f in files],
+                       data={k: str(v).lower() for k, v in form.items()})
+
+
+def test_upload_name():
+    assert cm.upload_name("Rooftop Static.comic") == "rooftop-static"
+    assert cm.upload_name("C:\\x\\ep_7.COMIC") == "ep_7"
+    assert cm.upload_name("../../etc/passwd.comic") == "passwd"
+    assert cm.upload_name("Ünïcode!!.txt") == "unicode"
+    assert cm.upload_name("!!!.comic") is None and cm.upload_name(".comic") is None
+
+
+def test_upload_saves_checks_and_never_overwrites_silently(client, repo):
+    r = _upload(client, [("New One.comic", "\ufefftitle: New\nPAGE\n".encode(), "text/plain"),
+                         ("ok.comic", b"title: Replaced\n", "text/plain"),
+                         ("bad.comic", b"title: BROKEN\n", "text/plain"),
+                         ("pic.png", b"\x89PNG", "image/png"),
+                         ("bin.comic", b"\xff\xfe\x00", "application/octet-stream")])
+    assert r.status_code == 200, r.text
+    res = {x["file"]: x for x in r.json()["results"]}
+    assert res["New One.comic"]["status"] == "saved" and res["New One.comic"]["name"] == "new-one"
+    assert res["New One.comic"]["plan"]["ok"] is True
+    # the BOM is dropped
+    assert (repo / "scripts" / "new-one.comic").read_text(encoding="utf-8") == "title: New\nPAGE\n"
+    assert res["ok.comic"]["status"] == "exists"
+    assert (repo / "scripts" / "ok.comic").read_text(encoding="utf-8") == "title: Saved\n"
+    # a script error still saves, flagged
+    assert res["bad.comic"]["status"] == "saved"
+    assert res["bad.comic"]["plan"] == {"ok": False, "error": 'x.comic:3: unknown character "zork"', "line": 3}
+    assert res["pic.png"]["status"] == "invalid" and res["bin.comic"]["status"] == "invalid"
+    assert not (repo / "scripts" / "pic.comic").exists() and not (repo / "scripts" / "bin.comic").exists()
+    # with overwrite
+    r = _upload(client, [("ok.comic", b"title: Replaced\n", "text/plain")], overwrite=True)
+    assert r.json()["results"][0]["status"] == "replaced"
+    assert (repo / "scripts" / "ok.comic").read_text(encoding="utf-8") == "title: Replaced\n"
+
+
+def test_upload_limits(client, repo, monkeypatch):
+    r = _upload(client, [("a.comic", b"title: A\n", "text/plain"), ("A.comic", b"title: B\n", "text/plain")])
+    st = [x["status"] for x in r.json()["results"]]
+    assert st == ["saved", "invalid"]
+    monkeypatch.setattr(cm, "UPLOAD_MAX_BYTES", 10)
+    assert _upload(client, [("big.comic", b"title: " + b"x" * 20, "text/plain")]).json()["results"][0]["error"] == "larger than 1 MB"
+    files = [(f"s{i}.comic", b"title: x\n", "text/plain") for i in range(cm.UPLOAD_MAX_FILES + 1)]
+    assert _upload(client, files).status_code == 400
+
+
+def test_upload_refuses_the_running_script(client, repo, monkeypatch):
+    monkeypatch.setattr(cm, "_running_run", lambda: {"script": "ok"})
+    r = _upload(client, [("ok.comic", b"title: X\n", "text/plain")], overwrite=True)
+    assert r.json()["results"][0]["status"] == "busy"
+    assert (repo / "scripts" / "ok.comic").read_text(encoding="utf-8") == "title: Saved\n"

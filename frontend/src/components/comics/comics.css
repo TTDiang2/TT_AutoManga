@@ -33,6 +33,31 @@
   flex-shrink: 0;
 }
 
+.comics-list.dropping {
+  outline: 2px dashed var(--accent-primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+
+.comics-drop-hint,
+.comics-upload-notice {
+  padding: var(--space-xs) var(--space-sm);
+  margin-bottom: var(--space-sm);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm, 13px);
+  overflow-wrap: anywhere;
+}
+
+.comics-drop-hint { background: var(--bg-tertiary); color: var(--text-secondary); text-align: center; }
+
+.comics-upload-notice {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.comics-upload-notice.warn { background: color-mix(in srgb, var(--warning) 14%, transparent); }
+
 .comics-new {
   display: flex;
   gap: var(--space-xs);

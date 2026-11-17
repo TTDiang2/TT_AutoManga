@@ -622,6 +622,16 @@ which paints with comic.js and rebuilds the project here. Names are
 
 - `GET/PUT /api/comics/scripts[/{name}]` list, read, save (`{text}`; 409
   while that script is being converted).
+- `POST /api/comics/scripts/upload` (multipart: `files` up to 20, `overwrite`
+  false by default; the Comics tab's upload button and drop on the script list)
+  adds `.comic`/`.txt` files to `scripts/`. The name comes from the file name
+  (lower-cased, accents dropped, other characters `-`: "Rooftop Static.comic" →
+  `rooftop-static`); UTF-8 only (a BOM is dropped), ≤ 1 MB each. Per file
+  `{file, name, status: saved|replaced|exists|busy|invalid, error?, plan?}`:
+  an existing script is replaced only with `overwrite` (else `exists`, nothing
+  written) and never while it is being converted (`busy`); a saved script is
+  checked with `comic.js --plan` (`plan {ok, error, line}`) and kept even when
+  it has a script error.
 - `POST /api/comics/scripts/{name}/plan {text?, face?}` → `comic.js --plan`
   (`--stdin` when `text` is given, so unsaved text can be checked; the script
   need not exist then). Read-only, allowed during a run, 20 s timeout. Returns
