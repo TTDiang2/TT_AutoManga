@@ -886,17 +886,44 @@ async def build_cover(project_id: str, req: CoverRequest):
     return {"page": page}
 
 
-# curated onomatopoeia for the SFX text tool (zh / ja / en)
+# curated onomatopoeia for the SFX text tool: Chinese, Japanese and English
+# words (`lang`), each meaning in English and Chinese; the UI offers English
+# words in English and all of them in Chinese
 _SFX_PRESETS = [
-    {"word": "轰", "meaning": "爆炸、引擎"}, {"word": "砰", "meaning": "撞击"},
-    {"word": "咔嚓", "meaning": "断裂、快门"}, {"word": "咚", "meaning": "重击、心跳"},
-    {"word": "唰", "meaning": "快速掠过"}, {"word": "啪", "meaning": "拍击"},
-    {"word": "哗啦", "meaning": "水流、散落"}, {"word": "扑通", "meaning": "落水"},
-    {"word": "滴答", "meaning": "钟表"}, {"word": "嘶", "meaning": "撕裂、嘶鸣"},
-    {"word": "ざっ", "meaning": "斩击"}, {"word": "どん", "meaning": "轰响"},
-    {"word": "ごごご", "meaning": "轰鸣渐进"}, {"word": "ドキッ", "meaning": "心跳"},
-    {"word": "BOOM", "meaning": "explosion"}, {"word": "WHOOSH", "meaning": "fast movement"},
-    {"word": "CRACK", "meaning": "impact"}, {"word": "THUD", "meaning": "heavy hit"},
+    {"word": "轰", "lang": "zh", "meaning": "explosion, engine", "meaningZh": "爆炸、引擎"},
+    {"word": "砰", "lang": "zh", "meaning": "impact", "meaningZh": "撞击"},
+    {"word": "咔嚓", "lang": "zh", "meaning": "snap, shutter", "meaningZh": "断裂、快门"},
+    {"word": "咚", "lang": "zh", "meaning": "heavy blow, heartbeat", "meaningZh": "重击、心跳"},
+    {"word": "唰", "lang": "zh", "meaning": "swoosh past", "meaningZh": "快速掠过"},
+    {"word": "啪", "lang": "zh", "meaning": "slap", "meaningZh": "拍击"},
+    {"word": "哗啦", "lang": "zh", "meaning": "splash, scatter", "meaningZh": "水流、散落"},
+    {"word": "扑通", "lang": "zh", "meaning": "plop into water", "meaningZh": "落水"},
+    {"word": "滴答", "lang": "zh", "meaning": "tick-tock", "meaningZh": "钟表"},
+    {"word": "嘶", "lang": "zh", "meaning": "rip, hiss", "meaningZh": "撕裂、嘶鸣"},
+    {"word": "ざっ", "lang": "ja", "meaning": "slash", "meaningZh": "斩击"},
+    {"word": "どん", "lang": "ja", "meaning": "boom", "meaningZh": "轰响"},
+    {"word": "ごごご", "lang": "ja", "meaning": "rising rumble", "meaningZh": "轰鸣渐进"},
+    {"word": "ドキッ", "lang": "ja", "meaning": "heart skips", "meaningZh": "心跳"},
+    {"word": "BOOM", "lang": "en", "meaning": "explosion", "meaningZh": "爆炸"},
+    {"word": "WHOOSH", "lang": "en", "meaning": "fast movement", "meaningZh": "快速移动"},
+    {"word": "CRACK", "lang": "en", "meaning": "impact", "meaningZh": "撞击"},
+    {"word": "THUD", "lang": "en", "meaning": "heavy hit", "meaningZh": "重击"},
+    {"word": "BANG", "lang": "en", "meaning": "gunshot, slammed door", "meaningZh": "枪声、摔门"},
+    {"word": "CRASH", "lang": "en", "meaning": "breaking, collision", "meaningZh": "碰撞、破碎"},
+    {"word": "SLAM", "lang": "en", "meaning": "door slammed", "meaningZh": "摔门"},
+    {"word": "KNOCK", "lang": "en", "meaning": "knock on a door", "meaningZh": "敲门"},
+    {"word": "DING", "lang": "en", "meaning": "bell, notification", "meaningZh": "铃声、提示音"},
+    {"word": "RING", "lang": "en", "meaning": "phone ringing", "meaningZh": "电话铃"},
+    {"word": "BUZZ", "lang": "en", "meaning": "phone vibrating", "meaningZh": "手机震动"},
+    {"word": "CLICK", "lang": "en", "meaning": "switch, camera, lock", "meaningZh": "开关、快门、锁"},
+    {"word": "SPLASH", "lang": "en", "meaning": "water", "meaningZh": "水花"},
+    {"word": "THUMP", "lang": "en", "meaning": "heartbeat, footstep", "meaningZh": "心跳、脚步"},
+    {"word": "POW", "lang": "en", "meaning": "punch", "meaningZh": "拳击"},
+    {"word": "ZAP", "lang": "en", "meaning": "electric shock", "meaningZh": "电击"},
+    {"word": "CREAK", "lang": "en", "meaning": "door, floorboard", "meaningZh": "吱呀声"},
+    {"word": "SNAP", "lang": "en", "meaning": "breaking, fingers", "meaningZh": "折断、响指"},
+    {"word": "GASP", "lang": "en", "meaning": "sharp breath", "meaningZh": "倒吸一口气"},
+    {"word": "SIGH", "lang": "en", "meaning": "sigh", "meaningZh": "叹气"},
 ]
 
 

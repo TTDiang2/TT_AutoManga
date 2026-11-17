@@ -165,7 +165,7 @@ export function ComposerTab() {
   const [saveProjectName, setSaveProjectName] = useState('');
   const [saveMsg, setSaveMsg] = useState('');
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [sfxPresets, setSfxPresets] = useState<Array<{ word: string; meaning: string }>>([]);
+  const [sfxPresets, setSfxPresets] = useState<Array<{ word: string; lang?: string; meaning: string; meaningZh?: string }>>([]);
   const [showSfxMenu, setShowSfxMenu] = useState(false);
   const [paginating, setPaginating] = useState(false);
   const sfxRef = useRef<HTMLDivElement | null>(null);
@@ -647,16 +647,16 @@ export function ComposerTab() {
                     maxHeight: 220, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,.25)',
                   }}
                 >
-                  {sfxPresets.map(p => (
+                  {sfxPresets.filter(p => language === 'zh' || !p.lang || p.lang === 'en').map(p => (
                     <button
                       key={p.word}
                       className="composer-prop-btn"
                       style={{ display: 'flex', flexDirection: 'column', fontSize: 15, fontWeight: 700, padding: '6px 4px' }}
-                      title={p.meaning}
+                      title={language === 'zh' ? p.meaningZh || p.meaning : p.meaning}
                       onClick={() => addSfx(p.word)}
                     >
                       <span>{p.word}</span>
-                      <span style={{ fontSize: 9, fontWeight: 400, opacity: 0.7 }}>{p.meaning}</span>
+                      <span style={{ fontSize: 9, fontWeight: 400, opacity: 0.7 }}>{language === 'zh' ? p.meaningZh || p.meaning : p.meaning}</span>
                     </button>
                   ))}
                 </div>

@@ -242,7 +242,7 @@ export function SettingsTab() {
           </div>
 
           <div className="form-group mt-md">
-            <label>Storyboard System Prompt (分镜生成)</label>
+            <label>{t.settings.storyboardSystemPrompt}</label>
             <div className="flex gap-sm items-start">
               <select
                 className="input select"
@@ -306,7 +306,7 @@ export function SettingsTab() {
           </div>
 
           <div className="form-group">
-            <label>Prompt Enhancement System Prompt (提示词优化)</label>
+            <label>{t.settings.enhanceSystemPrompt}</label>
             <div className="flex gap-sm items-start">
               <select
                 className="input select"

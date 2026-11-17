@@ -12,3 +12,8 @@ export function useTranslation() {
     language,
   };
 }
+
+/** Fills {name} placeholders in a translated string: fill(t.prompt.allFailed, { n: 3 }). */
+export function fill(text: string, values: Record<string, string | number>) {
+  return text.replace(/\{(\w+)\}/g, (m, k) => (k in values ? String(values[k]) : m));
+}
