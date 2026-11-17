@@ -11,6 +11,7 @@
   --text-muted: #9B9B9B;
   --accent-primary: #000000;
   --accent-hover: #333333;
+  --accent-contrast: #FFFFFF;
   --success: #4CAF50;
   --warning: #FF9800;
   --error: #F44336;
@@ -35,6 +36,44 @@
   --space-xxl: 48px;
   
   --sidebar-width: 64px;
+  color-scheme: light;
+}
+
+/* Dark theme: follows the system unless the sidebar switch picked one (html[data-theme]). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-primary: #17181B;
+    --bg-secondary: #1E1F23;
+    --bg-tertiary: #26282D;
+    --border-default: #33363C;
+    --border-hover: #474B53;
+    --text-primary: #ECECEE;
+    --text-secondary: #A4A7AE;
+    --text-muted: #73777F;
+    --accent-primary: #F2F2F3;
+    --accent-hover: #D0D1D4;
+    --accent-contrast: #111214;
+    --shadow-subtle: 0 1px 3px rgba(0,0,0,0.4);
+    --shadow-elevated: 0 4px 16px rgba(0,0,0,0.5);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg-primary: #17181B;
+  --bg-secondary: #1E1F23;
+  --bg-tertiary: #26282D;
+  --border-default: #33363C;
+  --border-hover: #474B53;
+  --text-primary: #ECECEE;
+  --text-secondary: #A4A7AE;
+  --text-muted: #73777F;
+  --accent-primary: #F2F2F3;
+  --accent-hover: #D0D1D4;
+  --accent-contrast: #111214;
+  --shadow-subtle: 0 1px 3px rgba(0,0,0,0.4);
+  --shadow-elevated: 0 4px 16px rgba(0,0,0,0.5);
+  color-scheme: dark;
 }
 
 * {
@@ -47,6 +86,11 @@ html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+}
+
+/* form controls don't inherit the page font by default (buttons showed the browser's serif) */
+button, input, select, textarea {
+  font-family: inherit;
 }
 
 body {
@@ -86,7 +130,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--accent-contrast);
   font-weight: 700;
   font-size: 16px;
 }
@@ -118,7 +162,7 @@ body {
 
 .nav-item.active {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
 }
 
 .nav-item.active::before {
@@ -139,7 +183,7 @@ body {
   margin-left: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
   font-size: 12px;
   border-radius: var(--radius-sm);
   white-space: nowrap;
@@ -147,6 +191,13 @@ body {
   pointer-events: none;
   transition: opacity var(--transition-default);
   z-index: 100;
+}
+
+.sidebar-theme {
+  margin: 0 auto;
+  border: none;
+  background: none;
+  font: inherit;
 }
 
 .nav-item:hover .nav-tooltip {
@@ -203,7 +254,7 @@ body {
 
 .btn-primary {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-contrast);
 }
 
 .btn-primary:hover {

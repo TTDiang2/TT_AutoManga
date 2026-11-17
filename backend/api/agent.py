@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from PIL import Image
 
 from ..assembly import build_page
-from ..core.config import settings, is_masked_api_key
+from ..core.config import settings
 from ..core.openai_client import client as llm_client
 from ..core.swarmui_client import swarm_client
 from ..jobs import create_job, job_snapshot, run_job
@@ -196,11 +196,9 @@ async def agent_storyboard(req: StoryboardRequest):
     project = _load_or_404(req.project_id)
 
     llm_client.reload_from_settings()
-    if req.endpoint:
-        llm_client.update_config(endpoint=req.endpoint)
-    # skip the masked echo clients may send back from GET /api/settings/
-    if req.api_key is not None and not is_masked_api_key(req.api_key):
-        llm_client.update_config(api_key=req.api_key)
+    # masked echoes are ignored; the stored key is only sent to the stored
+    # endpoint (a foreign endpoint needs the request's own api_key)
+    llm_client.apply_request_endpoint(req.endpoint, req.api_key)
     if req.model:
         llm_client.update_config(model=req.model)
 
@@ -341,13 +339,16 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
         if mask_dataurl is None:
             raise ValueError(f"mask_image not found: {payload['mask_image']}")
 
-    # automatic injection: project style suffix + character blocks
+    # automatic injection: project style suffix + character blocks + LoRAs
+    # (+ a solo panel's character sheet as an IP-Adapter reference)
     injected = []
+    ref_kwargs: Dict[str, Any] = {}
     project = None
     if payload.get("project_id"):
         project = storage.load_project(payload["project_id"])
     if payload.get("inject_characters", True) and project:
-        from ..prompting import (blocks_for_panel, location_block_for_panel,
+        from ..prompting import (apply_conditioning, blocks_for_panel, ipadapter_args,
+                                 location_block_for_panel, reference_for_panel,
                                  style_suffix)
         style = style_suffix(project)
         if style:
@@ -370,6 +371,20 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             for block in blocks_for_panel(project, panel):
                 prompt = f"{prompt}, {block}" if prompt_format_is_tags(payload) else f"{prompt}。{block}"
                 injected.append({"kind": "character", "text": block})
+            # the panel characters' trained LoRAs + trigger words, merged with the
+            # request/global LoRAs (a panel character's weight wins)
+            prompt, loras, lora_injected = apply_conditioning(
+                prompt, loras, project, panel,
+                sep=", " if prompt_format_is_tags(payload) else "。")
+            injected.extend(lora_injected)
+            # a solo panel's character sheet guides it through IP-Adapter
+            # (the character's refWeight > 0; the sheet itself is not echoed)
+            ref_kwargs = ipadapter_args(reference_for_panel(project, panel))
+            if ref_kwargs:
+                ref_name = next(str(n).strip() for n in panel.get("characters") or [] if str(n).strip())
+                injected.append({"kind": "reference", "name": ref_name,
+                                 "weight": ref_kwargs["ipadapter_weight"],
+                                 "preset": ref_kwargs["ipadapter"]})
 
     assets_out = []
     for v in range(variants):
@@ -388,6 +403,7 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             init_image=init_dataurl,
             init_creativity=payload.get("init_creativity"),
             mask_image=mask_dataurl,
+            **ref_kwargs,
         )
         if not result.get("success"):
             raise RuntimeError(f"SwarmUI: {result.get('error', 'unknown error')}")
@@ -412,6 +428,8 @@ async def _do_generate(payload: Dict[str, Any]) -> Dict[str, Any]:
             "prompt_format": payload.get("prompt_format"),
             "kind": payload.get("kind") or "panel",
             "alpha_method": alpha_method if payload.get("remove_background") else None,
+            "ipadapter": ({"preset": ref_kwargs["ipadapter"], "weight": ref_kwargs["ipadapter_weight"]}
+                          if ref_kwargs else None),
         })
         img = Image.open(io.BytesIO(img_bytes))
         has_alpha = (img.mode == "RGBA"
@@ -886,17 +904,44 @@ async def build_cover(project_id: str, req: CoverRequest):
     return {"page": page}
 
 
-# curated onomatopoeia for the SFX text tool (zh / ja / en)
+# curated onomatopoeia for the SFX text tool: Chinese, Japanese and English
+# words (`lang`), each meaning in English and Chinese; the UI offers English
+# words in English and all of them in Chinese
 _SFX_PRESETS = [
-    {"word": "轰", "meaning": "爆炸、引擎"}, {"word": "砰", "meaning": "撞击"},
-    {"word": "咔嚓", "meaning": "断裂、快门"}, {"word": "咚", "meaning": "重击、心跳"},
-    {"word": "唰", "meaning": "快速掠过"}, {"word": "啪", "meaning": "拍击"},
-    {"word": "哗啦", "meaning": "水流、散落"}, {"word": "扑通", "meaning": "落水"},
-    {"word": "滴答", "meaning": "钟表"}, {"word": "嘶", "meaning": "撕裂、嘶鸣"},
-    {"word": "ざっ", "meaning": "斩击"}, {"word": "どん", "meaning": "轰响"},
-    {"word": "ごごご", "meaning": "轰鸣渐进"}, {"word": "ドキッ", "meaning": "心跳"},
-    {"word": "BOOM", "meaning": "explosion"}, {"word": "WHOOSH", "meaning": "fast movement"},
-    {"word": "CRACK", "meaning": "impact"}, {"word": "THUD", "meaning": "heavy hit"},
+    {"word": "轰", "lang": "zh", "meaning": "explosion, engine", "meaningZh": "爆炸、引擎"},
+    {"word": "砰", "lang": "zh", "meaning": "impact", "meaningZh": "撞击"},
+    {"word": "咔嚓", "lang": "zh", "meaning": "snap, shutter", "meaningZh": "断裂、快门"},
+    {"word": "咚", "lang": "zh", "meaning": "heavy blow, heartbeat", "meaningZh": "重击、心跳"},
+    {"word": "唰", "lang": "zh", "meaning": "swoosh past", "meaningZh": "快速掠过"},
+    {"word": "啪", "lang": "zh", "meaning": "slap", "meaningZh": "拍击"},
+    {"word": "哗啦", "lang": "zh", "meaning": "splash, scatter", "meaningZh": "水流、散落"},
+    {"word": "扑通", "lang": "zh", "meaning": "plop into water", "meaningZh": "落水"},
+    {"word": "滴答", "lang": "zh", "meaning": "tick-tock", "meaningZh": "钟表"},
+    {"word": "嘶", "lang": "zh", "meaning": "rip, hiss", "meaningZh": "撕裂、嘶鸣"},
+    {"word": "ざっ", "lang": "ja", "meaning": "slash", "meaningZh": "斩击"},
+    {"word": "どん", "lang": "ja", "meaning": "boom", "meaningZh": "轰响"},
+    {"word": "ごごご", "lang": "ja", "meaning": "rising rumble", "meaningZh": "轰鸣渐进"},
+    {"word": "ドキッ", "lang": "ja", "meaning": "heart skips", "meaningZh": "心跳"},
+    {"word": "BOOM", "lang": "en", "meaning": "explosion", "meaningZh": "爆炸"},
+    {"word": "WHOOSH", "lang": "en", "meaning": "fast movement", "meaningZh": "快速移动"},
+    {"word": "CRACK", "lang": "en", "meaning": "impact", "meaningZh": "撞击"},
+    {"word": "THUD", "lang": "en", "meaning": "heavy hit", "meaningZh": "重击"},
+    {"word": "BANG", "lang": "en", "meaning": "gunshot, slammed door", "meaningZh": "枪声、摔门"},
+    {"word": "CRASH", "lang": "en", "meaning": "breaking, collision", "meaningZh": "碰撞、破碎"},
+    {"word": "SLAM", "lang": "en", "meaning": "door slammed", "meaningZh": "摔门"},
+    {"word": "KNOCK", "lang": "en", "meaning": "knock on a door", "meaningZh": "敲门"},
+    {"word": "DING", "lang": "en", "meaning": "bell, notification", "meaningZh": "铃声、提示音"},
+    {"word": "RING", "lang": "en", "meaning": "phone ringing", "meaningZh": "电话铃"},
+    {"word": "BUZZ", "lang": "en", "meaning": "phone vibrating", "meaningZh": "手机震动"},
+    {"word": "CLICK", "lang": "en", "meaning": "switch, camera, lock", "meaningZh": "开关、快门、锁"},
+    {"word": "SPLASH", "lang": "en", "meaning": "water", "meaningZh": "水花"},
+    {"word": "THUMP", "lang": "en", "meaning": "heartbeat, footstep", "meaningZh": "心跳、脚步"},
+    {"word": "POW", "lang": "en", "meaning": "punch", "meaningZh": "拳击"},
+    {"word": "ZAP", "lang": "en", "meaning": "electric shock", "meaningZh": "电击"},
+    {"word": "CREAK", "lang": "en", "meaning": "door, floorboard", "meaningZh": "吱呀声"},
+    {"word": "SNAP", "lang": "en", "meaning": "breaking, fingers", "meaningZh": "折断、响指"},
+    {"word": "GASP", "lang": "en", "meaning": "sharp breath", "meaningZh": "倒吸一口气"},
+    {"word": "SIGH", "lang": "en", "meaning": "sigh", "meaningZh": "叹气"},
 ]
 
 
@@ -963,6 +1008,20 @@ def _validate_element_payload(el: Dict[str, Any], partial: bool = False) -> None
         if not isinstance(el["strokeColor"], str):
             raise HTTPException(status_code=400,
                                 detail="strokeColor must be a string")
+    # optional bubble lettering fields (null clears them)
+    if el.get("tailTip") is not None:
+        tip = el["tailTip"]
+        if not isinstance(tip, dict) or not all(
+                isinstance(tip.get(k), (int, float)) and not isinstance(tip.get(k), bool)
+                and -20 <= tip[k] <= 20 for k in ("x", "y")):
+            raise HTTPException(status_code=400,
+                                detail="tailTip needs numeric x/y (box fractions, -20..20)")
+    if el.get("textAlign") is not None \
+            and el["textAlign"] not in ("left", "center", "right", "justify"):
+        raise HTTPException(status_code=400,
+                            detail="textAlign must be left, center or right")
+    if el.get("markup") is not None and el["markup"] != "stars":
+        raise HTTPException(status_code=400, detail='markup must be "stars"')
     if "corners" in el and el["corners"] is not None:
         c = el["corners"]
         if not isinstance(c, dict) or set(c.keys()) != {"tl", "tr", "br", "bl"}:
@@ -1047,10 +1106,16 @@ async def page_preview(project_id: str, page_id: str, scale: float = 2.0):
     project = _load_or_404(project_id)
     page = _find_page(project, page_id)
     scale = min(8.0, max(0.5, scale))
+    # CPU-bound PIL work: keep the event loop (and every other request) free
+    png = await asyncio.to_thread(_render_png, page, scale)
+    return Response(content=png, media_type="image/png")
+
+
+def _render_png(page: Dict[str, Any], scale: float) -> bytes:
     img = render_page(page, scale, _resolver)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
-    return Response(content=buf.getvalue(), media_type="image/png")
+    return buf.getvalue()
 
 
 # ---------------------------------------------------------------------------
@@ -1130,9 +1195,11 @@ async def agent_export(req: AgentExportRequest):
         raise HTTPException(status_code=400, detail="format must be pdf|zip|both")
     fmt = req.format
     base_name = f"manga_{req.project_id[:8]}_{time.strftime('%Y%m%d_%H%M%S')}"
-    result = export_pages(pages, fmt, min(8.0, max(0.5, req.scale)),
-                          _resolver, _exports_dir(), base_name,
-                          page_numbers=req.page_numbers)
+    # minutes of PIL/reportlab work for a long project: run it in a thread
+    result = await asyncio.to_thread(
+        export_pages, pages, fmt, min(8.0, max(0.5, req.scale)),
+        _resolver, _exports_dir(), base_name,
+        page_numbers=req.page_numbers)
     logger.info("agent/export project=%s fmt=%s base=%s", req.project_id, fmt,
                 base_name)
     return result

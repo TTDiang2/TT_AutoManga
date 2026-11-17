@@ -1,17 +1,44 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from urllib.parse import urlsplit
 from pathlib import Path
 import uvicorn
 import json
+import time
 
-from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent
+from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
+from .api import auth as auth_api
+from .api import training as training_api
+from .core import auth as auth_core
 from .core.config import BASE_DIR, PROJECTS_DIR, ASSETS_DIR
 
 logger = logging.getLogger(__name__)
+
+
+ORPHAN_ASSET_MIN_AGE_S = 14 * 24 * 3600
+
+
+def _asset_created(entry: dict) -> float:
+    """Creation time of an asset: index created_at, else file mtime. An
+    asset whose age can't be told counts as brand new (never deleted)."""
+    created = entry.get("created_at")
+    if created:
+        try:
+            from datetime import datetime, timezone
+            dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            pass
+    try:
+        return Path(entry.get("path", "")).stat().st_mtime
+    except OSError:
+        return time.time()
 
 
 def _cleanup_orphan_assets() -> None:
@@ -70,20 +97,26 @@ def _cleanup_orphan_assets() -> None:
                 "keeping all assets", meta_file, e)
             return
 
-    from .storage.asset_store import asset_store
-    removed = 0
-    for asset_id in list(asset_store.ids()):
-        if asset_id not in referenced:
-            if asset_store.remove(asset_id):
-                removed += 1
+    from .storage import asset_store as asset_store_mod
+    asset_store = asset_store_mod.asset_store
+    # Unreferenced is not the same as unwanted: unapplied variants, upscale
+    # outputs, overlay/cover art not placed yet and /api/assets/file uploads
+    # (the Comics converter caches those URLs) are all legitimately
+    # unreferenced for a while. Only reclaim assets nobody used for weeks.
+    cutoff = time.time() - ORPHAN_ASSET_MIN_AGE_S
+    stale = [a for a in asset_store.ids()
+             if a not in referenced
+             and _asset_created(asset_store.get(a) or {}) < cutoff]
+    removed = asset_store.remove_many(stale)   # one index.json flush
 
-    # Legacy per-project dirs (pre-refactor uploads): same rule as before.
+    # Legacy per-project dirs (pre-refactor uploads): same rule, same age gate.
     for item in ASSETS_DIR.iterdir():
         if not item.is_dir():
             continue
         for pf in item.rglob("*"):
             if pf.is_file() and str(pf.resolve()) not in referenced_paths \
-                    and pf.name != "index.json":
+                    and pf.name != "index.json" \
+                    and pf.stat().st_mtime < cutoff:
                 pf.unlink()
                 removed += 1
 
@@ -105,6 +138,57 @@ app = FastAPI(title="AutoManga API", version="1.0.0", lifespan=lifespan)
 # vite dev server proxies /api. Anything else — including a malicious page in
 # the user's browser — gets no cross-origin access to the API.
 
+_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+_LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
+
+
+def _cross_origin(request: Request) -> bool:
+    """A mutating request whose Origin host differs from Host (CSRF). The
+    vite dev server (localhost:5173 proxying to :5180) is allowed for local
+    requests."""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return False
+    try:
+        parts = urlsplit(origin)
+        origin_host, origin_name = parts.netloc.lower(), (parts.hostname or "")
+    except ValueError:
+        return True
+    if origin_host and origin_host == request.headers.get("host", "").lower():
+        return False
+    return not (auth_core.is_local(request) and origin_name in _LOOPBACK_NAMES)
+
+
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    """Login gate for /api (see backend/core/auth.py). The SPA shell and
+    /assets are public; local callers (loopback, no forwarding headers) pass;
+    everyone else needs a valid am_session cookie."""
+    path = request.url.path
+    if not (path == "/api" or path.startswith("/api/")):
+        return await call_next(request)
+    if request.method in _MUTATING and _cross_origin(request):
+        return JSONResponse({"detail": "cross-origin request refused"},
+                            status_code=403)
+    if (request.method, path.rstrip("/") or "/") in auth_api.PUBLIC_PATHS \
+            or path == "/api/health" or auth_core.is_local(request):
+        return await call_next(request)
+    data = auth_core.load_auth()
+    if data is None:
+        return JSONResponse({"detail": "login is not configured on this server"},
+                            status_code=503)
+    claims = auth_core.read_token(request.cookies.get(auth_core.COOKIE_NAME), data)
+    if claims is None:
+        return JSONResponse({"detail": "authentication required"},
+                            status_code=401)
+    response = await call_next(request)
+    if auth_core.needs_refresh(claims) and \
+            auth_core.COOKIE_NAME not in response.headers.get("set-cookie", ""):
+        auth_core.set_session_cookie(response, request, data)  # rolling refresh
+    return response
+
+
+app.include_router(auth_api.router)
 app.include_router(storyboard.router)
 app.include_router(prompt.router)
 app.include_router(assets.router)
@@ -118,6 +202,9 @@ app.include_router(characters.router)
 app.include_router(composer_templates.router)
 app.include_router(render.router)
 app.include_router(agent.router)
+app.include_router(comics.router)
+app.include_router(fonts.router)
+app.include_router(training_api.router)
 
 
 @app.get("/api/health")
@@ -174,4 +261,8 @@ if __name__ == "__main__":
         logging.getLogger(name).setLevel(logging.INFO)
         logging.getLogger(name).propagate = True
 
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    # Loopback by default; set AUTOMANGA_HOST=0.0.0.0 to serve the LAN.
+    import os
+    host = os.environ.get("AUTOMANGA_HOST", "127.0.0.1")
+    os.environ["AUTOMANGA_PORT"] = str(port)   # the comics converter calls back here
+    uvicorn.run(app, host=host, port=port, log_level="info")

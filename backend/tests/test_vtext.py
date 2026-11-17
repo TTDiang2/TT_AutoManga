@@ -69,8 +69,10 @@ def test_punctuation_mapping_skipped_when_font_lacks_forms(monkeypatch):
 def test_punctuation_maps_with_real_resolved_font():
     # regression for the P0 the review caught: maketrans().values() are strs,
     # cmap keys are ints — the mapping silently never applied with a font
-    from backend.render.fonts import get_font
-    font = get_font(20)   # msyh.ttc on this host — carries U+FE10 block
+    # the chain the renderers pass: with a Latin default lettering font the
+    # forms come from a CJK fallback (msyh / Hiragino / Noto carry U+FE10)
+    from backend.render.fonts import get_font_chain
+    font = get_font_chain(20)
     out = to_vertical_punctuation("你好，世界！……", font)
     assert "\uFE10" in out and "\uFE15" in out and "\uFE19" in out
 

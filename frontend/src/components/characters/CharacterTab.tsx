@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import type { Character, CharacterLora } from '../../types';
+import { TrainingPanel } from './TrainingPanel';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -13,55 +15,124 @@ interface CharacterTemplateMeta {
   isBuiltIn?: boolean;
 }
 
+// shape returned by GET /api/assets/swarmui/loras
+interface SwarmLora {
+  name: string;
+  trigger: string;
+  architecture?: string;
+}
+
+const DEFAULT_LORA_WEIGHT = 0.8;
+
 export function CharacterTab() {
   const { characters, setCharacters, addCharacter, updateCharacter, removeCharacter, extractCharactersFromPanels } = useProjectStore();
   const { t } = useTranslation();
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', description: '', appearance: '' });
+  // the LoRA form: name '' = none; trigger '' falls back to the LoRA's own
+  const [loraForm, setLoraForm] = useState({ name: '', weight: DEFAULT_LORA_WEIGHT, trigger: '' });
+  const [swarmLoras, setSwarmLoras] = useState<SwarmLora[]>([]);
+  // the sheet as an IP-Adapter reference on solo panels: 0 = off;
+  // ipadapter null = not probed yet (GET /api/assets/swarmui/features)
+  const [refWeight, setRefWeight] = useState(0);
+  const [ipadapter, setIpadapter] = useState<boolean | null>(null);
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<CharacterTemplateMeta[]>([]);
-  const [backendLoaded, setBackendLoaded] = useState(false);
 
-  const syncCharactersToBackend = async (chars: typeof characters) => {
-    try {
-      await fetch('/api/characters/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(chars),
-      });
-    } catch {
-      // best-effort sync; the backend library is optional
-    }
+  // The library is shared (the Comics converter adds characters too), so
+  // changes go through the per-item endpoints; posting the full list would
+  // wipe whatever was added since this tab loaded it.
+  const reportSyncError = (what: string) => (err: unknown) => {
+    console.warn(`[characters] ${what} failed:`, err);
+  };
+  const checked = (res: Response) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res;
+  };
+
+  const addChar = (char: Character) => {
+    addCharacter(char);
+    fetch('/api/characters/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(char),
+    }).then(checked).catch(reportSyncError('add'));
+  };
+
+  const patchChar = (id: string, updates: Partial<Character>) => {
+    updateCharacter(id, updates);
+    fetch(`/api/characters/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).then(checked).catch(reportSyncError('update'));
+  };
+
+  const deleteChar = (id: string) => {
+    removeCharacter(id);
+    fetch(`/api/characters/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then(checked).catch(reportSyncError('delete'));
   };
 
   useEffect(() => {
     fetch('/api/characters/')
+      .then(checked)
       .then(r => r.json())
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
           setCharacters(data);
-        } else if (characters.length === 0) {
-          const extracted = extractCharactersFromPanels();
-          if (extracted.length > 0) setCharacters(extracted);
+          return;
         }
-        setBackendLoaded(true);
+        // the library is empty: seed it once (nothing there to overwrite)
+        const { characters: local } = useProjectStore.getState();
+        const seed = local.length > 0 ? local : extractCharactersFromPanels();
+        if (seed.length === 0) return;
+        if (local.length === 0) setCharacters(seed);
+        fetch('/api/characters/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(seed),
+        }).then(checked).catch(reportSyncError('seed'));
       })
       .catch(() => {
-        if (characters.length === 0) {
+        // offline: show what can be derived locally, but don't write anything
+        if (useProjectStore.getState().characters.length === 0) {
           const extracted = extractCharactersFromPanels();
           if (extracted.length > 0) setCharacters(extracted);
         }
-        setBackendLoaded(true);
       });
   }, []);
 
   useEffect(() => {
-    if (backendLoaded && characters.length >= 0) {
-      syncCharactersToBackend(characters);
-    }
-  }, [characters, backendLoaded]);
+    if (!isEditing) return;
+    fetch('/api/assets/swarmui/loras')
+      .then(checked)
+      .then(r => r.json())
+      .then(data => setSwarmLoras(Array.isArray(data?.loras) ? data.loras : []))
+      .catch(() => setSwarmLoras([]));
+    fetch('/api/assets/swarmui/features')
+      .then(checked)
+      .then(r => r.json())
+      .then(data => setIpadapter(!!data?.ipadapter))
+      .catch(() => setIpadapter(false));
+  }, [isEditing]);
+
+  const startEdit = (char: Character) => {
+    setEditForm({ name: char.name, description: char.description, appearance: char.appearance || '' });
+    setLoraForm({ name: char.lora?.name || '', weight: char.lora?.weight ?? DEFAULT_LORA_WEIGHT, trigger: char.lora?.trigger || '' });
+    setRefWeight(char.refWeight || 0);
+    setIsEditing(true);
+  };
+
+  const pickLora = (name: string) => {
+    const found = swarmLoras.find(l => l.name === name);
+    // a new pick brings its own trigger word; an edited one is kept
+    const ownTrigger = swarmLoras.find(l => l.name === loraForm.name)?.trigger || '';
+    const keepTrigger = loraForm.trigger && loraForm.trigger !== ownTrigger;
+    setLoraForm({ ...loraForm, name, trigger: keepTrigger ? loraForm.trigger : (found?.trigger || '') });
+  };
 
   useEffect(() => {
     if (showTemplates) {
@@ -83,16 +154,20 @@ export function CharacterTab() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    addCharacter(newChar);
+    addChar(newChar);
     setSelectedCharId(newChar.id);
-    setEditForm({ name: newChar.name, description: '', appearance: '' });
-    setIsEditing(true);
+    startEdit(newChar);
   };
 
   const handleSave = () => {
     if (selectedCharId) {
-      updateCharacter(selectedCharId, {
+      const lora: CharacterLora | null = loraForm.name
+        ? { name: loraForm.name, weight: loraForm.weight, trigger: loraForm.trigger.trim() || null }
+        : null;
+      patchChar(selectedCharId, {
         ...editForm,
+        lora,
+        refWeight: refWeight > 0 ? refWeight : null,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -101,18 +176,23 @@ export function CharacterTab() {
 
   const handleDelete = (id: string) => {
     if (!confirm('Delete this character?')) return;
-    removeCharacter(id);
+    deleteChar(id);
     if (selectedCharId === id) setSelectedCharId(null);
   };
 
   const handleGenerateImage = async (charId: string) => {
     const char = characters.find(c => c.id === charId);
     if (!char) return;
+    // the appearance is the image prompt; a name alone paints a random person
+    if (!char.appearance?.trim()) {
+      alert(`${char.name} has no appearance yet. Click Edit and describe how they look (it is the image prompt).`);
+      return;
+    }
 
     setGeneratingFor(charId);
 
     try {
-      const prompt = char.appearance || `${char.name}, ${char.description}`;
+      const prompt = char.appearance;
       
       const response = await fetch('/api/characters/templates/generate-image', {
         method: 'POST',
@@ -128,10 +208,14 @@ export function CharacterTab() {
       const data = await response.json();
       
       if (data.success && data.image) {
-        updateCharacter(charId, { image: data.image, updatedAt: new Date().toISOString() });
+        patchChar(charId, { image: data.image, updatedAt: new Date().toISOString() });
+      } else {
+        // e.g. SwarmUI's "No model input given" when Settings has no model
+        alert(`Image generation failed: ${data.error || data.detail || `HTTP ${response.status}`}`);
       }
     } catch (err) {
       console.error('Failed to generate character image:', err);
+      alert(`Image generation failed: ${(err as Error).message}`);
     } finally {
       setGeneratingFor(null);
     }
@@ -148,7 +232,7 @@ export function CharacterTab() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    addCharacter(newChar);
+    addChar(newChar);
     setSelectedCharId(newChar.id);
     setShowTemplates(false);
   };
@@ -159,7 +243,7 @@ export function CharacterTab() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const result = ev.target?.result as string;
-      updateCharacter(selectedCharId, { image: result, updatedAt: new Date().toISOString() });
+      patchChar(selectedCharId, { image: result, updatedAt: new Date().toISOString() });
     };
     reader.readAsDataURL(file);
   };
@@ -288,6 +372,71 @@ export function CharacterTab() {
                   placeholder={t.characters.appearancePlaceholder}
                 />
               </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }}>{t.characters.lora}</label>
+                <select
+                  className="input"
+                  style={{ width: '100%' }}
+                  value={loraForm.name}
+                  onChange={e => pickLora(e.target.value)}
+                >
+                  <option value="">{t.characters.loraNone}</option>
+                  {loraForm.name && !swarmLoras.some(l => l.name === loraForm.name) && (
+                    <option value={loraForm.name}>{loraForm.name}</option>
+                  )}
+                  {swarmLoras.map(l => (
+                    <option key={l.name} value={l.name}>{l.name}</option>
+                  ))}
+                </select>
+                {loraForm.name && (
+                  <div className="flex gap-sm items-center" style={{ marginTop: '8px' }}>
+                    <label style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>{t.characters.loraWeight}</label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1.2}
+                      step={0.05}
+                      value={loraForm.weight}
+                      onChange={e => setLoraForm({ ...loraForm, weight: Number(e.target.value) })}
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ fontSize: '12px', width: '32px', textAlign: 'right' }}>{loraForm.weight.toFixed(2)}</span>
+                    <input
+                      className="input"
+                      style={{ width: '140px' }}
+                      value={loraForm.trigger}
+                      onChange={e => setLoraForm({ ...loraForm, trigger: e.target.value })}
+                      placeholder={t.characters.loraTrigger}
+                      aria-label={t.characters.loraTrigger}
+                    />
+                  </div>
+                )}
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.loraHint}</p>
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-ref-weight">{t.characters.refWeight}</label>
+                <div className="flex gap-sm items-center">
+                  <input
+                    id="char-ref-weight"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={refWeight}
+                    onChange={e => setRefWeight(Number(e.target.value))}
+                    disabled={!ipadapter || !selectedChar?.image}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: '12px', width: '32px', textAlign: 'right' }}>
+                    {refWeight > 0 ? refWeight.toFixed(2) : t.characters.refOff}
+                  </span>
+                </div>
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  {ipadapter === false ? t.characters.refUnavailable
+                    : !selectedChar?.image ? t.characters.refNoSheet
+                    : t.characters.refHint}
+                </p>
+              </div>
               <div className="flex gap-sm">
                 <button className="btn btn-primary" onClick={handleSave}>{t.characters.save}</button>
                 <button className="btn btn-secondary" onClick={handleSaveAsTemplate}>
@@ -306,7 +455,7 @@ export function CharacterTab() {
                   </p>
                 </div>
                 <div className="flex gap-sm">
-                  <button className="btn btn-secondary" onClick={() => { setEditForm({ name: selectedChar.name, description: selectedChar.description, appearance: selectedChar.appearance || '' }); setIsEditing(true); }}>
+                  <button className="btn btn-secondary" onClick={() => startEdit(selectedChar)}>
                     <FiEdit2 size={16} /> {t.characters.edit}
                   </button>
                   <button className="btn btn-ghost" onClick={() => handleDelete(selectedChar.id)} style={{ color: 'var(--error)' }}>
@@ -366,7 +515,7 @@ export function CharacterTab() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {selectedChar.description && (
                     <div style={{ marginBottom: '16px' }}>
-                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.description}</h4>
+                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.desc}</h4>
                       <p style={{ fontSize: '14px', lineHeight: '1.5', wordBreak: 'break-word' }}>{selectedChar.description}</p>
                     </div>
                   )}
@@ -378,9 +527,26 @@ export function CharacterTab() {
                     </div>
                   )}
 
+                  {selectedChar.lora?.name && (
+                    <div style={{ marginTop: '16px' }}>
+                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.lora}</h4>
+                      <p style={{ fontSize: '14px', wordBreak: 'break-word' }}>
+                        {selectedChar.lora.name} · {selectedChar.lora.weight}{selectedChar.lora.trigger ? ` · ${selectedChar.lora.trigger}` : ''}
+                      </p>
+                    </div>
+                  )}
+
+                  {!!selectedChar.refWeight && selectedChar.image && (
+                    <div style={{ marginTop: '16px' }}>
+                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.refWeight}</h4>
+                      <p style={{ fontSize: '14px' }}>{selectedChar.refWeight}</p>
+                    </div>
+                  )}
+
                   {!selectedChar.description && !selectedChar.appearance && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic' }}>No description or appearance details yet.</p>
                   )}
+                  <TrainingPanel key={selectedChar.id} character={selectedChar} />
                 </div>
               </div>
             </div>

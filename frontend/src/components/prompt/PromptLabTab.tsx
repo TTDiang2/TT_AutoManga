@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FiRefreshCw, FiCopy, FiCheck, FiZap, FiTag, FiShuffle, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
-import { useTranslation } from '../../hooks/useTranslation';
+import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Panel } from '../../types';
 
 // response shapes of /api/prompt/enhance and /api/prompt/batch-enhance
@@ -53,21 +53,25 @@ export function PromptLabTab() {
   };
   const [importError, setImportError] = useState('');
 
-  const selectedPanel = panels.find(p => p.id === selectedPanelId);
-
+  // Sync the editor fields when the user picks another panel (or switches
+  // prompt mode) — not on every store update to that panel, which would wipe
+  // unsaved negative prompt / seed / removeBG edits when e.g. the enhanced
+  // prompt arrives. Read the panel from the store so the panel object isn't
+  // a dependency.
   useEffect(() => {
-    if (selectedPanel) {
-      setInputText(selectedPanel.scene);
+    const panel = useProjectStore.getState().panels.find(p => p.id === selectedPanelId);
+    if (panel) {
+      setInputText(panel.scene);
       if (promptMode === 'turbo') {
-        setOutputText(selectedPanel.prompt.turbo || '');
+        setOutputText(panel.prompt.turbo || '');
       } else {
-        setOutputText(selectedPanel.prompt.tags?.join(', ') || '');
+        setOutputText(panel.prompt.tags?.join(', ') || '');
       }
-      setNegativePrompt(selectedPanel.prompt.negativePrompt || '');
-      setSeed(selectedPanel.prompt.seed != null ? String(selectedPanel.prompt.seed) : '');
-      setRemoveBG(selectedPanel.prompt.removeBG || false);
+      setNegativePrompt(panel.prompt.negativePrompt || '');
+      setSeed(panel.prompt.seed != null ? String(panel.prompt.seed) : '');
+      setRemoveBG(panel.prompt.removeBG || false);
     }
-  }, [selectedPanelId, promptMode, selectedPanel]);
+  }, [selectedPanelId, promptMode]);
 
   const handleImport = () => {
     setImportError('');
@@ -148,12 +152,12 @@ export function PromptLabTab() {
 
       if (!response.ok) {
         const detail = data?.detail || `HTTP ${response.status}`;
-        setErrorMessage(`后端错误 (${response.status}): ${detail}`);
+        setErrorMessage(fill(t.prompt.backendError, { status: response.status, detail }));
         return;
       }
 
       if (data?.error) {
-        setErrorMessage(`LLM 调用失败: ${data.error}`);
+        setErrorMessage(fill(t.prompt.llmFailed, { error: data.error }));
         return;
       }
 
@@ -167,11 +171,11 @@ export function PromptLabTab() {
           updatePanelPrompt(selectedPanelId, { tags });
         }
       } else {
-        setErrorMessage('后端返回了空结果,请检查后端日志。');
+        setErrorMessage(t.prompt.emptyResult);
       }
     } catch (error) {
       console.error('Enhancement failed:', error);
-      setErrorMessage(`网络/客户端错误: ${toErrorMessage(error)}`);
+      setErrorMessage(fill(t.prompt.networkError, { error: toErrorMessage(error) }));
     } finally {
       stopTimer();
       setIsGenerating(false);
@@ -207,7 +211,7 @@ export function PromptLabTab() {
 
       if (!response.ok) {
         const detail = data?.detail || `HTTP ${response.status}`;
-        setErrorMessage(`后端错误 (${response.status}): ${detail}`);
+        setErrorMessage(fill(t.prompt.backendError, { status: response.status, detail }));
         return;
       }
 
@@ -229,16 +233,16 @@ export function PromptLabTab() {
           }
         });
         if (failed > 0 && success === 0) {
-          setErrorMessage(`全部 ${failed} 个分镜生成失败,请查看后端日志。`);
+          setErrorMessage(fill(t.prompt.allFailed, { n: failed }));
         } else if (failed > 0) {
-          setErrorMessage(`部分失败: ${success} 个成功, ${failed} 个失败。`);
+          setErrorMessage(fill(t.prompt.partlyFailed, { success, failed }));
         }
       } else {
-        setErrorMessage('后端返回了空结果,请检查后端日志。');
+        setErrorMessage(t.prompt.emptyResult);
       }
     } catch (error) {
       console.error('Batch enhancement failed:', error);
-      setErrorMessage(`网络/客户端错误: ${toErrorMessage(error)}`);
+      setErrorMessage(fill(t.prompt.networkError, { error: toErrorMessage(error) }));
     } finally {
       stopTimer();
       setIsGenerating(false);
@@ -284,7 +288,7 @@ export function PromptLabTab() {
             <FiRefreshCw size={16} /> {t.prompt.generateAll}
             {isGenerating && (
               <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
-                生成中… {generatingSeconds}s
+                {fill(t.prompt.generatingFor, { s: generatingSeconds })}
               </span>
             )}
           </button>
@@ -339,7 +343,7 @@ export function PromptLabTab() {
               onClick={() => setErrorMessage('')}
               style={{ fontSize: 12, padding: '2px 8px' }}
             >
-              关闭
+              {t.prompt.close}
             </button>
           </div>
         )}
@@ -362,7 +366,7 @@ export function PromptLabTab() {
             {isGenerating ? <span className="loading-spinner" /> : t.prompt.generate}
             {isGenerating && (
               <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
-                生成中… {generatingSeconds}s
+                {fill(t.prompt.generatingFor, { s: generatingSeconds })}
               </span>
             )}
           </button>

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -5,13 +6,21 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from ..core.config import PROJECTS_DIR
+from ..core.config import PROJECTS_DIR, atomic_write_json
 
 logger = logging.getLogger(__name__)
 
 # Client-supplied ids become directory names under data/projects — only
 # [A-Za-z0-9_-] is allowed so "../" and friends can never escape it.
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
+def pages_base(project: Dict[str, Any]) -> str:
+    """Version token of a project's composer pages (optimistic concurrency
+    for the Composer autosave): sha1 of the canonical JSON of composerPages."""
+    pages = project.get("composerPages", []) if project else []
+    blob = json.dumps(pages, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
 class InvalidProjectIdError(ValueError):
@@ -40,8 +49,7 @@ class StorageManager:
                 data["id"] = new_id
                 proj_dir = PROJECTS_DIR / new_id
                 proj_dir.mkdir(exist_ok=True)
-                with open(proj_dir / "project.json", "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
+                atomic_write_json(proj_dir / "project.json", data, indent=2)
                 flat_file.unlink()
             except Exception as e:
                 logger.warning("flat project migration failed: %s", e)
@@ -54,8 +62,17 @@ class StorageManager:
             if proj_dir.is_dir():
                 meta_file = proj_dir / "project.json"
                 if meta_file.exists():
-                    with open(meta_file, "r", encoding="utf-8") as f:
-                        projects.append(json.load(f))
+                    # one damaged project must not hide all the others
+                    try:
+                        with open(meta_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        logger.warning("skipping unreadable %s: %s", meta_file, e)
+                        continue
+                    if isinstance(data, dict):
+                        projects.append(data)
+                    else:
+                        logger.warning("skipping %s: not a JSON object", meta_file)
         return sorted(projects, key=lambda x: x.get("updatedAt", ""), reverse=True)
 
     @staticmethod
@@ -94,8 +111,7 @@ class StorageManager:
 
         StorageManager._normalize_image_refs(project_data)
 
-        with open(proj_dir / "project.json", "w", encoding="utf-8") as f:
-            json.dump(project_data, f, indent=2)
+        atomic_write_json(proj_dir / "project.json", project_data, indent=2)
 
         return project_data
 

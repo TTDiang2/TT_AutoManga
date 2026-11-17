@@ -117,13 +117,27 @@ async def upload_image(project_id: str, panel_id: str, file: UploadFile = File(.
 @router.post("/swarmui/generate")
 async def generate_with_swarmui(req: GenerateImageRequest):
     swarmsettings = settings.swarmui
-    if req.swarmui_address:
-        swarm_client.update_address(req.swarmui_address)
-    
+
     loras = None
     if swarmsettings.currentLoras:
         loras = [l for l in swarmsettings.currentLoras if l.name]
-    
+    prompt = req.prompt
+    # the panel characters' trained LoRAs + trigger words (global LoRAs stay;
+    # a panel character's weight wins for the same LoRA)
+    project = None
+    try:
+        project = storage.load_project(req.project_id) if req.project_id else None
+    except InvalidProjectIdError:
+        project = None
+    panel = next((p for p in (project or {}).get("panels") or []
+                  if p.get("id") == req.panel_id), None) if project else None
+    ref_kwargs: Dict[str, Any] = {}
+    if panel:
+        from ..prompting import apply_conditioning, ipadapter_args, reference_for_panel
+        prompt, loras, _ = apply_conditioning(prompt, loras, project, panel)
+        # a solo panel's character sheet (refWeight > 0) guides it via IP-Adapter
+        ref_kwargs = ipadapter_args(reference_for_panel(project, panel))
+
     try:
         import logging
         logger = logging.getLogger(__name__)
@@ -131,7 +145,7 @@ async def generate_with_swarmui(req: GenerateImageRequest):
         logger.info(f"[Generate] Using settings: steps={swarmsettings.currentSteps}, cfg={swarmsettings.currentCfgScale}, model={swarmsettings.currentModel}, w={swarmsettings.currentWidth}, h={swarmsettings.currentHeight}")
         
         result = await swarm_client.generate_image(
-            prompt=req.prompt,
+            prompt=prompt,
             negative_prompt=req.negative_prompt,
             model=swarmsettings.currentModel or None,
             steps=swarmsettings.currentSteps,
@@ -141,7 +155,10 @@ async def generate_with_swarmui(req: GenerateImageRequest):
             sampler_name=swarmsettings.currentSamplerName,
             loras=loras,
             seed=req.seed,
-            remove_background=req.remove_background
+            remove_background=req.remove_background,
+            # one-shot override: never rewrites the shared client's address
+            address=req.swarmui_address or None,
+            **ref_kwargs,
         )
         
         if result.get("success"):
@@ -167,6 +184,26 @@ async def get_swarmui_models():
         return {"models": [], "error": str(e)}
 
 
+@router.get("/swarmui/loras")
+async def get_swarmui_loras():
+    """Installed LoRAs for the Characters tab: [{name, trigger, architecture}],
+    the name as SwarmUI's <lora:> tag wants it (relative to Models/Lora, no
+    extension), the trigger from the model's metadata or the name convention."""
+    from ..prompting import default_trigger, lora_base_name
+    try:
+        files = await swarm_client.list_models(subtype="LoRA")
+    except Exception as e:
+        return {"loras": [], "error": str(e)}
+    out = []
+    for f in files:
+        name = lora_base_name(f.get("name") or "")
+        if not name:
+            continue
+        trigger = (f.get("trigger_phrase") or "").strip() or default_trigger(name)
+        out.append({"name": name, "trigger": trigger, "architecture": f.get("architecture") or ""})
+    return {"loras": out}
+
+
 @router.get("/swarmui/test")
 async def test_swarmui_connection():
     try:
@@ -174,3 +211,27 @@ async def test_swarmui_connection():
         return result
     except Exception as e:
         return {"connected": False, "status": str(e)}
+
+
+# SwarmUI's optional features, probed at most once a minute (the Characters
+# tab asks on every mount; the backend list rarely changes)
+_FEATURES_TTL = 60.0
+_features_cache: Dict[str, Any] = {"at": 0.0, "address": None, "value": None}
+
+
+@router.get("/swarmui/features")
+async def get_swarmui_features():
+    """``{"ipadapter": bool, "presets": [str], "preset": str}``: whether a
+    running SwarmUI backend has the IP-Adapter nodes (character-sheet
+    references), its "Use IP-Adapter" presets and the configured one."""
+    import time
+    now = time.monotonic()
+    address = swarm_client.address
+    cached = _features_cache["value"]
+    if cached is None or _features_cache["address"] != address or now - _features_cache["at"] > _FEATURES_TTL:
+        try:
+            cached = await swarm_client.ipadapter_features()
+        except Exception:
+            cached = {"ipadapter": False, "presets": []}
+        _features_cache.update(at=now, address=address, value=cached)
+    return {**cached, "preset": settings.swarmui.ipadapterPreset}

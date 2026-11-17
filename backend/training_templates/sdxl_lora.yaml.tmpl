@@ -1,0 +1,65 @@
+# ai-toolkit job for one character LoRA, rendered by backend/training.py.
+# The recipe is the one that trained the sf_* LoRAs
+# (~/ai-toolkit/output/sf_mara/config.yaml on the Razer) verbatim except
+# name, trigger_word, folder_path, model path, steps, sample prompts and
+# disable_sampling (settings training.sampling, off: previews OOM on 8 GB).
+# Placeholders (double braces) are substituted as JSON strings/numbers (valid YAML).
+job: extension
+config:
+  name: {{name}}
+  process:
+  - type: sd_trainer
+    training_folder: output
+    device: cuda:0
+    trigger_word: {{trigger}}
+    network:
+      type: lora
+      linear: 16
+      linear_alpha: 16
+    save:
+      dtype: float16
+      save_every: 500
+      max_step_saves_to_keep: 3
+    datasets:
+    - folder_path: {{folder_path}}
+      caption_ext: txt
+      caption_dropout_rate: 0.05
+      shuffle_tokens: false
+      cache_latents_to_disk: true
+      resolution:
+      - 768
+      - 1024
+    train:
+      batch_size: 1
+      steps: {{steps}}
+      gradient_accumulation: 1
+      disable_sampling: {{disable_sampling}}
+      train_unet: true
+      train_text_encoder: false
+      gradient_checkpointing: true
+      noise_scheduler: ddpm
+      optimizer: adamw8bit
+      lr: 0.0001
+      dtype: bf16
+      ema_config:
+        use_ema: false
+    model:
+      name_or_path: {{base_model}}
+      arch: sdxl
+      low_vram: true
+    sample:
+      sampler: ddpm
+      sample_every: 500
+      width: 832
+      height: 1216
+      prompts:
+      - {{prompt_1}}
+      - {{prompt_2}}
+      neg: child, loli, shota, teen, lowres, bad anatomy
+      seed: 42
+      walk_seed: false
+      guidance_scale: 5
+      sample_steps: 25
+meta:
+  name: {{name}}
+  version: '1.0'

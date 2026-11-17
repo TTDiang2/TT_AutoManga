@@ -140,11 +140,15 @@ def upscale_bytes(png_bytes: bytes, model_id: str = "realesrgan-anime-6b",
     a two-sided tent window (no visible seams). An alpha channel, when
     present, is resized alongside so transparent overlays survive. A output
     size guard keeps memory bounded (~16 bytes/output-pixel accumulators)."""
-    import numpy as np
-    from PIL import Image
-
     if model_id not in INFERENCE_MODELS:
         raise ModelError(f"unknown model: {model_id}")
+    # the optional runtime first: without it numpy may be missing as well
+    if not available():
+        raise InferenceUnavailable(
+            "local upscaling needs onnxruntime and numpy: "
+            "pip install -r backend/requirements-inference.txt")
+    import numpy as np
+    from PIL import Image
     scale = INFERENCE_MODELS[model_id]["scale"]
 
     src = Image.open(io.BytesIO(png_bytes))

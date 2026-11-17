@@ -2,12 +2,17 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+import asyncio
 import io
+import re
 import zipfile
 import uuid
 import base64
 import logging
 from pathlib import Path
+
+from ..render.resolve import ref_to_bytes
+from ..storage.manager import validate_project_id, InvalidProjectIdError
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -19,18 +24,40 @@ EXPORTS_ROOT = EXPORTS_DIR.resolve()
 
 
 def _panel_image_bytes(image: str) -> Optional[bytes]:
-    """Resolve a panel image ref (data URL / asset URL / local path) to bytes."""
+    """Resolve a panel image ref to bytes. Only data: URLs, managed assets
+    and archive images are accepted — never a filesystem path, which would
+    let any client zip up and download arbitrary local files."""
+    from ..storage.asset_store import asset_store
+    return ref_to_bytes(image, asset_store)
+
+
+def _checked_project_id(project_id: str) -> str:
+    # project_id ends up in an export file name
     try:
-        if image.startswith("data:"):
-            return base64.b64decode(image.split(",", 1)[1])
-        if image.startswith("/api/assets/file/"):
-            from ..storage.asset_store import asset_store
-            path = asset_store.path_for(image.rsplit("/", 1)[-1])
-            return path.read_bytes() if path else None
-        path = Path(image)
-        return path.read_bytes() if path.is_file() else None
-    except Exception:
-        return None
+        return validate_project_id(project_id)
+    except InvalidProjectIdError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+_IMAGE_FORMATS = {"png", "jpg", "jpeg", "webp"}
+
+
+def _safe_entry_name(name: str) -> str:
+    """Client-supplied page names become ZIP entry names: keep them flat."""
+    cleaned = re.sub(r"[^\w\- ]", "_", name or "").strip()
+    return cleaned[:80] or "page"
+
+
+def _fit_on_page(img_reader, width: float, height: float, inch: float):
+    """Centered draw box (x, y, w, h) keeping 1in margins and aspect."""
+    img_w, img_h = img_reader.getSize()
+    aspect = img_h / img_w
+    draw_w = width - 2 * inch
+    draw_h = draw_w * aspect
+    if draw_h > height - 2 * inch:
+        draw_h = height - 2 * inch
+        draw_w = draw_h / aspect
+    return (width - draw_w) / 2, height - draw_h - 1 * inch, draw_w, draw_h
 
 
 class ExportPDFRequest(BaseModel):
@@ -56,184 +83,140 @@ class ComposerExportRequest(BaseModel):
     pages: List[ComposerPageRequest]
 
 
+# The export bodies are CPU-bound PIL/reportlab work; the endpoints run them
+# with asyncio.to_thread so a long export never freezes the event loop.
+
+def _export_pdf_sync(req: ExportPDFRequest) -> dict:
+    from reportlab.lib.pagesizes import A4, LETTER
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
+
+    page_size = {"A4": A4, "LETTER": LETTER}.get(req.page_size, A4)
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=page_size)
+    width, height = page_size
+
+    if req.include_cover:
+        c.setFont("Helvetica-Bold", 36)
+        c.drawString(1*inch, height - 2*inch, f"Project: {req.project_id}")
+        c.showPage()
+
+    for panel in req.panels:
+        if panel.get("image"):
+            img_bytes = _panel_image_bytes(panel["image"])
+            if img_bytes:
+                try:
+                    img_reader = ImageReader(io.BytesIO(img_bytes))
+                    x, y, w, h = _fit_on_page(img_reader, width, height, inch)
+                    c.drawImage(img_reader, x, y, width=w, height=h)
+                except Exception as e:
+                    logger.warning("export pdf: skipping unreadable image: %s", e)
+        c.showPage()
+
+    c.save()
+    filename = f"manga_{req.project_id}_{uuid.uuid4().hex[:8]}.pdf"
+    output_path = EXPORTS_DIR / filename
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(buffer.getvalue())
+    return {"success": True, "file": str(output_path)}
+
+
 @router.post("/pdf")
 async def export_pdf(req: ExportPDFRequest):
+    _checked_project_id(req.project_id)
     try:
-        from reportlab.lib.pagesizes import A4, LETTER
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.units import inch
-        import base64
-        
-        page_sizes = {"A4": A4, "LETTER": LETTER}
-        page_size = page_sizes.get(req.page_size, A4)
-        
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=page_size)
-        width, height = page_size
-        
-        if req.include_cover:
-            c.setFont("Helvetica-Bold", 36)
-            c.drawString(1*inch, height - 2*inch, f"Project: {req.project_id}")
-            c.showPage()
-        
-        quality_mult = 2 if req.quality == "high" else 1
-        
+        return await asyncio.to_thread(_export_pdf_sync, req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _export_images_sync(req: ExportImagesRequest) -> dict:
+    zip_filename = f"manga_{req.project_id}_{uuid.uuid4().hex[:8]}.zip"
+    output_path = EXPORTS_DIR / zip_filename
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, panel in enumerate(req.panels):
             if panel.get("image"):
                 img_bytes = _panel_image_bytes(panel["image"])
                 if img_bytes:
-                    img_stream = io.BytesIO(img_bytes)
-
-                    try:
-                        from reportlab.lib.utils import ImageReader
-                        img_reader = ImageReader(img_stream)
-                        img_width, img_height = img_reader.getSize()
-                        
-                        aspect = img_height / img_width
-                        draw_width = width - 2*inch
-                        draw_height = draw_width * aspect
-                        
-                        if draw_height > height - 2*inch:
-                            draw_height = height - 2*inch
-                            draw_width = draw_height / aspect
-                        
-                        x = (width - draw_width) / 2
-                        y = height - draw_height - 1*inch
-                        
-                        c.drawImage(img_reader, x, y, width=draw_width, height=draw_height)
-                    except Exception as e:
-                        logger.warning("export pdf: skipping unreadable image: %s", e)
-            
-            c.showPage()
-        
-        c.save()
-        buffer.seek(0)
-        
-        filename = f"manga_{req.project_id}_{uuid.uuid4().hex[:8]}.pdf"
-        output_path = EXPORTS_DIR / filename
-        
-        with open(output_path, "wb") as f:
-            f.write(buffer.read())
-        
-        return {"success": True, "file": str(output_path)}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+                    zf.writestr(f"panel_{i+1:03d}.{req.format}", img_bytes)
+    return {"success": True, "file": str(output_path)}
 
 
 @router.post("/images")
 async def export_images(req: ExportImagesRequest):
+    _checked_project_id(req.project_id)
+    # format becomes a file extension
+    if req.format.lower() not in _IMAGE_FORMATS:
+        raise HTTPException(status_code=400,
+                            detail=f"format must be one of {sorted(_IMAGE_FORMATS)}")
     try:
-        import base64
-        import uuid
-        
-        output_dir = EXPORTS_DIR / f"images_{uuid.uuid4().hex[:8]}"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        for i, panel in enumerate(req.panels):
-            if panel.get("image"):
-                img_bytes = _panel_image_bytes(panel["image"])
-                if img_bytes:
-                    filename = output_dir / f"panel_{i+1:03d}.{req.format}"
-                    with open(filename, "wb") as f:
-                        f.write(img_bytes)
-        
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for img_file in output_dir.glob("*"):
-                zf.write(img_file, img_file.name)
-        
-        buffer.seek(0)
-        
-        zip_filename = f"manga_{req.project_id}_{uuid.uuid4().hex[:8]}.zip"
-        output_path = EXPORTS_DIR / zip_filename
-        
-        with open(output_path, "wb") as f:
-            f.write(buffer.read())
-        
-        return {"success": True, "file": str(output_path)}
-        
+        return await asyncio.to_thread(_export_images_sync, req)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _export_composer_pdf_sync(req: ComposerExportRequest) -> dict:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import inch
+    from reportlab.lib.utils import ImageReader
+
+    page_size = A4
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=page_size)
+    width, height = page_size
+
+    for page in req.pages:
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(0, 0, width, height, fill=1)
+        if page.dataUrl:
+            img_data = page.dataUrl
+            if img_data.startswith("data:"):
+                img_data = img_data.split(",", 1)[1]
+            try:
+                img_reader = ImageReader(io.BytesIO(base64.b64decode(img_data)))
+                x, y, w, h = _fit_on_page(img_reader, width, height, inch)
+                c.drawImage(img_reader, x, y, width=w, height=h)
+            except Exception as e:
+                logger.warning("composer pdf: skipping unreadable page image: %s", e)
+        c.showPage()
+
+    c.save()
+    filename = f"composer_{uuid.uuid4().hex[:8]}.pdf"
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    (EXPORTS_DIR / filename).write_bytes(buffer.getvalue())
+    return {"success": True, "downloadUrl": f"/api/export/download/{filename}"}
 
 
 @router.post("/composer-pdf")
 async def export_composer_pdf(req: ComposerExportRequest):
     try:
-        from reportlab.lib.pagesizes import A4, LETTER
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.units import inch
-
-        page_size = A4
-        buffer = io.BytesIO()
-        c = canvas.Canvas(buffer, pagesize=page_size)
-        width, height = page_size
-
-        for page in req.pages:
-            c.setFillColorRGB(1, 1, 1)
-            c.rect(0, 0, width, height, fill=1)
-            if page.dataUrl:
-                img_data = page.dataUrl
-                if img_data.startswith("data:"):
-                    img_data = img_data.split(",", 1)[1]
-                try:
-                    img_bytes = base64.b64decode(img_data)
-                    img_stream = io.BytesIO(img_bytes)
-                    from reportlab.lib.utils import ImageReader
-                    img_reader = ImageReader(img_stream)
-                    img_w, img_h = img_reader.getSize()
-                    aspect = img_h / img_w
-                    draw_w = width - 2 * inch
-                    draw_h = draw_w * aspect
-                    if draw_h > height - 2 * inch:
-                        draw_h = height - 2 * inch
-                        draw_w = draw_h / aspect
-                    x = (width - draw_w) / 2
-                    y = height - draw_h - 1 * inch
-                    c.drawImage(img_reader, x, y, width=draw_w, height=draw_h)
-                except Exception as e:
-                    logger.warning("composer pdf: skipping unreadable page image: %s", e)
-            c.showPage()
-
-        c.save()
-        buffer.seek(0)
-
-        filename = f"composer_{uuid.uuid4().hex[:8]}.pdf"
-        output_path = EXPORTS_DIR / filename
-        with open(output_path, "wb") as f:
-            f.write(buffer.read())
-
-        return {
-            "success": True,
-            "downloadUrl": f"/api/export/download/{filename}"
-        }
-
+        return await asyncio.to_thread(_export_composer_pdf_sync, req)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _export_composer_images_sync(req: ComposerExportRequest) -> dict:
+    zip_name = f"composer_{uuid.uuid4().hex[:8]}.zip"
+    EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(EXPORTS_DIR / zip_name, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, page in enumerate(req.pages):
+            if page.dataUrl and page.dataUrl.startswith("data:"):
+                try:
+                    img_bytes = base64.b64decode(page.dataUrl.split(",", 1)[1])
+                    fname = f"{_safe_entry_name(page.name)}_{i+1:03d}.png"
+                    zf.writestr(fname, img_bytes)
+                except Exception as e:
+                    logger.warning("composer zip: skipping undecodable page %d: %s", i + 1, e)
+    return {"success": True, "downloadUrl": f"/api/export/download/{zip_name}"}
 
 
 @router.post("/composer-images")
 async def export_composer_images(req: ComposerExportRequest):
     try:
-        zip_name = f"composer_{uuid.uuid4().hex[:8]}.zip"
-        zip_path = EXPORTS_DIR / zip_name
-
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, page in enumerate(req.pages):
-                if page.dataUrl and page.dataUrl.startswith("data:"):
-                    img_data = page.dataUrl.split(",", 1)[1]
-                    try:
-                        img_bytes = base64.b64decode(img_data)
-                        fname = f"{page.name or 'page'}_{i+1:03d}.png"
-                        zf.writestr(fname, img_bytes)
-                    except Exception as e:
-                        logger.warning("composer zip: skipping undecodable page %d: %s", i + 1, e)
-
-        return {
-            "success": True,
-            "downloadUrl": f"/api/export/download/{zip_name}"
-        }
-
+        return await asyncio.to_thread(_export_composer_images_sync, req)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

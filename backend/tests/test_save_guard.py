@@ -21,7 +21,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(mgr, "PROJECTS_DIR", tmp_path / "projects")
 
     from backend.main import app
-    return TestClient(app)
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 def _make_project(client) -> str:

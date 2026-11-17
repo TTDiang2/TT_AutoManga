@@ -90,7 +90,7 @@ export interface SwarmUIPreset {
   promptSuffix: string;
 }
 
-export type TabId = 'storyboard' | 'prompt' | 'assets' | 'composer' | 'showcase' | 'settings' | 'characters';
+export type TabId = 'storyboard' | 'prompt' | 'assets' | 'composer' | 'showcase' | 'settings' | 'characters' | 'comics';
 
 export type BubbleType = 'speech' | 'thought' | 'shout' | 'whisper' | 'narration' | 'inner-voice';
 
@@ -135,6 +135,14 @@ export interface LayoutDefinition {
   is_preset?: boolean;
 }
 
+/** A character's trained LoRA: the SwarmUI name relative to Models/Lora
+    (no extension), weight, trigger word (null: the name convention). */
+export interface CharacterLora {
+  name: string;
+  weight: number;
+  trigger?: string | null;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -142,6 +150,9 @@ export interface Character {
   appearance?: string;
   image?: string;
   sourcePanelIds: string[];
+  lora?: CharacterLora | null;
+  // 0-1: the sheet guides the character's solo panels via IP-Adapter; null/0 = off
+  refWeight?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -303,6 +314,12 @@ export interface BubbleElement extends ComposerElementBase {
   backgroundColor: string;
   borderColor: string;
   tailPosition: TailPosition;
+  /** Pointed tail aimed at this point: fractions of the element box, unrotated, may be <0 or >1
+   *  (an off-panel speaker). Overrides tailPosition. Geometry: composer/tailGeometry.ts. */
+  tailTip?: { x: number; y: number };
+  textAlign?: 'left' | 'center' | 'right';
+  /** 'stars': `*word*` is set as emphasis. Opt-in, so existing texts like "*sigh*" keep their stars. */
+  markup?: 'stars';
 }
 
 export interface ComposerTemplate {

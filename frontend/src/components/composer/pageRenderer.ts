@@ -1,4 +1,5 @@
 import type { ComposerPage, ImageElement, TextElement, BubbleElement } from '../../types';
+import { tailGeometry, wedgePath, parseStars, SERVER_INSET, type TailGeometry } from './tailGeometry';
 
 export function renderPageToImage(page: ComposerPage): Promise<string> {
   return new Promise(resolve => {
@@ -172,6 +173,11 @@ function drawBubbleEl(
   }
 
   const bt = el.bubbleType;
+  const tail = el.tailTip
+    ? tailGeometry(bt, ew, eh, [el.tailTip.x * ew, el.tailTip.y * eh], SERVER_INSET)
+    : null;
+  // pointed tail, wedge: edges at double width UNDER the body, fill-only over it (seamless root)
+  if (tail?.kind === 'wedge') drawTailTip(ctx, x, y, el, tail, 'under');
 
   if (bt === 'shout') {
     drawShoutShape(ctx, x, y, ew, eh, el);
@@ -181,7 +187,8 @@ function drawBubbleEl(
     drawOvalShape(ctx, x, y, ew, eh, el);
   }
 
-  drawTail(ctx, x, y, ew, eh, el);
+  if (tail) drawTailTip(ctx, x, y, el, tail, 'over');
+  else if (!el.tailTip) drawTail(ctx, x, y, ew, eh, el);
   drawBubbleText(ctx, x, y, ew, eh, el);
   ctx.restore();
 }
@@ -259,6 +266,38 @@ function drawNarrationShape(
   ctx.strokeStyle = el.borderColor || '#333333';
   ctx.lineWidth = 2;
   ctx.stroke();
+}
+
+function drawTailTip(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number,
+  el: BubbleElement,
+  tail: TailGeometry,
+  layer: 'under' | 'over',
+) {
+  const sw = el.bubbleType === 'shout' ? 3 : el.bubbleType === 'whisper' ? 1 : 2;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = el.backgroundColor || (el.bubbleType === 'shout' ? '#FFF9C4' : '#ffffff');
+  ctx.strokeStyle = el.borderColor || '#000000';
+  if (tail.kind === 'circles') {
+    ctx.lineWidth = sw;
+    for (const [cx, cy, r] of tail.circles) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else {
+    const path = new Path2D(wedgePath(tail, true));
+    if (layer === 'under') {
+      ctx.lineWidth = sw * 2;
+      ctx.lineJoin = 'round';
+      ctx.stroke(path);
+    }
+    ctx.fill(path);
+  }
+  ctx.restore();
 }
 
 function drawTail(
@@ -352,7 +391,9 @@ function drawBubbleText(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const text = el.text || '';
+  let text = el.text || '';
+  let em: boolean[] | null = null;
+  if (el.markup === 'stars') ({ plain: text, em } = parseStars(text));
   const padding = 10;
   if (el.direction === 'vertical') {
     const positions = layoutVertical(text, ew, eh, padding, fs);
@@ -365,8 +406,35 @@ function drawBubbleText(
   const totalH = lines.length * lineH;
   const startY = y + eh / 2 - totalH / 2 + lineH / 2;
 
+  const align = el.textAlign === 'left' || el.textAlign === 'right' ? el.textAlign : 'center';
+  if (align === 'center' && !em) {
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x + ew / 2, startY + i * lineH);
+    });
+    return;
+  }
+  // bubbles.py _text_layout: left/right align to the centred block's edge
+  // (narration: to the padded box edge); emphasis runs in italic bold
+  const emFont = `italic bold ${fs}px sans-serif`;
+  const widths = lines.map(l => ctx.measureText(l).width);
+  const block = Math.max(0, ...widths);
+  const narration = el.bubbleType === 'narration';
+  const left = narration ? x + padding : x + ew / 2 - block / 2;
+  const right = narration ? x + ew - padding : x + ew / 2 + block / 2;
+  ctx.textAlign = 'left';
+  const all = Array.from(text);
+  let k = 0;   // index into em (wrapText drops only the newlines between lines)
   lines.forEach((line, i) => {
-    ctx.fillText(line, x + ew / 2, startY + i * lineH);
+    const w = widths[i];
+    let cx = align === 'left' ? left : align === 'right' ? right - w : x + ew / 2 - w / 2;
+    const chars = Array.from(line);
+    for (const ch of chars) {
+      ctx.font = em?.[k] ? emFont : fontStr;
+      ctx.fillText(ch, cx, startY + i * lineH);
+      cx += ctx.measureText(ch).width;
+      k++;
+    }
+    if (all[k] === '\n') k++;
   });
 }
 

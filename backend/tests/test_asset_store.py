@@ -102,6 +102,8 @@ def test_cleanup_removes_orphan_assets(tmp_path, monkeypatch, store):
     # one referenced asset + one orphan
     kept = mod.asset_store.save_bytes(PNG_1PX, kind="panel")
     orphan = mod.asset_store.save_bytes(PNG_1PX, kind="panel")
+    # only orphans older than the 14-day grace period are reclaimed
+    mod.asset_store._index[orphan["asset_id"]]["created_at"] = "2020-01-01T00:00:00Z"
     proj_dir = tmp_path / "projects" / "proj1"
     proj_dir.mkdir()
     (proj_dir / "project.json").write_text(json.dumps({

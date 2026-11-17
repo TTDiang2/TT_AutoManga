@@ -6,7 +6,7 @@ import json
 import logging
 
 from ..core.swarmui_client import swarm_client
-from ..core.config import settings, LoraConfig
+from ..core.config import settings, atomic_write_json
 
 router = APIRouter(prefix="/api/characters/templates", tags=["character_templates"])
 
@@ -63,8 +63,7 @@ def load_templates() -> List[dict]:
 
 
 def save_templates(templates: List[dict]) -> None:
-    with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
-        json.dump(templates, f, indent=2)
+    atomic_write_json(TEMPLATES_FILE, templates, indent=2)
 
 
 @router.get("/")
@@ -108,7 +107,8 @@ async def generate_character_image(req: GenerateCharacterImageRequest):
     swarmsettings = settings.swarmui
     loras = None
     if swarmsettings.currentLoras:
-        loras = [LoraConfig(name=l.get("name", ""), weight=l.get("weight", 1.0)) for l in swarmsettings.currentLoras if l.get("name")]
+        # settings loras are LoraConfig models (settings.py normalizes on save)
+        loras = [l for l in swarmsettings.currentLoras if l.name]
 
     try:
         result = await swarm_client.generate_image(

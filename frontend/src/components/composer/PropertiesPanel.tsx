@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useCallback, memo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useComposerStore } from '../../store/composerStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { TranslationKeys } from '../../i18n';
@@ -20,33 +21,49 @@ import { FiTrash2, FiRefreshCw } from 'react-icons/fi';
 
 type CornerKey = 'tl' | 'tr' | 'br' | 'bl';
 
-export function PropertiesPanel() {
+// memoized (no props): ComposerTab re-renders on every page edit, this
+// component only when its own store selections change
+export const PropertiesPanel = memo(function PropertiesPanel() {
   const { t } = useTranslation();
   const {
-    pages,
-    currentPageId,
-    selectedElementId,
     updateElement,
     removeElement,
     selectElement,
     autoGap,
     setAllFrameBorders,
     snapFramesToEdge,
-  } = useComposerStore();
+    commit,
+  } = useComposerStore(useShallow(s => ({
+    updateElement: s.updateElement,
+    removeElement: s.removeElement,
+    selectElement: s.selectElement,
+    autoGap: s.autoGap,
+    setAllFrameBorders: s.setAllFrameBorders,
+    snapFramesToEdge: s.snapFramesToEdge,
+    commit: s.commit,
+  })));
+  // narrow selectors: the panel re-renders only when the selected element
+  // (or the page-wide border summary) changes, not on every canvas edit
+  const selectedElement = useComposerStore(s =>
+    s.pages.find(p => p.id === s.currentPageId)?.elements.find(e => e.id === s.selectedElementId));
+  const { hasFrames, currentBorderWidth } = useComposerStore(useShallow(s => {
+    const page = s.pages.find(p => p.id === s.currentPageId);
+    const first = page?.elements.find(e => e.type === 'image-slot' || e.type === 'image');
+    // the first frame's border width is the "current" value for the slider
+    return {
+      hasFrames: !!first,
+      currentBorderWidth: (first as ImageElement | undefined)?.frameBorderWidth ?? 1.5,
+    };
+  }));
 
-  const currentPage = pages.find(p => p.id === currentPageId);
-  const selectedElement = currentPage?.elements.find(e => e.id === selectedElementId);
+  // every property edit is an undo step; continuous edits of the same field
+  // (slider drags, typing in a number box) coalesce into one step
+  const editElement = useCallback((id: string, updates: Partial<ComposerElement>) => {
+    commit(`prop:${id}:${Object.keys(updates).sort().join(',')}`);
+    updateElement(id, updates);
+  }, [commit, updateElement]);
 
   const isFrame = selectedElement?.type === 'image' || selectedElement?.type === 'image-slot' || selectedElement?.type === 'page-image';
-
-  const frameElements = (currentPage?.elements ?? []).filter(
-    e => e.type === 'image-slot' || e.type === 'image',
-  );
-  // Pick the border width of the first frame as the "current" value for the slider
-  const currentBorderWidth =
-    frameElements.length > 0
-      ? (frameElements[0] as ImageElement | PageImageElement).frameBorderWidth ?? 1.5
-      : 1.5;
 
   return (
     <div className="composer-properties">
@@ -58,7 +75,7 @@ export function PropertiesPanel() {
         <PageLevelControls
           autoGap={autoGap}
           currentBorderWidth={currentBorderWidth}
-          hasFrames={frameElements.length > 0}
+          hasFrames={hasFrames}
           onBorderChange={(w) => setAllFrameBorders(w)}
           onSnap={() => snapFramesToEdge()}
         />
@@ -68,23 +85,23 @@ export function PropertiesPanel() {
         )}
 
         {selectedElement && (<>
-          <PositionSizeProps element={selectedElement} updateElement={updateElement} />
+          <PositionSizeProps element={selectedElement} updateElement={editElement} />
 
           {isFrame && (
-            <CornerProps element={selectedElement} updateElement={updateElement} />
+            <CornerProps element={selectedElement} updateElement={editElement} />
           )}
 
           {selectedElement.type === 'bubble' && (
-            <BubbleProps element={selectedElement as BubbleElement} updateElement={updateElement} t={t} />
+            <BubbleProps element={selectedElement as BubbleElement} updateElement={editElement} t={t} />
           )}
           {selectedElement.type === 'text' && (
-            <TextProps element={selectedElement as TextElement} updateElement={updateElement} t={t} />
+            <TextProps element={selectedElement as TextElement} updateElement={editElement} t={t} />
           )}
           {selectedElement.type === 'image' && (
-            <ImageProps element={selectedElement as ImageElement} updateElement={updateElement} />
+            <ImageProps element={selectedElement as ImageElement} updateElement={editElement} />
           )}
           {selectedElement.type === 'page-image' && (
-            <ImageProps element={selectedElement as PageImageElement} updateElement={updateElement} />
+            <ImageProps element={selectedElement as PageImageElement} updateElement={editElement} />
           )}
           {selectedElement.type === 'image-slot' && (
             <div className="composer-prop-group">
@@ -108,7 +125,7 @@ export function PropertiesPanel() {
       </div>
     </div>
   );
-}
+});
 
 /**
  * Page-wide controls at the top of the properties sidebar — always visible.
@@ -359,7 +376,7 @@ function ImageProps({
   element: ImageElement | PageImageElement;
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
 }) {
-  const { openImagePicker } = useComposerStore();
+  const openImagePicker = useComposerStore(s => s.openImagePicker);
   const offX = element.imageOffsetX ?? 0;
   const offY = element.imageOffsetY ?? 0;
   const isOffset = offX !== 0 || offY !== 0;
@@ -539,6 +556,43 @@ function BubbleProps({
             </button>
           ))}
         </div>
+        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={!!element.tailTip}
+            disabled={element.bubbleType === 'narration'}
+            onChange={e => updateElement(element.id, {
+              tailTip: e.target.checked ? { x: 0.3, y: 1.6 } : undefined,
+            } as Partial<BubbleElement>)}
+          />
+          Point tail (drag the orange handle)
+        </label>
+      </div>
+      <div className="composer-prop-group">
+        <span className="composer-prop-label">Text align</span>
+        <div className="composer-prop-btn-group">
+          {(['left', 'center', 'right'] as const).map(a => (
+            <button
+              key={a}
+              className={`composer-prop-btn ${(element.textAlign ?? 'center') === a ? 'active' : ''}`}
+              onClick={() => updateElement(element.id, {
+                textAlign: a === 'center' ? undefined : a,
+              } as Partial<BubbleElement>)}
+            >
+              {a}
+            </button>
+          ))}
+        </div>
+        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={element.markup === 'stars'}
+            onChange={e => updateElement(element.id, {
+              markup: e.target.checked ? 'stars' : undefined,
+            } as Partial<BubbleElement>)}
+          />
+          *word* = emphasis
+        </label>
       </div>
       <div className="composer-prop-group">
         <span className="composer-prop-label">{t.composer.direction}</span>

@@ -36,7 +36,11 @@ def _cmap_has(font, codepoints) -> bool:
     guarded — falls back to True since all shipped CJK fonts carry the
     presentation forms). ``codepoints`` are ints. Note: TTFont fontNumber=0
     matches ImageFont.truetype()'s default face selection for .ttc files —
-    keep the two in sync if fonts.py ever picks a face index."""
+    keep the two in sync if fonts.py ever picks a face index. A
+    fonts.FontChain answers for all of its fonts (per-glyph fallback)."""
+    covers = getattr(font, "covers", None)
+    if covers is not None:
+        return all(covers(cp) for cp in codepoints)
     path = getattr(font, "path", None)
     if not path:
         return True

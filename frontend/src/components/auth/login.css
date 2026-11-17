@@ -1,0 +1,109 @@
+/* Login screen: theme colours come from the variables in styles/globals.css,
+   so light and dark both work (html[data-theme] or prefers-color-scheme). */
+.login-screen {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.login-screen--overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-xl);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-elevated);
+}
+
+.login-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  margin-bottom: var(--space-md);
+}
+
+.login-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.login-subtitle {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: var(--space-xs) 0 var(--space-lg);
+}
+
+.login-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.login-card .input {
+  width: 100%;
+}
+
+.login-card .input:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 15%, transparent);
+}
+
+.login-card .input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+
+.login-message {
+  min-height: 20px;
+  margin: var(--space-sm) 0;
+  font-size: 13px;
+  color: var(--error);
+}
+
+.login-message--notice {
+  color: var(--text-secondary);
+}
+
+.login-submit {
+  width: 100%;
+  height: 40px;
+}
+
+.login-unconfigured p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-sm);
+}
+
+.login-unconfigured code {
+  display: block;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}

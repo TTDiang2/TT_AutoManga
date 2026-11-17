@@ -7,13 +7,30 @@ import { ComposerTab } from './components/composer/ComposerTab';
 import { ShowcaseTab } from './components/showcase/ShowcaseTab';
 import { SettingsTab } from './components/settings/SettingsTab';
 import { CharacterTab } from './components/characters/CharacterTab';
+import { ComicsTab } from './components/comics/ComicsTab';
 import { useProjectStore } from './store/projectStore';
 import { useTranslation } from './hooks/useTranslation';
 import './styles/globals.css';
 
 function App() {
-  const { activeTab, setSettings } = useProjectStore();
+  const activeTab = useProjectStore(s => s.activeTab);
+  const setSettings = useProjectStore(s => s.setSettings);
   const { t } = useTranslation();
+
+  // the server's lettering fonts (data/fonts), so the Composer draws text the way the export does
+  useEffect(() => {
+    fetch('/api/fonts')
+      .then(res => res.json())
+      .then((data: { fonts: { family: string; url: string }[] }) => {
+        const css = data.fonts.map(f => `@font-face { font-family: "${f.family}"; src: url("${f.url}"); }`).join('\n');
+        if (!css) return;
+        const style = document.createElement('style');
+        style.dataset.userFonts = '';
+        style.textContent = css;
+        document.head.appendChild(style);
+      })
+      .catch(console.error);
+  }, []);
 
   useEffect(() => {
     fetch('/api/settings/')
@@ -45,6 +62,8 @@ function App() {
         return <SettingsTab />;
       case 'characters':
         return <CharacterTab />;
+      case 'comics':
+        return <ComicsTab />;
       default:
         return <StoryboardTab />;
     }
@@ -59,6 +78,7 @@ function App() {
     showcase: t.showcase.description,
     settings: t.settings.description,
     characters: t.characters.description,
+    comics: t.comics.description,
   };
   const description = descriptions[activeTab] || t.storyboard.description;
 

@@ -6,3 +6,4 @@ openai==1.54.0
 httpx==0.28.1
 pillow==10.4.0
 reportlab==4.2.5
+fonttools>=4.50
