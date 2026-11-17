@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { FiSave, FiRefreshCw, FiCheck, FiEye, FiEyeOff, FiX } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
-import type { AppSettings } from '../../types';
+import type { AppSettings, ContentRating } from '../../types';
 import { changePassword, fetchAuthStatus, fetchGoogleConfig, logout, logoutAll, setAllowedEmails, setPasswordLogin } from '../../auth';
 import type { AuthStatus, GoogleConfig } from '../../auth';
 import { SET_PASSWORD_CMD } from '../auth/LoginScreen';
@@ -43,6 +43,8 @@ export function SettingsTab() {
   const [ipadapter, setIpadapter] = useState<IpAdapterSettings>(DEFAULT_IPADAPTER);
   // null until the server sent it: never save placeholder trainer settings
   const [training, setTraining] = useState<TrainingSettings | null>(null);
+  // settings.content.defaultRating; null until loaded (never saved unloaded)
+  const [defaultRating, setDefaultRating] = useState<ContentRating | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -82,6 +84,7 @@ export function SettingsTab() {
         ipadapterEnd: typeof loadedSwarmui.ipadapterEnd === 'number'
           ? loadedSwarmui.ipadapterEnd : DEFAULT_IPADAPTER.ipadapterEnd,
       });
+      setDefaultRating(data.content?.defaultRating === 'mature' ? 'mature' : 'sfw');
       setTraining(data.training ? { host: '', baseModel: '', ...DEFAULT_TRAINING, ...data.training } : null);
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -100,6 +103,7 @@ export function SettingsTab() {
           swarmui: { ...localSettings.swarmui, ...ipadapter },
           defaults: localSettings.defaults,
           ...(training ? { training } : {}),
+          ...(defaultRating ? { content: { defaultRating } } : {}),
           language: localSettings.language,
         }),
       });
@@ -810,6 +814,32 @@ export function SettingsTab() {
             </div>
           </div>
         </div>
+
+        {defaultRating && (
+          <div className="settings-section card">
+            <h4>{t.settings.contentTitle}</h4>
+            <p className="text-sm text-secondary mb-md">{t.settings.contentHint}</p>
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="content-default-rating">{t.settings.defaultRating}</label>
+                <select
+                  id="content-default-rating"
+                  className="input select"
+                  value={defaultRating}
+                  onChange={(e) => {
+                    const v = e.target.value === 'mature' ? 'mature' : 'sfw';
+                    if (v === 'mature' && !confirm(t.settings.matureConfirm)) return;
+                    setDefaultRating(v);
+                  }}
+                >
+                  <option value="sfw">{t.settings.ratingSfw}</option>
+                  <option value="mature">{t.settings.ratingMature}</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-sm text-secondary mt-sm">{t.settings.contentRules}</p>
+          </div>
+        )}
 
         <AccessSection />
       </div>

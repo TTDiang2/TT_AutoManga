@@ -460,9 +460,12 @@ export function AssetTab() {
       if (data.success && data.image) {
         updatePanelImage(panelId, data.image);
         setPanelStatuses(prev => ({ ...prev, [panelId]: 'ready' }));
+        // a mature request forced SFW (a minor, or a character with no age)
+        if (data.notice) console.info(`[Generate] ${panelId}: ${data.notice}`);
       } else {
         setPanelStatuses(prev => ({ ...prev, [panelId]: 'error' }));
-        setPanelErrors(prev => ({ ...prev, [panelId]: data.error || 'Generation failed' }));
+        // detail: a refused request (HTTP 400, e.g. a mature prompt that mentions a minor)
+        setPanelErrors(prev => ({ ...prev, [panelId]: data.error || data.detail || 'Generation failed' }));
       }
     } catch (error) {
       console.error('Generation failed:', error);

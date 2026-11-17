@@ -131,11 +131,26 @@ class DefaultSettingsUpdate(BaseModel):
     exportQuality: Optional[str] = None
 
 
+class ContentConfigUpdate(BaseModel):
+    defaultRating: Optional[str] = None
+
+    @field_validator("defaultRating")
+    @classmethod
+    def _rating(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        if v not in ("sfw", "mature"):
+            raise ValueError('defaultRating must be "sfw" or "mature"')
+        return v
+
+
 class FullSettingsUpdate(BaseModel):
     api: Optional[APIConfigUpdate] = None
     swarmui: Optional[SwarmUIConfigUpdate] = None
     defaults: Optional[DefaultSettingsUpdate] = None
     training: Optional[TrainingConfigUpdate] = None
+    content: Optional[ContentConfigUpdate] = None
     language: Optional[str] = None
 
 
@@ -151,6 +166,7 @@ async def get_settings():
         "swarmui": config.settings.swarmui.model_dump(),
         "defaults": config.settings.defaults.model_dump(),
         "training": config.settings.training.model_dump(),
+        "content": config.settings.content.model_dump(),
         "language": config.settings.language
     }
 
@@ -240,6 +256,9 @@ async def update_settings(update: FullSettingsUpdate):
             # validated by TrainingConfigUpdate; only the fields sent change
             for key, value in update.training.model_dump(exclude_none=True).items():
                 setattr(config.settings.training, key, value)
+
+        if update.content and update.content.defaultRating is not None:
+            config.settings.content.defaultRating = update.content.defaultRating
 
         if update.language is not None:
             config.settings.language = update.language

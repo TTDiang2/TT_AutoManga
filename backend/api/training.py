@@ -296,6 +296,7 @@ ANGLES = ["from front", "three-quarter view", "from side", "from slightly above"
 EXPRESSIONS = ["neutral expression", "smiling", "laughing, closed eyes", "surprised, open mouth",
                "angry", "sad", "smirk", "blushing, shy smile"]
 SHOTS = ["cowboy shot", "full body", "upper body", "portrait, close-up"]
+# the dataset is always SFW: content_rating.SFW_NEG is added to this, in any mode
 GEN_NEGATIVE = ("multiple people, 2girls, 2boys, text, watermark, signature, lowres, bad anatomy, "
                 "bad hands, extra fingers, child, loli, shota")
 
@@ -322,6 +323,7 @@ class GenerateRequest(BaseModel):
 
 
 async def _generate(slug: str, appearance: str, count: int, start: int) -> None:
+    from ..content_rating import apply_rating
     from ..core.swarmui_client import swarm_client
     st = _gen[slug]
     try:
@@ -329,8 +331,10 @@ async def _generate(slug: str, appearance: str, count: int, start: int) -> None:
             i = start + k
             # a name-less LoraConfig: a non-empty list keeps generate_image
             # from falling back to settings.swarmui.currentLoras, and adds no tag
+            # always SFW, whatever the content rating (backend/content_rating.py)
+            rated = apply_rating(grid_prompt(appearance, i), GEN_NEGATIVE, cast=[], force_sfw=True)
             res = await swarm_client.generate_image(
-                prompt=grid_prompt(appearance, i), negative_prompt=GEN_NEGATIVE,
+                prompt=rated["prompt"], negative_prompt=rated["negative"],
                 width=832, height=1216, seed=SEED_BASE + i * SEED_STEP,
                 loras=[LoraConfig(name="", weight=0)])
             if res.get("success") and res.get("image", "").startswith("data:"):

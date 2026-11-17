@@ -6,6 +6,8 @@ export interface CollectionEpisode {
   pages: number;
   firstPageId: string | null;
   cover: string | null;
+  // the effective content rating (the project's, else the global default)
+  contentRating?: 'sfw' | 'mature';
   updatedAt?: string;
 }
 
@@ -22,6 +24,8 @@ export interface Collection {
   missing: string[];
   pages: number;
   coverUrl: string | null;
+  // any episode rated mature
+  mature?: boolean;
 }
 
 export interface CollectionExportJob {

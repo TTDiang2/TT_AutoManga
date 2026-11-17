@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ..content_rating import project_rating
 from ..render import collection_export
 from ..render.resolve import make_resolver
 from ..storage import collections as store
@@ -49,6 +50,7 @@ def _summaries(cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                              "pages": len(pages),
                              "firstPageId": pages[0].get("id") if pages else None,
                              "cover": project_cover_src(p),
+                             "contentRating": project_rating(p),
                              "updatedAt": p.get("updatedAt")})
         if missing:
             logger.warning("collection %s lists missing project(s): %s",
@@ -61,6 +63,7 @@ def _summaries(cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             cover = next((e["cover"] for e in episodes if e["cover"]), None)
         out.append({**c, "episodes": episodes, "missing": missing,
                     "pages": sum(e["pages"] for e in episodes),
+                    "mature": any(e["contentRating"] == "mature" for e in episodes),
                     "coverUrl": cover})
     return out
 

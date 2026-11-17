@@ -64,6 +64,9 @@ class CharacterInput(BaseModel):
     # 0-1: how strongly the sheet (``image``) guides the character's solo
     # panels through SwarmUI's IP-Adapter; None / 0 = off (opt-in)
     refWeight: Optional[float] = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    # the character's age (0-120; None = unknown). Mature projects only make
+    # mature images of characters known to be adults (18+): unknown is SFW
+    age: Optional[int] = Field(default=None, ge=0, le=120)
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -173,6 +176,12 @@ async def update_character(character_id: str, updates: Dict[str, Any]):
                     or not math.isfinite(w) or not 0 <= w <= 1:
                 raise HTTPException(status_code=422, detail="refWeight: a number from 0 to 1 (0 = off)")
             updates["refWeight"] = round(float(w), 3) or None
+    if "age" in updates:
+        # null clears it; else a whole number 0-120
+        a = updates["age"]
+        if a is not None:
+            if isinstance(a, bool) or not isinstance(a, int) or not 0 <= a <= 120:
+                raise HTTPException(status_code=422, detail="age: a whole number from 0 to 120 (or null = unknown)")
     with CHARACTERS_LOCK:
         characters = _load_characters()
         for c in characters:

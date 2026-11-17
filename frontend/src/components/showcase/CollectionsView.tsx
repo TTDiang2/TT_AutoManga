@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import type { Project } from '../../types';
 import { CollectionExportDialog } from './CollectionExportDialog';
+import { MatureCover } from './MatureCover';
 import { addEpisodes, episodeTitle, moveItem } from './collectionUtils';
 import type { Collection, CollectionEpisode } from './collectionUtils';
 import './collections.css';
@@ -316,8 +317,8 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
                 ) : (
                   col.episodes.slice(0, 4).map(ep => (
                     <div key={ep.id} className="collection-strip-cell">
-                      {ep.cover ? <img src={ep.cover} alt={ep.name} loading="lazy" />
-                        : <div className="cover-placeholder"><FiGrid size={16} /></div>}
+                      <MatureCover id={ep.id} src={ep.cover} alt={ep.name} mature={ep.contentRating === 'mature'}
+                        interactive={false} placeholder={<div className="cover-placeholder"><FiGrid size={16} /></div>} />
                     </div>
                   ))
                 )}
@@ -326,6 +327,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
                 <h4>
                   {col.name}
                   {col.auto && <span className="badge collection-auto-badge">{t.showcase.auto}</span>}
+                  {col.mature && <span className="mature-badge">{t.showcase.matureBadge}</span>}
                 </h4>
                 <p className="text-sm text-muted">
                   {col.episodes.length === 1 ? t.showcase.episodeCountOne
@@ -410,11 +412,14 @@ function EpisodeRow({ ep, index, count, collectionName, isCover, onMove, onRemov
       </span>
       <span className="episode-index">{index + 1}</span>
       <div className="episode-thumb">
-        {ep.cover ? <img src={ep.cover} alt={ep.name} loading="lazy" />
-          : <div className="cover-placeholder"><FiGrid size={14} /></div>}
+        <MatureCover id={ep.id} src={ep.cover} alt={ep.name} mature={ep.contentRating === 'mature'}
+          placeholder={<div className="cover-placeholder"><FiGrid size={14} /></div>} />
       </div>
       <div className="episode-info">
-        <div className="episode-name">{episodeTitle(collectionName, ep.name)}</div>
+        <div className="episode-name">
+          {episodeTitle(collectionName, ep.name)}
+          {ep.contentRating === 'mature' && <span className="mature-badge">{t.showcase.matureBadge}</span>}
+        </div>
         <div className="text-sm text-muted">
           {fill(t.showcase.pageCount, { n: ep.pages })}
           {isCover && <span className="badge collection-auto-badge">{t.showcase.isCover}</span>}

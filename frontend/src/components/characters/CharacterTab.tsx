@@ -5,6 +5,7 @@ import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Character, CharacterLora } from '../../types';
 import { TrainingPanel } from './TrainingPanel';
 import { uploadSheet, isInlineImage } from './sheetAsset';
+import { parseAge } from './age';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -37,6 +38,8 @@ export function CharacterTab() {
   // the sheet as an IP-Adapter reference on solo panels: 0 = off;
   // ipadapter null = not probed yet (GET /api/assets/swarmui/features)
   const [refWeight, setRefWeight] = useState(0);
+  // the age field as typed ("" = unknown); saved as a whole number or null
+  const [ageText, setAgeText] = useState('');
   const [ipadapter, setIpadapter] = useState<boolean | null>(null);
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -154,6 +157,7 @@ export function CharacterTab() {
     setEditForm({ name: char.name, description: char.description, appearance: char.appearance || '' });
     setLoraForm({ name: char.lora?.name || '', weight: char.lora?.weight ?? DEFAULT_LORA_WEIGHT, trigger: char.lora?.trigger || '' });
     setRefWeight(char.refWeight || 0);
+    setAgeText(char.age != null ? String(char.age) : '');
     setIsEditing(true);
   };
 
@@ -191,6 +195,11 @@ export function CharacterTab() {
   };
 
   const handleSave = () => {
+    const age = parseAge(ageText);
+    if (age === undefined) {
+      alert(`${t.characters.age}: 0-120`);
+      return;
+    }
     if (selectedCharId) {
       const lora: CharacterLora | null = loraForm.name
         ? { name: loraForm.name, weight: loraForm.weight, trigger: loraForm.trigger.trim() || null }
@@ -199,6 +208,7 @@ export function CharacterTab() {
         ...editForm,
         lora,
         refWeight: refWeight > 0 ? refWeight : null,
+        age,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -249,6 +259,8 @@ export function CharacterTab() {
           }
         }
         patchChar(charId, { image, updatedAt: new Date().toISOString() });
+        // a mature request forced SFW (a minor, or no age): say why
+        if (data.notice) alert(data.notice);
       } else {
         // e.g. SwarmUI's "No model input given" when Settings has no model
         alert(`Image generation failed: ${data.error || data.detail || `HTTP ${response.status}`}`);
@@ -474,6 +486,22 @@ export function CharacterTab() {
                 <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.loraHint}</p>
               </div>
               <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-age">{t.characters.age}</label>
+                <input
+                  id="char-age"
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={120}
+                  step={1}
+                  placeholder={t.characters.ageUnknown}
+                  value={ageText}
+                  onChange={e => setAgeText(e.target.value)}
+                  style={{ width: '120px' }}
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.ageHint}</p>
+              </div>
+              <div style={{ marginBottom: '12px' }}>
                 <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-ref-weight">{t.characters.refWeight}</label>
                 <div className="flex gap-sm items-center">
                   <input
@@ -595,6 +623,11 @@ export function CharacterTab() {
                       </p>
                     </div>
                   )}
+
+                  <div style={{ marginTop: '16px' }}>
+                    <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.age}</h4>
+                    <p style={{ fontSize: '14px' }}>{selectedChar.age != null ? selectedChar.age : t.characters.ageUnknown}</p>
+                  </div>
 
                   {!!selectedChar.refWeight && selectedChar.image && (
                     <div style={{ marginTop: '16px' }}>
