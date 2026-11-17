@@ -12,7 +12,7 @@ import uvicorn
 import json
 import time
 
-from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, fonts
+from .api import storyboard, prompt, assets, project, export, settings, layouts, archive, character_templates, characters, composer_templates, render, agent, comics, comics_rewrite, fonts
 from .api import auth as auth_api
 from .api import auth_google as auth_google_api
 from .api import training as training_api
@@ -258,6 +258,7 @@ app.include_router(composer_templates.router)
 app.include_router(render.router)
 app.include_router(agent.router)
 app.include_router(comics.router)
+app.include_router(comics_rewrite.router)
 app.include_router(fonts.router)
 app.include_router(training_api.router)
 app.include_router(collections_api.router)

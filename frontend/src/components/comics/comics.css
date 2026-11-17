@@ -248,6 +248,15 @@
   tab-size: 2;
 }
 
+/* the editor and the AI rewrite popover floating over it */
+.comics-editor-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 360px;
+}
+
 .comics-editor {
   resize: none;
   background: var(--bg-primary);

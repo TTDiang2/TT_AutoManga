@@ -226,19 +226,25 @@ def plan_script(name: str, req: PlanRequest):
     path = _script_path(name)
     if req.text is None and not path.exists():
         raise HTTPException(status_code=404, detail="script not found")
+    return _run_plan(path, req.text, face=req.face, uncut=req.uncut)
+
+
+def _run_plan(path: Path, text: Optional[str], face: bool = False, uncut: bool = False) -> Dict[str, Any]:
+    """comic.js --plan of the script at path (text: unsaved text, sent with --stdin): the plan dict
+    ({ok: true, panels, ...} or {ok: false, error, line}). Blocking: call it from a thread."""
     if not (COMICS_DIR / "comic.js").exists():
         raise HTTPException(status_code=404, detail=f"no comic.js in {COMICS_DIR}")
     node = _node()
     args = [node, str(COMICS_DIR / "comic.js"), str(path), "--plan"]
-    if req.text is not None:
+    if text is not None:
         args.append("--stdin")
-    if req.face:
+    if face:
         args.append("--face")
-    if req.uncut:
+    if uncut:
         args.append("--uncut")
     try:
         proc = subprocess.run(args, cwd=str(COMICS_DIR), env=_node_env(node),
-                              input=req.text if req.text is not None else "",
+                              input=text if text is not None else "",
                               capture_output=True, text=True, timeout=_PLAN_TIMEOUT)
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail=f"comic.js --plan took over {_PLAN_TIMEOUT}s")
