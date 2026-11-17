@@ -88,6 +88,11 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* form controls don't inherit the page font by default (buttons showed the browser's serif) */
+button, input, select, textarea {
+  font-family: inherit;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;

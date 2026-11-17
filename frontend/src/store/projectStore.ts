@@ -187,7 +187,8 @@ export const useProjectStore = create<ProjectStore>()(
               charMap.set(charName, {
                 id: `char_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 name: charName,
-                description: panel.dialogue || '',
+                // not the panel's dialogue: that is a line someone says, not who they are
+                description: '',
                 sourcePanelIds: [panel.id],
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),

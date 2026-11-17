@@ -108,11 +108,16 @@ export function CharacterTab() {
   const handleGenerateImage = async (charId: string) => {
     const char = characters.find(c => c.id === charId);
     if (!char) return;
+    // the appearance is the image prompt; a name alone paints a random person
+    if (!char.appearance?.trim()) {
+      alert(`${char.name} has no appearance yet. Click Edit and describe how they look (it is the image prompt).`);
+      return;
+    }
 
     setGeneratingFor(charId);
 
     try {
-      const prompt = char.appearance || `${char.name}, ${char.description}`;
+      const prompt = char.appearance;
       
       const response = await fetch('/api/characters/templates/generate-image', {
         method: 'POST',
@@ -129,9 +134,13 @@ export function CharacterTab() {
       
       if (data.success && data.image) {
         updateCharacter(charId, { image: data.image, updatedAt: new Date().toISOString() });
+      } else {
+        // e.g. SwarmUI's "No model input given" when Settings has no model
+        alert(`Image generation failed: ${data.error || data.detail || `HTTP ${response.status}`}`);
       }
     } catch (err) {
       console.error('Failed to generate character image:', err);
+      alert(`Image generation failed: ${(err as Error).message}`);
     } finally {
       setGeneratingFor(null);
     }
@@ -366,7 +375,7 @@ export function CharacterTab() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {selectedChar.description && (
                     <div style={{ marginBottom: '16px' }}>
-                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.description}</h4>
+                      <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.desc}</h4>
                       <p style={{ fontSize: '14px', lineHeight: '1.5', wordBreak: 'break-word' }}>{selectedChar.description}</p>
                     </div>
                   )}
