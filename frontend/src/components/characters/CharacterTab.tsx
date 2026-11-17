@@ -4,6 +4,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Character, CharacterLora } from '../../types';
 import { TrainingPanel } from './TrainingPanel';
+import { uploadSheet, isInlineImage } from './sheetAsset';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -43,6 +44,7 @@ export function CharacterTab() {
   // the server's library is empty: characters this browser has (or the storyboard names),
   // added only when the user asks (opening the tab writes nothing)
   const [seedCandidates, setSeedCandidates] = useState<Character[]>([]);
+  const [migrating, setMigrating] = useState(false);
 
   // The library is shared (the Comics converter adds characters too), so
   // changes go through the per-item endpoints; posting the full list would
@@ -77,6 +79,26 @@ export function CharacterTab() {
     removeCharacter(id);
     fetch(`/api/characters/${encodeURIComponent(id)}`, { method: 'DELETE' })
       .then(checked).catch(reportSyncError('delete'));
+  };
+
+  const loadLibrary = () => fetch('/api/characters/')
+    .then(checked)
+    .then(r => r.json())
+    .then(data => { if (Array.isArray(data)) setCharacters(data); });
+
+  // sheets saved as data URLs (before they went to the asset store): move them out of characters.json
+  const migrateImages = async () => {
+    setMigrating(true);
+    try {
+      const r = await fetch('/api/characters/migrate-images', { method: 'POST' }).then(checked);
+      const data = await r.json();
+      await loadLibrary();
+      if (data.failed) alert(fill(t.characters.migrateFailed, { n: data.failed }));
+    } catch (err) {
+      alert(fill(t.characters.migrateError, { error: (err as Error).message }));
+    } finally {
+      setMigrating(false);
+    }
   };
 
   useEffect(() => {
@@ -217,7 +239,16 @@ export function CharacterTab() {
       const data = await response.json();
       
       if (data.success && data.image) {
-        patchChar(charId, { image: data.image, updatedAt: new Date().toISOString() });
+        // the asset store keeps the picture; the character only its URL
+        let image: string = data.image;
+        if (isInlineImage(image)) {
+          try {
+            image = await uploadSheet(image, `${charId}.png`);
+          } catch (err) {
+            console.warn('[characters] storing the generated sheet as an asset failed, keeping it inline:', err);
+          }
+        }
+        patchChar(charId, { image, updatedAt: new Date().toISOString() });
       } else {
         // e.g. SwarmUI's "No model input given" when Settings has no model
         alert(`Image generation failed: ${data.error || data.detail || `HTTP ${response.status}`}`);
@@ -246,15 +277,19 @@ export function CharacterTab() {
     setShowTemplates(false);
   };
 
-  const handleUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedCharId) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string;
-      patchChar(selectedCharId, { image: result, updatedAt: new Date().toISOString() });
-    };
-    reader.readAsDataURL(file);
+  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    const charId = selectedCharId;
+    if (!file || !charId) return;
+    try {
+      const url = await uploadSheet(file);
+      patchChar(charId, { image: url, updatedAt: new Date().toISOString() });
+    } catch (err) {
+      alert(fill(t.characters.uploadFailed, { error: (err as Error).message }));
+    } finally {
+      input.value = '';
+    }
   };
 
   const handleSaveAsTemplate = async () => {
@@ -307,6 +342,15 @@ export function CharacterTab() {
                 {tpl.isBuiltIn && <span style={{ fontSize: '10px', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '10px', marginTop: '4px', display: 'inline-block' }}>{t.characters.builtIn}</span>}
               </div>
             ))}
+          </div>
+        )}
+
+        {characters.some(c => isInlineImage(c.image)) && (
+          <div className="character-migrate" style={{ margin: '8px 0 12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+            <p style={{ marginBottom: '6px' }}>{t.characters.migrateHint}</p>
+            <button className="btn btn-secondary" onClick={migrateImages} disabled={migrating}>
+              <FiUpload size={14} /> {migrating ? t.characters.migrating : t.characters.migrate}
+            </button>
           </div>
         )}
 

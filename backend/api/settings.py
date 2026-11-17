@@ -1,10 +1,20 @@
+import re
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
 from ..core import config
 from ..core.config import is_masked_api_key
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+# user@host for ssh: no leading "-" (it would be read as an ssh option)
+_HOST_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,63}@[A-Za-z0-9][A-Za-z0-9.-]{0,252}")
+_REMOTE_PATH_RE = re.compile(r"[A-Za-z0-9_./~+-]{1,400}")
+_FOLDER_RE = re.compile(r"[A-Za-z0-9_][\w .-]{0,63}(/[A-Za-z0-9_][\w .-]{0,63}){0,3}")
+# SwarmUI's "IP-Adapter Weight Type" values the Settings tab offers
+IPADAPTER_WEIGHT_TYPES = ("standard", "prompt is more important", "style transfer")
 
 
 class APIConfigUpdate(BaseModel):
@@ -42,6 +52,78 @@ class SwarmUIConfigUpdate(BaseModel):
     ipadapterWeightType: Optional[str] = None
     ipadapterEnd: Optional[float] = None
 
+    @field_validator("ipadapterPreset")
+    @classmethod
+    def _preset(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v or len(v) > 120 or _CONTROL_RE.search(v):
+            raise ValueError("an IP-Adapter preset is a SwarmUI preset name (1-120 characters)")
+        return v
+
+    @field_validator("ipadapterWeightType")
+    @classmethod
+    def _weight_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in IPADAPTER_WEIGHT_TYPES:
+            raise ValueError(f"ipadapterWeightType must be one of {list(IPADAPTER_WEIGHT_TYPES)}")
+        return v
+
+
+class TrainingConfigUpdate(BaseModel):
+    """settings.training (the ai-toolkit trainer). Every value ends up in an
+    ssh command line or a local path, so the formats are strict."""
+    host: Optional[str] = None
+    toolkitDir: Optional[str] = None
+    python: Optional[str] = None
+    baseModel: Optional[str] = None
+    loraFolder: Optional[str] = None
+    sampling: Optional[bool] = None
+    resolution: Optional[List[int]] = None
+    cacheTextEmbeddings: Optional[bool] = None
+
+    @field_validator("host")
+    @classmethod
+    def _host(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not _HOST_RE.fullmatch(v):
+            raise ValueError("host is user@host (letters, digits, . _ -; no spaces or quotes)")
+        return v
+
+    @field_validator("toolkitDir", "python", "baseModel")
+    @classmethod
+    def _path(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not _REMOTE_PATH_RE.fullmatch(v) or v.startswith("-"):
+            raise ValueError("a trainer path is letters, digits, / ~ . _ - and + "
+                             "(no spaces or quotes)")
+        return v
+
+    @field_validator("loraFolder")
+    @classmethod
+    def _folder(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip().strip("/")
+        if not _FOLDER_RE.fullmatch(v) or ".." in v:
+            raise ValueError("loraFolder is a folder under SwarmUI Models/Lora: names of "
+                             "letters, digits, space, _ . - separated by / (no ..)")
+        return v
+
+    @field_validator("resolution")
+    @classmethod
+    def _resolution(cls, v: Optional[List[int]]) -> Optional[List[int]]:
+        if v is None:
+            return None
+        v = sorted(set(v))
+        if not v or len(v) > 8 or any(r % 64 or not 256 <= r <= 1536 for r in v):
+            raise ValueError("resolution is 1-8 sizes, each a multiple of 64 from 256 to 1536")
+        return v
+
 
 class DefaultSettingsUpdate(BaseModel):
     detailLevel: Optional[int] = None
@@ -53,6 +135,7 @@ class FullSettingsUpdate(BaseModel):
     api: Optional[APIConfigUpdate] = None
     swarmui: Optional[SwarmUIConfigUpdate] = None
     defaults: Optional[DefaultSettingsUpdate] = None
+    training: Optional[TrainingConfigUpdate] = None
     language: Optional[str] = None
 
 
@@ -67,6 +150,7 @@ async def get_settings():
         "api": api,
         "swarmui": config.settings.swarmui.model_dump(),
         "defaults": config.settings.defaults.model_dump(),
+        "training": config.settings.training.model_dump(),
         "language": config.settings.language
     }
 
@@ -152,6 +236,11 @@ async def update_settings(update: FullSettingsUpdate):
             if update.defaults.exportQuality is not None:
                 config.settings.defaults.exportQuality = update.defaults.exportQuality
         
+        if update.training:
+            # validated by TrainingConfigUpdate; only the fields sent change
+            for key, value in update.training.model_dump(exclude_none=True).items():
+                setattr(config.settings.training, key, value)
+
         if update.language is not None:
             config.settings.language = update.language
         

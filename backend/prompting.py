@@ -180,7 +180,8 @@ def _image_dataurl(ref: Any) -> Optional[str]:
             path = asset_store.path_for(ref.rsplit("/", 1)[-1])
             if not path:
                 return None
-            mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+            mime = {".png": "image/png", ".webp": "image/webp",
+                    ".gif": "image/gif"}.get(path.suffix.lower(), "image/jpeg")
             return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
         except Exception as e:
             logging.getLogger(__name__).debug("sheet asset unreadable: %s", e)

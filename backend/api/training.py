@@ -478,7 +478,9 @@ def _prepare_and_launch(job_id: str) -> None:
                    f"{trig}, solo, sitting, laughing, upper body, night, city background"]
         cfg_text = tr.render_config(name=job["name"], trigger=trig, folder_path=folder,
                                     base_model=remote.base_model, steps=job["steps"], prompts=prompts,
-                                    sampling=config.settings.training.sampling)
+                                    sampling=config.settings.training.sampling,
+                                    resolution=config.settings.training.resolution,
+                                    cache_text_embeddings=config.settings.training.cacheTextEmbeddings)
         cfg_path, log = f"{jd}/config.yaml", f"{jd}/train.log"
         job = _check_current(job_id, "pushing")
         remote.write_file(cfg_path, cfg_text)

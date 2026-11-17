@@ -28,6 +28,7 @@ SUPPORTED_OS = ("linux",)
 READ_LIMIT = 1 << 20          # max log bytes fetched per poll
 _STAT_RE = re.compile(r"^AMSTAT (\S+) ([01])$")
 _HOMES: Dict[str, str] = {}   # host → $HOME, read once per process
+DEFAULT_RESOLUTION = [512, 768]   # settings training.resolution's default
 
 
 class RemoteError(RuntimeError):
@@ -52,12 +53,16 @@ def clean_text(text: str) -> str:
 
 
 def render_config(*, name: str, trigger: str, folder_path: str, base_model: str,
-                  steps: int, prompts: List[str], sampling: bool = False) -> str:
+                  steps: int, prompts: List[str], sampling: bool = False,
+                  resolution: Optional[List[int]] = None,
+                  cache_text_embeddings: bool = False) -> str:
     prompts = [clean_text(p) for p in prompts]
     values = {
         "name": name, "trigger": trigger, "folder_path": folder_path,
         "base_model": base_model, "steps": int(steps),
         "disable_sampling": not sampling,
+        "resolution": [int(r) for r in (resolution or DEFAULT_RESOLUTION)],
+        "cache_text_embeddings": bool(cache_text_embeddings),
         "prompt_1": prompts[0], "prompt_2": prompts[1] if len(prompts) > 1 else prompts[0],
     }
     text = TEMPLATE.read_text(encoding="utf-8")

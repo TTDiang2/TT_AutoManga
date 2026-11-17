@@ -1,8 +1,11 @@
 # ai-toolkit job for one character LoRA, rendered by backend/training.py.
 # The recipe is the one that trained the sf_* LoRAs
 # (~/ai-toolkit/output/sf_mara/config.yaml on the Razer) verbatim except
-# name, trigger_word, folder_path, model path, steps, sample prompts and
-# disable_sampling (settings training.sampling, off: previews OOM on 8 GB).
+# name, trigger_word, folder_path, model path, steps, sample prompts,
+# disable_sampling (settings training.sampling, off: previews OOM on 8 GB),
+# the dataset resolution (settings training.resolution, default [512, 768]:
+# the recipe's 768/1024 OOMs on 8 GB with full-size panels) and
+# cache_text_embeddings (settings training.cacheTextEmbeddings, off).
 # Placeholders (double braces) are substituted as JSON strings/numbers (valid YAML).
 job: extension
 config:
@@ -26,14 +29,13 @@ config:
       caption_dropout_rate: 0.05
       shuffle_tokens: false
       cache_latents_to_disk: true
-      resolution:
-      - 768
-      - 1024
+      resolution: {{resolution}}
     train:
       batch_size: 1
       steps: {{steps}}
       gradient_accumulation: 1
       disable_sampling: {{disable_sampling}}
+      cache_text_embeddings: {{cache_text_embeddings}}
       train_unet: true
       train_text_encoder: false
       gradient_checkpointing: true

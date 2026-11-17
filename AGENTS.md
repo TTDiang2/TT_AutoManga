@@ -289,7 +289,15 @@ curl -s -X POST $BASE/api/agent/export -H 'Content-Type: application/json' \
 #    "zip": {"path": "...", "url": "/api/export/download/..."}}
 #    page_numbers stamps bottom-center numbers on every page but the first.
 # (format "pdf" or "zip" returns only that key; download URLs are same-origin GETs)
+# Once downloaded, delete AutoManga's copy (the file, and its _pages/ folder
+# when no PDF/ZIP of that name is left):
+curl -s -X DELETE $BASE/api/export/download/manga_1a2b3c4d_20261117_120000.pdf
 ```
+
+Exports are pruned on every new export: `data/exports/` keeps nothing older
+than 7 days and at most the 20 newest exports per project (grouped by the
+name's `manga_<project id, first 8>` / `composer` prefix; other files there
+are left alone).
 
 **Preview-adjust loop**: render `preview.png` at every meaningful step and
 actually inspect it (you can read images). Overlapping bubbles, clipped
@@ -359,7 +367,15 @@ released at 70% keeps the scene and inking and still carries face, hair and
 outfit details (0.5 is a good refWeight). Panels listing several people
 never get one (a single reference blends faces). A project entry
 (`settings.characters[]`) may override `refWeight`/`image`; sheets are read
-only from data URLs or `/api/assets/file/<id>`. `swarm_client.generate_image`
+only from data URLs or `/api/assets/file/<id>`; the Characters tab uploads and
+generates sheets into the asset store (`POST /api/assets/file`, kind
+`character`) and keeps the URL, and `POST /api/characters/migrate-images`
+moves remaining data-URL sheets out of `data/characters.json`
+(→ `{migrated, failed}`, idempotent). Library and per-project character
+images count as references for the startup orphan-asset cleanup. The
+preset, weight type and end are in the Settings tab ("IP-Adapter"; weight
+type one of `standard`, `prompt is more important`, `style transfer`).
+`swarm_client.generate_image`
 takes `prompt_images` / `ipadapter` / `ipadapter_weight` /
 `ipadapter_weight_type` / `ipadapter_end` and sends nothing IP-Adapter unless both images and a
 preset are given; `promptimages` is redacted in the payload log. Applied by
@@ -488,7 +504,11 @@ without force.
 Character LoRAs are trained on the Razer (ai-toolkit, the sf_* SDXL recipe)
 over ssh/scp; setup and troubleshooting: `docs/TRAINING.md`. Settings live in
 `data/settings.json` → `training {host, os, toolkitDir, python, baseModel,
-loraFolder, sampling}` (edit the file; `GET /api/training/settings` shows them).
+loraFolder, sampling, resolution, cacheTextEmbeddings}` (Settings tab "LoRA
+training" or `POST /api/settings/ {"training": {...}}`, validated;
+`GET /api/training/settings` shows them). `resolution` (default `[512, 768]`)
+is the dataset bucket list: 1024 ran out of memory on the 8 GB RTX 3070 with
+full-size panels.
 
 - Datasets: `data/training/<slug>/img_NNN.png` + `img_NNN.txt` (the trigger
   word only) + `meta.json`. `GET/POST /api/training/datasets`

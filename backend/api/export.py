@@ -9,8 +9,10 @@ import zipfile
 import uuid
 import base64
 import logging
+import shutil
 from pathlib import Path
 
+from ..render.export_service import prune_exports
 from ..render.resolve import ref_to_bytes
 from ..storage.manager import validate_project_id, InvalidProjectIdError
 
@@ -119,6 +121,7 @@ def _export_pdf_sync(req: ExportPDFRequest) -> dict:
     output_path = EXPORTS_DIR / filename
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     output_path.write_bytes(buffer.getvalue())
+    prune_exports(EXPORTS_DIR, keep={output_path.stem})
     return {"success": True, "file": str(output_path)}
 
 
@@ -141,6 +144,7 @@ def _export_images_sync(req: ExportImagesRequest) -> dict:
                 img_bytes = _panel_image_bytes(panel["image"])
                 if img_bytes:
                     zf.writestr(f"panel_{i+1:03d}.{req.format}", img_bytes)
+    prune_exports(EXPORTS_DIR, keep={output_path.stem})
     return {"success": True, "file": str(output_path)}
 
 
@@ -187,6 +191,7 @@ def _export_composer_pdf_sync(req: ComposerExportRequest) -> dict:
     filename = f"composer_{uuid.uuid4().hex[:8]}.pdf"
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
     (EXPORTS_DIR / filename).write_bytes(buffer.getvalue())
+    prune_exports(EXPORTS_DIR, keep={Path(filename).stem})
     return {"success": True, "downloadUrl": f"/api/export/download/{filename}"}
 
 
@@ -210,6 +215,7 @@ def _export_composer_images_sync(req: ComposerExportRequest) -> dict:
                     zf.writestr(fname, img_bytes)
                 except Exception as e:
                     logger.warning("composer zip: skipping undecodable page %d: %s", i + 1, e)
+    prune_exports(EXPORTS_DIR, keep={Path(zip_name).stem})
     return {"success": True, "downloadUrl": f"/api/export/download/{zip_name}"}
 
 
@@ -231,3 +237,31 @@ async def download_file(filename: str):
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path, media_type="application/octet-stream", filename=filename)
+
+
+# what the export endpoints write: a flat <name>.pdf or <name>.zip
+_EXPORT_FILE_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,200}\.(?:pdf|zip)")
+
+
+@router.delete("/download/{filename}")
+async def delete_export(filename: str):
+    """Remove an export (once a client has downloaded it) and, when no PDF or
+    ZIP of the same name is left, its <name>_pages/ folder of page PNGs."""
+    if not _EXPORT_FILE_RE.fullmatch(filename) or ".." in filename:
+        raise HTTPException(status_code=400, detail="not an export file name")
+    root = EXPORTS_DIR.resolve()
+    path = (EXPORTS_DIR / filename).resolve()
+    if path.parent != root or not path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    path.unlink()
+    deleted = [filename]
+    stem = path.stem
+    pages = EXPORTS_DIR / f"{stem}_pages"
+    siblings = [EXPORTS_DIR / f"{stem}{ext}" for ext in (".pdf", ".zip")]
+    if pages.is_dir() and not pages.is_symlink() \
+            and pages.resolve().parent == root \
+            and not any(p.exists() for p in siblings):
+        shutil.rmtree(pages)
+        deleted.append(pages.name)
+    logger.info("export deleted: %s", ", ".join(deleted))
+    return {"success": True, "deleted": deleted}

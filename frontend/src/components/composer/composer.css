@@ -1101,9 +1101,18 @@
 
 .composer-corner-row {
   display: grid;
-  grid-template-columns: 60px 1fr 1fr;
+  /* minmax(0, …): a number input's intrinsic width (~150px) must not widen
+     the 1fr tracks past the 260px panel */
+  grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px;
   align-items: center;
+}
+
+.composer-corner-row .composer-prop-input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 4px;
 }
 
 .composer-corner-key {

@@ -8,9 +8,13 @@ Two entry points over the same renderer:
 PDF pages are sized 1 image px = 1 pt, i.e. the page's own width/height.
 """
 import io
+import logging
+import re
+import shutil
+import time
 import zipfile
 from pathlib import Path
-from typing import Iterator, List, Tuple
+from typing import Iterable, Iterator, List, Optional, Tuple
 from PIL import Image
 from . import render_page
 
@@ -18,6 +22,85 @@ from . import render_page
 # layer). Some PDF viewers render A85+Flate filter arrays as blank pages.
 from reportlab import rl_config as _rl_config
 _rl_config.useA85 = 0
+
+logger = logging.getLogger(__name__)
+
+# data/exports pruning: every export writes <base>.pdf/.zip (+ <base>_pages/);
+# on each new export, ones older than this go, and of the rest at most
+# EXPORT_KEEP_PER_PROJECT newest per project stay.
+EXPORT_MAX_AGE_DAYS = 7
+EXPORT_KEEP_PER_PROJECT = 20
+
+# <kind>[_<project id>]_<timestamp or 8 hex>: manga_<id8>_20261117_073326
+# (agent export), manga_<project id>_ab12cd34 (/api/export/pdf|images),
+# composer_ab12cd34 (/api/export/composer-*). Anything else is left alone.
+_EXPORT_STEM_RE = re.compile(
+    r"(?P<kind>[a-z]+)(?:_(?P<pid>[\w-]+?))?_(?:\d{8}_\d{6}|[0-9a-f]{8})")
+
+
+def export_group(stem: str) -> Optional[str]:
+    """The project an export stem belongs to ("manga:67537cf6", "composer:"),
+    None for a name no export writes. Agent exports carry only the first 8
+    characters of the project id, so the full-id ones are grouped by those."""
+    m = _EXPORT_STEM_RE.fullmatch(stem)
+    if not m:
+        return None
+    return f"{m.group('kind')}:{(m.group('pid') or '')[:8]}"
+
+
+def _export_stem(p: Path) -> Optional[str]:
+    if p.is_symlink():
+        return None
+    if p.is_dir() and p.name.endswith("_pages"):
+        return p.name[:-len("_pages")]
+    if p.is_file() and p.suffix.lower() in (".pdf", ".zip"):
+        return p.stem
+    return None
+
+
+def prune_exports(out_dir: Path, keep: Iterable[str] = (),
+                  max_age_days: float = EXPORT_MAX_AGE_DAYS,
+                  keep_per_project: int = EXPORT_KEEP_PER_PROJECT,
+                  now: Optional[float] = None) -> List[str]:
+    """Delete exports (PDF, ZIP and _pages/ folder of one stem together) older
+    than max_age_days, and beyond the keep_per_project newest of each
+    project. Stems in ``keep`` (the export just written) always stay. Never
+    raises: a failed prune must not fail the export. Returns deleted names."""
+    deleted: List[str] = []
+    try:
+        if not out_dir.is_dir():
+            return deleted
+        now = time.time() if now is None else now
+        keep = set(keep)
+        stems: dict = {}   # stem -> [paths]
+        for p in out_dir.iterdir():
+            stem = _export_stem(p)
+            if stem is not None and export_group(stem) is not None:
+                stems.setdefault(stem, []).append(p)
+        groups: dict = {}  # group -> [(mtime, stem)]
+        for stem, paths in stems.items():
+            mtime = max(p.stat().st_mtime for p in paths)
+            groups.setdefault(export_group(stem), []).append((mtime, stem))
+        cutoff = now - max_age_days * 86400
+        for entries in groups.values():
+            entries.sort(reverse=True)
+            for i, (mtime, stem) in enumerate(entries):
+                if stem in keep or (i < keep_per_project and mtime >= cutoff):
+                    continue
+                for p in stems[stem]:
+                    try:
+                        if p.is_dir():
+                            shutil.rmtree(p)
+                        else:
+                            p.unlink()
+                        deleted.append(p.name)
+                    except OSError as e:
+                        logger.warning("prune exports: could not delete %s: %s", p.name, e)
+        if deleted:
+            logger.info("pruned %d old export file(s)/folder(s)", len(deleted))
+    except OSError as e:
+        logger.warning("prune exports failed: %s", e)
+    return deleted
 
 
 def _stamp_page_number(img: Image.Image, index: int, scale: float) -> None:
@@ -141,4 +224,5 @@ def export_pages(pages: List[dict], fmt: str, scale: float, resolve,
                 zf.write(f, f.name)
         result["zip"] = {"path": str(zip_path),
                          "url": f"/api/export/download/{zip_path.name}"}
+    prune_exports(out_dir, keep={base_name})
     return result

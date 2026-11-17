@@ -30,25 +30,22 @@ async def enhance_prompt(req: EnhanceRequest):
     if not req.scene_description.strip():
         raise HTTPException(status_code=400, detail="Scene description cannot be empty")
     
-    client.reload_from_settings()
-    
-    # the frontend echoes the masked key from GET /api/settings/; only a
-    # freshly typed key overrides the stored one, and the stored key never
-    # goes to an endpoint other than the stored one
-    client.apply_request_endpoint(req.endpoint, req.api_key)
-    if req.model:
-        client.update_config(model=req.model)
+    # a request-local client (never the shared one: concurrent requests
+    # would swap endpoints/keys). The frontend echoes the masked key from GET
+    # /api/settings/; only a freshly typed key overrides the stored one, and
+    # the stored key never goes to an endpoint other than the stored one
+    llm = client.for_request(req.endpoint, req.api_key, model=req.model)
     
     logger.info(
         "prompt/enhance mode=%s model=%s endpoint=%s scene_len=%d",
         req.mode,
-        req.model or client.model,
-        req.endpoint or client.endpoint,
+        req.model or llm.model,
+        req.endpoint or llm.endpoint,
         len(req.scene_description),
     )
     
     try:
-        result = await client.enhance_prompt(req.scene_description, req.mode)
+        result = await llm.enhance_prompt(req.scene_description, req.mode)
         logger.info(
             "prompt/enhance OK mode=%s out_len=%d",
             req.mode,
@@ -65,27 +62,24 @@ async def batch_enhance_prompts(req: BatchEnhanceRequest):
     if not req.scenes:
         raise HTTPException(status_code=400, detail="No scenes provided")
     
-    client.reload_from_settings()
-    
-    # the frontend echoes the masked key from GET /api/settings/; only a
-    # freshly typed key overrides the stored one, and the stored key never
-    # goes to an endpoint other than the stored one
-    client.apply_request_endpoint(req.endpoint, req.api_key)
-    if req.model:
-        client.update_config(model=req.model)
+    # a request-local client (never the shared one: concurrent requests
+    # would swap endpoints/keys). The frontend echoes the masked key from GET
+    # /api/settings/; only a freshly typed key overrides the stored one, and
+    # the stored key never goes to an endpoint other than the stored one
+    llm = client.for_request(req.endpoint, req.api_key, model=req.model)
     
     logger.info(
         "prompt/batch-enhance mode=%s model=%s endpoint=%s count=%d",
         req.mode,
-        req.model or client.model,
-        req.endpoint or client.endpoint,
+        req.model or llm.model,
+        req.endpoint or llm.endpoint,
         len(req.scenes),
     )
     
     results = []
     for scene in req.scenes:
         try:
-            result = await client.enhance_prompt(scene, req.mode)
+            result = await llm.enhance_prompt(scene, req.mode)
             results.append(result)
         except Exception as e:
             logger.exception("prompt/batch-enhance item failed: %s", e)
