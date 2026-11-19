@@ -66,7 +66,7 @@ export const PropertiesPanel = memo(function PropertiesPanel() {
   const isFrame = selectedElement?.type === 'image' || selectedElement?.type === 'image-slot' || selectedElement?.type === 'page-image';
 
   return (
-    <div className="composer-properties">
+    <div className="composer-properties" data-tour="composer-properties">
       <div className="composer-properties-header">
         {selectedElement ? `${t.composer.properties} — ${selectedElement.type}` : t.composer.properties}
       </div>

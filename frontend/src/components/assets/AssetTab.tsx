@@ -487,7 +487,7 @@ export function AssetTab() {
     <div className="asset-tab">
       <div className="asset-header flex items-center justify-between mb-lg">
         <div className="flex items-center gap-md">
-          <div className="mode-toggle">
+          <div className="mode-toggle" data-tour="assets-mode">
             <button
               className={`mode-btn ${promptMode === 'turbo' ? 'active' : ''}`}
               onClick={() => setPromptMode('turbo')}
@@ -501,7 +501,7 @@ export function AssetTab() {
               <FiTag size={16} /> {t.prompt.sdxl}
             </button>
           </div>
-          <div className="view-toggle" style={{ marginLeft: '16px', display: 'flex', gap: '4px', padding: '4px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
+          <div className="view-toggle" data-tour="assets-view" style={{ marginLeft: '16px', display: 'flex', gap: '4px', padding: '4px', background: 'var(--bg-tertiary)', borderRadius: '8px' }}>
             <button
               className={`view-btn ${viewMode === 'generated' ? 'active' : ''}`}
               onClick={() => setViewMode('generated')}
@@ -523,6 +523,7 @@ export function AssetTab() {
             <button
               className="btn btn-primary"
               onClick={handleGenerateAll}
+              data-tour="assets-generate-all"
               disabled={generatingPanels.length > 0}
               style={{ whiteSpace: 'nowrap' }}
             >
@@ -530,7 +531,7 @@ export function AssetTab() {
               {t.assets.generateAll || 'Generate All'}
             </button>
           )}
-          <span className={`connection-status ${swarmUIConnected ? 'connected' : 'disconnected'}`}>
+          <span className={`connection-status ${swarmUIConnected ? 'connected' : 'disconnected'}`} data-tour="assets-status">
             <span className="status-dot" />
             SwarmUI: {swarmUIConnected === null ? t.assets.checking : swarmUIConnected ? t.assets.connected : t.assets.disconnected}
           </span>
@@ -652,7 +653,7 @@ export function AssetTab() {
               <p>{t.assets.noPanelsDesc}</p>
             </div>
           ) : (
-            <div className="assets-grid">
+            <div className="assets-grid" data-tour="assets-grid">
         {panels.map((panel, index) => (
           <PanelSlot
             key={panel.id}
