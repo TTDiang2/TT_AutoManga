@@ -22,6 +22,11 @@ export const translations = {
       detailLevel: 'Detail Level',
       abstract: 'Abstract',
       detailed: 'Detailed',
+      importFile: 'Import',
+      importFileHint: 'Load a .md or .txt file into the text box (or drop one on it)',
+      importReplaceConfirm: 'Replace the current text with the imported file?',
+      importInvalid: 'Only .md and .txt files can be imported.',
+      importTooLarge: 'File is too large (max 5 MB).',
     },
     prompt: {
       title: 'Prompt Lab',
@@ -403,6 +408,11 @@ export const translations = {
       detailLevel: '详细程度',
       abstract: '简略',
       detailed: '详细',
+      importFile: '导入',
+      importFileHint: '将 .md 或 .txt 文件载入文本框（也可直接拖入）',
+      importReplaceConfirm: '用导入的文件替换当前文本？',
+      importInvalid: '只能导入 .md 和 .txt 文件。',
+      importTooLarge: '文件过大（最大 5 MB）。',
     },
     prompt: {
       title: '提示词实验室',
