@@ -13,10 +13,12 @@ import {
   FiBookOpen,
   FiMonitor,
   FiSun,
-  FiMoon
+  FiMoon,
+  FiCompass
 } from 'react-icons/fi';
 
 const tabs: { id: TabId; icon: React.ReactNode }[] = [
+  { id: 'wizard', icon: <FiCompass size={20} /> },
   { id: 'storyboard', icon: <FiFileText size={20} /> },
   { id: 'characters', icon: <FiUser size={20} /> },
   { id: 'prompt', icon: <FiEdit3 size={20} /> },

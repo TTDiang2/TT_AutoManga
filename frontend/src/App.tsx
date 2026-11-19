@@ -8,6 +8,7 @@ import { ShowcaseTab } from './components/showcase/ShowcaseTab';
 import { SettingsTab } from './components/settings/SettingsTab';
 import { CharacterTab } from './components/characters/CharacterTab';
 import { ComicsTab } from './components/comics/ComicsTab';
+import { WizardTab } from './components/wizard/WizardTab';
 import { useProjectStore } from './store/projectStore';
 import { useTranslation } from './hooks/useTranslation';
 import './styles/globals.css';
@@ -48,6 +49,8 @@ function App() {
 
   const renderTab = () => {
     switch (activeTab) {
+      case 'wizard':
+        return <WizardTab />;
       case 'storyboard':
         return <StoryboardTab />;
       case 'prompt':
@@ -71,6 +74,7 @@ function App() {
 
   const title = t.tabs[activeTab];
   const descriptions: Record<string, string> = {
+    wizard: t.wizard.description,
     storyboard: t.storyboard.description,
     prompt: t.prompt.description,
     assets: t.assets.description,

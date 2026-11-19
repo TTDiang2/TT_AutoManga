@@ -76,7 +76,7 @@ export const useProjectStore = create<ProjectStore>()(
       currentProject: null,
       panels: [],
       characters: [],
-      activeTab: 'storyboard',
+      activeTab: 'wizard',   // new users start in the guided flow
       settings: defaultSettings,
       isLoading: false,
       promptMode: 'turbo',

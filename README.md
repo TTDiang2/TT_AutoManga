@@ -78,6 +78,11 @@ frame where the art's own perspective calls for it.
 
 ## ✨ Features
 
+**Create wizard (start here)**
+- The **Create** tab (compass icon, first in the sidebar) walks you from story to finished comic in six steps: Story → Panels → Look → Art → Pages → Finish
+- Plain-language hints at each step, a SwarmUI connection check, a progress bar while panels are drawn, page previews, a cover page and PDF/ZIP download
+- It builds an ordinary project, so you can switch to Storyboard, Prompt Lab or Composer at any point for fine control. The wizard remembers where you were.
+
 **Storyboard & story**
 - LLM storyboard generation from novel text (detail-level slider), or write panels by hand
 - Per panel: scene, characters, dialogue (`"Name：line"` marks the speaker), shot type (wide / medium / close-up / ECU / splash), location
@@ -146,7 +151,7 @@ npm --prefix frontend run build
 python -m backend.main 5180
 ```
 
-On Windows, `run.bat` does all of the above.
+On Windows, `run.bat` does all of the above. Open the UI and start in the **Create** tab.
 
 ## 🤖 Agent access (MCP / Skill / CLI)
 
