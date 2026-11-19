@@ -22,6 +22,15 @@ export const translations = {
       stepOf: '{n} of {total}',
       turnOff: "Don't show tours automatically",
       steps: {
+        wizard: {
+          intro: { title: 'Welcome to TT_AutoManga', body: 'This guide takes you from a story to a finished comic, one step at a time. Here is a quick look around.' },
+          steps: { title: 'Six steps', body: 'Your progress: Story, Panels, Look, Art, Pages, Finish. Finished steps get a tick, and you can jump back to any step you have reached.' },
+          card: { title: 'The current step', body: 'Fill in this step. Your work is saved to the project as you go, so you can close the browser and pick up where you left off.' },
+          tip: { title: 'Hints', body: 'Every step has a hint like this one, with advice for that step.' },
+          nav: { title: 'Moving on', body: 'Continue with these buttons. On the first step you choose whether the AI splits your story into panels or you write them yourself.' },
+          project: { title: 'Your comic', body: 'The comic you are working on. Start over begins a new one; this one stays saved in Showcase.' },
+          tabs: { title: 'Expert tools', body: 'The other tabs are the full tools for fine control. Your comic is there too. Each tab has its own tour: press Tour at the top right.' },
+        },
         storyboard: {
           intro: { title: 'Storyboard', body: 'Turn a piece of story into panels: one picture each, with who is in it and what they say. Every other tab works from these panels.' },
           input: { title: 'Paste your story', body: 'Paste a chapter or a few paragraphs here. The AI reads it and splits it into panels.' },
@@ -813,6 +822,15 @@ export const translations = {
       stepOf: '{n} / {total}',
       turnOff: '不再自动显示导览',
       steps: {
+        wizard: {
+          intro: { title: '欢迎使用 TT_AutoManga', body: '这个向导会一步步带你从故事做出完整的漫画。先快速看一下。' },
+          steps: { title: '六个步骤', body: '你的进度：故事、分镜、画风、绘制、排版、完成。完成的步骤会打勾，已到达的步骤可以随时返回。' },
+          card: { title: '当前步骤', body: '在这里完成当前步骤。内容会随时保存到项目，关掉浏览器也能接着做。' },
+          tip: { title: '提示', body: '每一步都有这样的提示，告诉你这一步的要点。' },
+          nav: { title: '继续', body: '用这些按钮继续。第一步可以选择让 AI 拆分分镜，或自己写分镜。' },
+          project: { title: '你的漫画', body: '正在制作的漫画。“重新开始”会新建一部，这一部仍保存在作品中。' },
+          tabs: { title: '专业工具', body: '左侧其他页面是精细调整用的完整工具，你的漫画也在那里。每个页面都有自己的导览：点右上角的“导览”。' },
+        },
         storyboard: {
           intro: { title: '分镜', body: '把故事拆成分镜：每格一张图，标明人物和台词。其他页面都基于这些分镜工作。' },
           input: { title: '粘贴故事', body: '在这里粘贴一章或几段文字，AI 会把它拆成分镜。' },

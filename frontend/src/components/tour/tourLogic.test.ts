@@ -50,8 +50,8 @@ describe('seen tours', () => {
     expect(parseSeen('{').size).toBe(0);
     expect(parseSeen(null).size).toBe(0);
   });
-  it('has no tour for the wizard', () => {
-    expect(hasTour('wizard')).toBe(false);
+  it('has a tour for every tab', () => {
+    expect(hasTour('wizard')).toBe(true);
     expect(hasTour('composer')).toBe(true);
   });
 });

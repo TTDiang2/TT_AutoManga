@@ -45,7 +45,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">AM</div>
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" data-tour="app-tabs">
         {tabs.map((tab) => (
           <div
             key={tab.id}
