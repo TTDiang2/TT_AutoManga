@@ -7,9 +7,19 @@ export interface TourStep {
   target?: string;
 }
 
-export type TourTab = Exclude<TabId, 'wizard'>;
+export type TourTab = TabId;
 
 export const TOURS: Record<TourTab, TourStep[]> = {
+  // the landing tab: doubles as the app's welcome for new users
+  wizard: [
+    { key: 'intro' },
+    { key: 'steps', target: 'wizard-steps' },
+    { key: 'card', target: 'wizard-card' },
+    { key: 'tip', target: 'wizard-tip' },
+    { key: 'nav', target: 'wizard-nav' },
+    { key: 'project', target: 'wizard-project' },
+    { key: 'tabs', target: 'app-tabs' },
+  ],
   storyboard: [
     { key: 'intro' },
     { key: 'input', target: 'storyboard-input' },

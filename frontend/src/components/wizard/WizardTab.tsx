@@ -103,7 +103,7 @@ export function WizardTab() {
 
   return (
     <div className="wizard">
-      <ol className="wizard-steps" aria-label={w.progress}>
+      <ol className="wizard-steps" aria-label={w.progress} data-tour="wizard-steps">
         {STEPS.map((id, i) => {
           const status = i === stepIndex ? 'current' : i < stepIndex || i <= reach ? 'open' : 'locked';
           return (
@@ -122,14 +122,14 @@ export function WizardTab() {
         })}
       </ol>
 
-      <section className="wizard-card card">
+      <section className="wizard-card card" data-tour="wizard-card">
         <header className="wizard-card-head">
           <div>
             <h2>{w.steps[state.step].title}</h2>
             <p className="text-secondary">{w.steps[state.step].intro}</p>
           </div>
           {project && (
-            <div className="wizard-project">
+            <div className="wizard-project" data-tour="wizard-project">
               <span className="badge">{project.name}</span>
               <button type="button" className="btn btn-ghost" onClick={startOver} disabled={!!busy}>
                 {w.startOver}
@@ -189,7 +189,7 @@ function Nav({ back, next, nextLabel, nextDisabled, busy, extra }: {
 }) {
   const { t } = useTranslation();
   return (
-    <div className="wizard-nav">
+    <div className="wizard-nav" data-tour="wizard-nav">
       {back ? (
         <button type="button" className="btn btn-secondary" onClick={back} disabled={!!busy}>
           <FiArrowLeft size={16} /> {t.wizard.back}
@@ -209,7 +209,7 @@ function Nav({ back, next, nextLabel, nextDisabled, busy, extra }: {
 }
 
 function Tip({ children }: { children: React.ReactNode }) {
-  return <div className="wizard-tip">{children}</div>;
+  return <div className="wizard-tip" data-tour="wizard-tip">{children}</div>;
 }
 
 // --- 1. Story --------------------------------------------------------------
