@@ -720,7 +720,7 @@ export function ComicsTab() {
 
   return (
     <div className="comics-tab">
-      <aside className={`comics-list ${dropping ? 'dropping' : ''}`}
+      <aside className={`comics-list ${dropping ? 'dropping' : ''}`} data-tour="comics-list"
         onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); }}
         onDrop={e => { e.preventDefault(); setDropping(false); upload([...e.dataTransfer.files]); }}>
@@ -760,7 +760,7 @@ export function ComicsTab() {
         ))}
       </aside>
 
-      <section className="comics-main">
+      <section className="comics-main" data-tour="comics-main">
         {!current ? (
           <div className="empty-state">
             <FiFileText size={48} />

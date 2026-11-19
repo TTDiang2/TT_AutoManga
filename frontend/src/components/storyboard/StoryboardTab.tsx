@@ -205,7 +205,7 @@ export function StoryboardTab() {
 
   return (
     <div className="storyboard-tab">
-      <div className="input-section">
+      <div className="input-section" data-tour="storyboard-input">
         <textarea
           className="input textarea novel-input"
           value={novelText}
@@ -214,7 +214,7 @@ export function StoryboardTab() {
           rows={8}
         />
         <div className="flex items-center justify-between mt-md">
-          <div className="precision-control">
+          <div className="precision-control" data-tour="storyboard-detail">
             <div className="flex items-center gap-md">
               <span className="text-sm text-secondary">{t.storyboard.detailLevel}:</span>
               <input
@@ -236,6 +236,7 @@ export function StoryboardTab() {
           </div>
           <button 
             className="btn btn-primary" 
+            data-tour="storyboard-generate"
             onClick={handleGenerate}
             disabled={isGenerating || !novelText.trim()}
           >
@@ -244,7 +245,7 @@ export function StoryboardTab() {
         </div>
       </div>
 
-      <div className="panels-section mt-lg">
+      <div className="panels-section mt-lg" data-tour="storyboard-panels">
         <div className="flex items-center justify-between mb-md">
           <h3>Storyboard Panels ({panels.length})</h3>
           <button className="btn btn-secondary" onClick={handleAddPanel}>

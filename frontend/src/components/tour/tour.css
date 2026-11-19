@@ -1,0 +1,88 @@
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+}
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+}
+.tour-backdrop.is-dim { background: rgba(0, 0, 0, 0.5); }
+
+/* the hole: its huge shadow dims everything around the target */
+.tour-spot {
+  position: fixed;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  pointer-events: none;
+  transition: top 200ms ease-out, left 200ms ease-out, width 200ms ease-out, height 200ms ease-out;
+}
+
+.tour-pop {
+  position: fixed;
+  width: min(340px, calc(100vw - 24px));
+  padding: var(--space-md) var(--space-lg) var(--space-md);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-elevated);
+  transition: top 200ms ease-out, left 200ms ease-out;
+}
+.tour-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: var(--space-xs);
+}
+.tour-pop h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 var(--space-xs);
+}
+.tour-pop p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-md);
+}
+.tour-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.tour-actions-right { display: flex; gap: var(--space-sm); }
+.tour-skip { padding-left: 0; }
+.tour-off {
+  display: block;
+  margin-top: var(--space-sm);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.tour-off:hover { color: var(--text-secondary); }
+
+/* the "?" button in the page header */
+.content-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-md);
+}
+.tour-help {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-spot, .tour-pop { transition: none; }
+}

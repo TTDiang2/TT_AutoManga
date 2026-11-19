@@ -654,7 +654,7 @@ export function ComposerTab() {
 
   return (
     <div className="composer-tab">
-      <div className="composer-page-list">
+      <div className="composer-page-list" data-tour="composer-pages">
         <div className="composer-page-list-header">
           <span>{t.composer.pages}</span>
         </div>
@@ -689,7 +689,7 @@ export function ComposerTab() {
 
       <div className="composer-canvas-workspace">
         <div className="composer-toolbar">
-          <div className="composer-toolbar-group">
+          <div className="composer-toolbar-group" data-tour="composer-tools">
             <button
               className={`composer-tool-btn composer-tool-labeled ${activeTool === 'select' ? 'active' : ''}`}
               title={t.composer.select}
@@ -742,7 +742,7 @@ export function ComposerTab() {
             </div>
           )}
 
-          <div className="composer-toolbar-group">
+          <div className="composer-toolbar-group" data-tour="composer-templates">
             <select
               className="composer-template-select"
               value={currentPage?.templateId || 'blank'}
@@ -897,7 +897,7 @@ export function ComposerTab() {
             </span>
           )}
 
-          <div className="composer-toolbar-group">
+          <div className="composer-toolbar-group" data-tour="composer-save">
             <button
               className="composer-tool-btn"
               title="Save to Showcase"

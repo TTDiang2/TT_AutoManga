@@ -266,7 +266,7 @@ export function PromptLabTab() {
     <div className="prompt-lab-tab">
       <div className="prompt-controls">
         <div className="flex items-center gap-md">
-          <div className="mode-toggle">
+          <div className="mode-toggle" data-tour="prompt-mode">
             <button
               className={`mode-btn ${promptMode === 'turbo' ? 'active' : ''}`}
               onClick={() => setPromptMode('turbo')}
@@ -283,6 +283,7 @@ export function PromptLabTab() {
           <button
             className="btn btn-primary"
             onClick={handleBatchRefresh}
+            data-tour="prompt-generate-all"
             disabled={isGenerating || panels.length === 0}
           >
             <FiRefreshCw size={16} /> {t.prompt.generateAll}
@@ -294,7 +295,7 @@ export function PromptLabTab() {
           </button>
         </div>
 
-        <div className="panel-selector flex items-center gap-md">
+        <div className="panel-selector flex items-center gap-md" data-tour="prompt-panel">
           <select
             className="input select"
             value={selectedPanelId}
@@ -318,7 +319,7 @@ export function PromptLabTab() {
         </div>
       </div>
 
-      <div className="prompt-workspace">
+      <div className="prompt-workspace" data-tour="prompt-workspace">
         {errorMessage && (
           <div
             role="alert"
@@ -453,7 +454,7 @@ export function PromptLabTab() {
         </div>
       </div>
 
-      <div className="prompts-overview mt-lg">
+      <div className="prompts-overview mt-lg" data-tour="prompt-overview">
         <h3>{t.prompt.allPrompts}</h3>
         <div className="prompts-grid">
           {panels.map((panel, idx) => (

@@ -233,7 +233,7 @@ export function ShowcaseTab() {
             </button>
           )}
           {mode === 'browse' && (
-            <div className="showcase-view-toggle" role="tablist">
+            <div className="showcase-view-toggle" role="tablist" data-tour="showcase-view">
               <button role="tab" aria-selected={view === 'comics'} className={view === 'comics' ? 'active' : ''}
                 onClick={() => setView('comics')}>
                 <FiGrid size={13} /> {t.showcase.comics}
@@ -258,7 +258,7 @@ export function ShowcaseTab() {
             </label>
           )}
           {mode === 'browse' && view === 'comics' && (
-            <button className="btn btn-secondary" onClick={() => setShowNewModal(true)}>
+            <button className="btn btn-secondary" onClick={() => setShowNewModal(true)} data-tour="showcase-new">
               <FiPlus size={14} /> New Comic
             </button>
           )}
@@ -282,7 +282,7 @@ export function ShowcaseTab() {
           <p>{t.showcase.noProjectsDesc}</p>
         </div>
       ) : mode === 'browse' ? (
-        <div className="projects-grid">
+        <div className="projects-grid" data-tour="showcase-grid">
           {projects.map(project => {
             const mature = effectiveRating(project.settings, defaultRating) === 'mature';
             const own = project.settings?.contentRating;

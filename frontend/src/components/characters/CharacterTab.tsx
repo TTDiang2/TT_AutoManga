@@ -323,16 +323,17 @@ export function CharacterTab() {
 
   return (
     <div className="character-tab" style={{ display: 'flex', height: '100%', gap: '16px' }}>
-      <div className="character-list" style={{ width: '300px', flexShrink: 0 }}>
+      <div className="character-list" data-tour="characters-list" style={{ width: '300px', flexShrink: 0 }}>
         <div className="flex justify-between items-center mb-md">
           <h3>{t.characters.title} ({characters.length})</h3>
-          <button className="btn btn-primary" onClick={handleCreateNew}>
+          <button className="btn btn-primary" onClick={handleCreateNew} data-tour="characters-new">
             <FiPlus size={16} /> {t.characters.newChar}
           </button>
         </div>
         
         <button 
           className="btn btn-ghost mt-sm" 
+          data-tour="characters-templates"
           style={{ width: '100%', justifyContent: 'flex-start' }}
           onClick={() => setShowTemplates(!showTemplates)}
         >
@@ -407,7 +408,7 @@ export function CharacterTab() {
         </div>
       </div>
 
-      <div className="character-detail" style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+      <div className="character-detail" data-tour="characters-detail" style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
         {selectedChar ? (
           isEditing ? (
             <div className="card" style={{ padding: '20px', width: '100%', maxWidth: '600px' }}>

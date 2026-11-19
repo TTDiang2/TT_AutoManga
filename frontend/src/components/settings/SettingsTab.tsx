@@ -162,7 +162,7 @@ export function SettingsTab() {
           <button className="btn btn-secondary" onClick={handleReset}>
             <FiRefreshCw size={14} /> Reset to Defaults
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={isSaving} data-tour="settings-save">
             {saveSuccess ? <FiCheck size={14} /> : <FiSave size={14} />}
             {saveSuccess ? 'Saved!' : 'Save Settings'}
           </button>
@@ -171,7 +171,7 @@ export function SettingsTab() {
       {saveError && <p className="settings-save-error mb-md" role="alert">{saveError}</p>}
 
       <div className="settings-sections">
-        <div className="settings-section card">
+        <div className="settings-section card" data-tour="settings-api">
           <h4>OpenAI Compatible API</h4>
           <p className="text-sm text-secondary mb-md">
             Configure your AI API endpoint for storyboard and prompt generation
@@ -419,7 +419,7 @@ export function SettingsTab() {
           </div>
         </div>
 
-        <div className="settings-section card">
+        <div className="settings-section card" data-tour="settings-swarmui">
           <h4>{t.settings.swarmui}</h4>
           <p className="text-sm text-secondary mb-md">
             {t.settings.swarmuiDesc}
@@ -730,7 +730,7 @@ export function SettingsTab() {
 
         {training && <TrainingSection value={training} onChange={setTraining} />}
 
-        <div className="settings-section card">
+        <div className="settings-section card" data-tour="settings-defaults">
           <h4>Default Settings</h4>
           <p className="text-sm text-secondary mb-md">
             Configure default values for new projects
