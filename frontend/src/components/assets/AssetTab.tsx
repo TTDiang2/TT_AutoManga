@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { FiUpload, FiRefreshCw, FiImage, FiCheck, FiX, FiAlertCircle, FiZap, FiTag, FiArchive, FiDownload, FiEdit2, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { TranslationKeys } from '../../i18n';
 import type { Panel } from '../../types';
 
@@ -66,6 +67,7 @@ interface PanelSlotProps {
 }
 
 function PanelSlot({ panelId, index, image, status, isGenerating, error, defaultAspectRatio, onUpload, onGenerate, onArchive, t }: PanelSlotProps) {
+  const tip = useTips().assets;
   const [isUploading, setIsUploading] = useState(false);
   // Snap to the image's real ratio once it loads; fall back to the configured
   // default (matches the current SwarmUI width/height) for empty slots.
@@ -117,7 +119,7 @@ function PanelSlot({ panelId, index, image, status, isGenerating, error, default
       )}
 
       <div className="slot-actions">
-        <label className="btn btn-secondary">
+        <label className="btn btn-secondary" data-tip={tip.upload}>
           <FiUpload size={14} />
           {t.assets.upload}
           <input
@@ -132,6 +134,7 @@ function PanelSlot({ panelId, index, image, status, isGenerating, error, default
           className="btn btn-primary"
           onClick={() => onGenerate(panelId)}
           disabled={isGenerating}
+          data-tip={tip.generate}
         >
           {isGenerating ? <span className="loading-spinner" /> : <FiRefreshCw size={14} />}
           {t.assets.generate}
@@ -140,7 +143,8 @@ function PanelSlot({ panelId, index, image, status, isGenerating, error, default
           <button
             className="btn btn-secondary"
             onClick={() => onArchive(panelId)}
-            title="Archive image"
+            data-tip={tip.archive}
+            aria-label={tip.archive}
           >
             <FiArchive size={14} />
           </button>
@@ -168,12 +172,14 @@ interface ArchiveItemProps {
  * cascading across the whole list.
  */
 function ArchiveItem({ img, isSelected, isMoveMenuOpen, folders, onSelect, onDelete, onToggleMoveMenu, onMove, t }: ArchiveItemProps) {
+  const tip = useTips().assets;
   const src = `/api/archive/images/${img.id}/serve`;
   const aspectRatio = useImageAspectRatio(src, '2 / 3');
   return (
     <div
       className={`archive-item card ${isSelected ? 'selected' : ''}`}
       onClick={() => onSelect(img.id)}
+      data-tip={tip.openImage}
     >
       <div className="archive-item-preview" style={{ aspectRatio }}>
         <img src={src} alt={img.name} />
@@ -184,6 +190,7 @@ function ArchiveItem({ img, isSelected, isMoveMenuOpen, folders, onSelect, onDel
       <button
         className="btn btn-ghost archive-item-delete"
         onClick={(e) => { e.stopPropagation(); onDelete(img.id); }}
+        data-tip={tip.deleteImage}
       >
         Delete
       </button>
@@ -191,6 +198,7 @@ function ArchiveItem({ img, isSelected, isMoveMenuOpen, folders, onSelect, onDel
         <button
           className="btn btn-ghost archive-item-move-btn"
           onClick={(e) => { e.stopPropagation(); onToggleMoveMenu(img.id); }}
+          data-tip={tip.moveImage}
         >
           {t.assets.moveToFolder}
         </button>
@@ -224,6 +232,7 @@ function ArchiveItem({ img, isSelected, isMoveMenuOpen, folders, onSelect, onDel
 }
 
 export function AssetTab() {
+  const tip = useTips().assets;
   const { panels, updatePanelImage, settings, currentProject, promptMode, setPromptMode, generatingPanels, startGenerating, stopGenerating } = useProjectStore();
   const { t } = useTranslation();
   const [panelStatuses, setPanelStatuses] = useState<Record<string, ImageStatus>>({});
@@ -491,12 +500,14 @@ export function AssetTab() {
             <button
               className={`mode-btn ${promptMode === 'turbo' ? 'active' : ''}`}
               onClick={() => setPromptMode('turbo')}
+              data-tip={tip.natural}
             >
               <FiZap size={16} /> {t.prompt.turbo}
             </button>
             <button
               className={`mode-btn ${promptMode === 'tags' ? 'active' : ''}`}
               onClick={() => setPromptMode('tags')}
+              data-tip={tip.tags}
             >
               <FiTag size={16} /> {t.prompt.sdxl}
             </button>
@@ -505,6 +516,7 @@ export function AssetTab() {
             <button
               className={`view-btn ${viewMode === 'generated' ? 'active' : ''}`}
               onClick={() => setViewMode('generated')}
+              data-tip={tip.viewGenerated}
               style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: viewMode === 'generated' ? 'var(--accent-primary)' : 'transparent', color: viewMode === 'generated' ? 'var(--accent-contrast)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}
             >
               Generated
@@ -512,6 +524,7 @@ export function AssetTab() {
             <button
               className={`view-btn ${viewMode === 'archive' ? 'active' : ''}`}
               onClick={() => setViewMode('archive')}
+              data-tip={tip.viewArchive}
               style={{ padding: '6px 12px', borderRadius: '6px', border: 'none', background: viewMode === 'archive' ? 'var(--accent-primary)' : 'transparent', color: viewMode === 'archive' ? 'var(--accent-contrast)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px' }}
             >
               Archive
@@ -524,6 +537,7 @@ export function AssetTab() {
               className="btn btn-primary"
               onClick={handleGenerateAll}
               data-tour="assets-generate-all"
+              data-tip={tip.generateAll}
               disabled={generatingPanels.length > 0}
               style={{ whiteSpace: 'nowrap' }}
             >
@@ -531,7 +545,7 @@ export function AssetTab() {
               {t.assets.generateAll || 'Generate All'}
             </button>
           )}
-          <span className={`connection-status ${swarmUIConnected ? 'connected' : 'disconnected'}`} data-tour="assets-status">
+          <span className={`connection-status ${swarmUIConnected ? 'connected' : 'disconnected'}`} data-tour="assets-status" data-tip={tip.status}>
             <span className="status-dot" />
             SwarmUI: {swarmUIConnected === null ? t.assets.checking : swarmUIConnected ? t.assets.connected : t.assets.disconnected}
           </span>
@@ -547,13 +561,14 @@ export function AssetTab() {
                 <select
                   value={folderSortBy}
                   onChange={(e) => { const v = e.target.value as 'order' | 'name' | 'created'; setFolderSortBy(v); }}
+                  data-tip={tip.sortFolders}
                   style={{ fontSize: '10px', padding: '2px 4px', borderRadius: '4px', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
                 >
                   <option value="order">Default</option>
                   <option value="name">Name</option>
                   <option value="created">Date</option>
                 </select>
-                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: '11px' }} onClick={createFolder}>+ New</button>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: '11px' }} onClick={createFolder} data-tip={tip.newFolder}>+ New</button>
               </div>
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>
@@ -561,6 +576,7 @@ export function AssetTab() {
                 className={`group-item ${activeGroup === null ? 'active' : ''}`}
                 style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', background: activeGroup === null ? 'var(--accent-primary)' : 'transparent', color: activeGroup === null ? 'var(--accent-contrast)' : 'inherit', fontSize: '12px', fontWeight: 600 }}
                 onClick={() => { setActiveGroup(null); setCurrentFolder(null); }}
+                data-tip={tip.allFolders}
               >
                 All Folders
               </div>
@@ -583,6 +599,7 @@ export function AssetTab() {
                       className={`group-item ${activeGroup === groupName ? 'active' : ''}`}
                       style={{ padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', background: activeGroup === groupName ? '#5b8def' : 'var(--bg-tertiary)', color: activeGroup === groupName ? 'white' : 'var(--text-secondary)', fontSize: '11px', fontWeight: 500, marginBottom: '2px' }}
                       onClick={() => { setActiveGroup(groupName); setCurrentFolder(null); }}
+                      data-tip={tip.group}
                     >
                       {groupName === '__ungrouped__' ? 'Ungrouped' : groupName} ({folders.length})
                     </div>
@@ -600,14 +617,15 @@ export function AssetTab() {
                           marginBottom: '2px',
                         }}
                         onClick={() => setCurrentFolder(folder.id)}
+                        data-tip={tip.folder}
                       >
                         <div className="flex justify-between items-center" style={{ padding: '6px 10px', width: '100%' }}>
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontSize: '12px' }}>{folder.name}</span>
                           <div style={{ display: 'flex', gap: '1px', alignItems: 'center', flexShrink: 0, marginLeft: '8px' }} onClick={e => e.stopPropagation()}>
-                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => { const newName = prompt('Rename folder:', folder.name); if (newName) { fetch(`/api/archive/folders/${folder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }).then(() => loadArchive()); } }} title="Rename"><FiEdit2 size={11} /></button>
-                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => { const g = prompt('Group name:', folder.group || ''); fetch(`/api/archive/folders/${folder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group: g || null }) }).then(() => loadArchive()); }} title="Group"><FiLayers size={11} /></button>
-                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => downloadFolder(folder.id)} title={t.assets.downloadFolder || 'Download'}><FiDownload size={11} /></button>
-                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => deleteFolder(folder.id)} title="Delete">×</button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => { const newName = prompt('Rename folder:', folder.name); if (newName) { fetch(`/api/archive/folders/${folder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName }) }).then(() => loadArchive()); } }} data-tip={tip.renameFolder} aria-label={tip.renameFolder}><FiEdit2 size={11} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => { const g = prompt('Group name:', folder.group || ''); fetch(`/api/archive/folders/${folder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ group: g || null }) }).then(() => loadArchive()); }} data-tip={tip.groupFolder} aria-label={tip.groupFolder}><FiLayers size={11} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => downloadFolder(folder.id)} data-tip={tip.downloadFolder} aria-label={tip.downloadFolder}><FiDownload size={11} /></button>
+                            <button style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', opacity: 0.6, padding: '3px', borderRadius: '3px', display: 'flex', alignItems: 'center' }} onClick={() => deleteFolder(folder.id)} data-tip={tip.deleteFolder} aria-label={tip.deleteFolder}>×</button>
                           </div>
                         </div>
                       </div>
@@ -941,7 +959,7 @@ export function AssetTab() {
       `}</style>
       {selectedArchiveImage && (
         <div className="image-lightbox" onClick={() => setSelectedArchiveImage(null)}>
-          <button className="image-lightbox-close" onClick={() => setSelectedArchiveImage(null)}>×</button>
+          <button className="image-lightbox-close" onClick={() => setSelectedArchiveImage(null)} data-tip={tip.closePreview} aria-label={tip.closePreview}>×</button>
           <img
             src={`/api/archive/images/${selectedArchiveImage}/serve`}
             alt="preview"
