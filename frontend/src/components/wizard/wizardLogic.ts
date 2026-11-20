@@ -16,6 +16,8 @@ export interface WizardState {
   panelsPerPage: number;
   dynamic: boolean;
   coverPageId: string | null;
+  /** library characters picked on the Story step (names) */
+  cast: string[];
 }
 
 export const DEFAULT_STATE: WizardState = {
@@ -28,6 +30,7 @@ export const DEFAULT_STATE: WizardState = {
   panelsPerPage: 4,
   dynamic: false,
   coverPageId: null,
+  cast: [],
 };
 
 const STORAGE_KEY = 'automanga-wizard';
@@ -47,6 +50,7 @@ export function loadState(raw: string | null): WizardState {
     if (typeof s.projectId !== 'string' || !s.projectId) s.projectId = null;
     if (typeof s.coverPageId !== 'string' || !s.coverPageId) s.coverPageId = null;
     if (typeof s.storyText !== 'string') s.storyText = '';
+    s.cast = Array.isArray(s.cast) ? parseNames(s.cast.filter(x => typeof x === 'string').join(',')) : [];
     return s;
   } catch {
     return { ...DEFAULT_STATE };
@@ -159,4 +163,59 @@ export function prefersVerticalBubbles(panels: Pick<Panel, 'dialogue'>[]): boole
   const cjk = (text.match(/[぀-ヿ㐀-鿿豈-﫿가-힯]/g) || []).length;
   const latin = (text.match(/[A-Za-z]/g) || []).length;
   return cjk > 0 && cjk * 3 >= latin;   // a CJK glyph carries roughly a word's worth
+}
+
+// --- the global character library (Characters tab) --------------------------
+
+/** What the wizard needs of a library character (GET /api/characters/). */
+export interface LibraryCharacter {
+  id?: string;
+  name: string;
+  description?: string;
+  appearance?: string;
+  image?: string;
+  lora?: { name?: string } | null;
+  refWeight?: number | null;
+}
+
+const key = (name: string) => name.trim().toLowerCase();
+
+/** The library character a name refers to. Generation matches names the
+ *  same way (trimmed, case-insensitive), so a match means its look, LoRA and
+ *  reference sheet are used for panels that list this name. */
+export function findInLibrary(name: string, library: LibraryCharacter[]): LibraryCharacter | undefined {
+  return library.find(c => key(c.name) === key(name));
+}
+
+/** The prompt text generation injects for a library character. */
+export function libraryLook(c: LibraryCharacter): string {
+  return (c.appearance || c.description || '').trim();
+}
+
+/** Names to offer as one-click chips for a panel: the picked cast, then names
+ *  already used in this comic, then the rest of the library; minus the ones
+ *  already on the panel. */
+export function castSuggestions(onPanel: string[], picked: string[], comicCast: string[], library: LibraryCharacter[], max = 8): string[] {
+  const taken = new Set(onPanel.map(key));
+  const out: string[] = [];
+  for (const name of [...picked, ...comicCast, ...library.map(c => c.name)]) {
+    const k = key(name);
+    if (!k || taken.has(k)) continue;
+    taken.add(k);
+    out.push(name.trim());
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** Appended to the story sent to the AI storyboard, so panels use the
+ *  library characters' exact names (and with them, their looks). */
+export function castNote(picked: string[], library: LibraryCharacter[]): string {
+  if (!picked.length) return '';
+  const lines = picked.map(name => {
+    const c = findInLibrary(name, library);
+    const about = (c?.description || '').trim().replace(/\s+/g, ' ').slice(0, 160);
+    return `- ${c?.name ?? name}${about ? `: ${about}` : ''}`;
+  });
+  return `\n\nCharacters (use exactly these names in the panels):\n${lines.join('\n')}`;
 }
