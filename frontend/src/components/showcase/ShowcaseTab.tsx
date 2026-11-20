@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
+import { useExportScale } from '../../hooks/useExportScale';
 import { fill, useTranslation } from '../../hooks/useTranslation';
 import { useTips } from '../../hooks/useTips';
 import { renderPageToImage } from '../composer/pageRenderer';
@@ -12,6 +13,7 @@ import './collections.css';
 
 export function ShowcaseTab() {
   const { setCurrentProject, setActiveTab, setComposerProjectId, loadProjectWithImages } = useProjectStore();
+  const exportScale = useExportScale();
   const { t } = useTranslation();
   const tip = useTips().showcase;
   const [projects, setProjects] = useState<Project[]>([]);
@@ -155,7 +157,7 @@ export function ShowcaseTab() {
       const resp = await fetch('/api/agent/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, format: 'pdf', scale: 2, page_numbers: pageNumbers }),
+        body: JSON.stringify({ project_id: projectId, format: 'pdf', scale: exportScale, page_numbers: pageNumbers }),
       });
       if (resp.ok) {
         const data = await resp.json();

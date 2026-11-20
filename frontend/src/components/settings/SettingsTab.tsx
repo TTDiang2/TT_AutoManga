@@ -794,13 +794,14 @@ export function SettingsTab() {
                   defaults: { ...localSettings.defaults, exportQuality: e.target.value }
                 })}
               >
-                <option value="standard">Standard</option>
-                <option value="high">High</option>
+                <option value="standard">Standard (600×900 px pages)</option>
+                <option value="high">High (1200×1800 px)</option>
+                <option value="print">Print (2400×3600 px)</option>
               </select>
             </div>
 
             <div className="form-group">
-              <label>Auto-save Interval (seconds)</label>
+              <label>Save at least every (seconds)</label>
               <input data-tip={tip.autoSave}
                 className="input"
                 type="number"

@@ -5,6 +5,7 @@ import { useTips } from '../../hooks/useTips';
 import { clampScale, exportPercent } from './collectionUtils';
 import { matureNames } from './rating';
 import type { Collection, CollectionExportJob } from './collectionUtils';
+import { useExportScale } from '../../hooks/useExportScale';
 
 type Format = 'pdf' | 'zip' | 'both';
 
@@ -16,7 +17,9 @@ export function CollectionExportDialog({ collection, onClose }: {
   const { t } = useTranslation();
   const tip = useTips().showcase;
   const [format, setFormat] = useState<Format>('pdf');
-  const [scale, setScale] = useState(2);
+  // starts at the saved Export Quality; can be changed for this one export
+  const defaultScale = useExportScale();
+  const [scale, setScale] = useState(defaultScale);
   const [pageNumbers, setPageNumbers] = useState(true);
   const [titlePages, setTitlePages] = useState(true);
   const [cover, setCover] = useState(true);
