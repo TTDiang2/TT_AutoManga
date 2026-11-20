@@ -49,6 +49,9 @@ describe('names', () => {
 });
 
 describe('promptForPanel', () => {
+  it('reads tags stored as one string (Comics conversions)', () => {
+    expect(promptForPanel(panel({ prompt: { tags: 'masterpiece, 1boy,solo' } }), 'danbooru')).toBe('masterpiece, 1boy, solo');
+  });
   it('uses the enhanced prompt for the matching format, else the scene', () => {
     const p = panel({ prompt: { tags: ['1girl', ' rain'], turbo: 'A girl in the rain' } });
     expect(promptForPanel(p, 'danbooru')).toBe('1girl, rain');
