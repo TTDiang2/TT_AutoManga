@@ -12,6 +12,8 @@ import { ComicsTab } from './components/comics/ComicsTab';
 import { WizardTab } from './components/wizard/WizardTab';
 import { Tour } from './components/tour/Tour';
 import { hasTour, isSeen } from './components/tour/tourLogic';
+import { TooltipLayer } from './components/tooltip/TooltipLayer';
+import { useTips } from './hooks/useTips';
 import { useProjectStore } from './store/projectStore';
 import { useTranslation } from './hooks/useTranslation';
 import './styles/globals.css';
@@ -20,6 +22,7 @@ function App() {
   const activeTab = useProjectStore(s => s.activeTab);
   const setSettings = useProjectStore(s => s.setSettings);
   const { t } = useTranslation();
+  const tip = useTips();
   // the tab whose tour is open; a tab's tour starts by itself on its first visit
   const [tourTab, setTourTab] = useState<string | null>(null);
 
@@ -109,7 +112,7 @@ function App() {
               <p>{description}</p>
             </div>
             {hasTour(activeTab) && (
-              <button type="button" className="btn btn-ghost tour-help" title={t.tour.buttonHint}
+              <button type="button" className="btn btn-ghost tour-help" data-tip={tip.common.tour}
                 onClick={() => setTourTab(activeTab)}>
                 <FiHelpCircle size={16} /> {t.tour.button}
               </button>
@@ -120,6 +123,7 @@ function App() {
           {renderTab()}
         </div>
       </main>
+      <TooltipLayer />
       {tourTab === activeTab && hasTour(activeTab) && (
         <Tour key={activeTab} tab={activeTab} onClose={() => setTourTab(null)} />
       )}
