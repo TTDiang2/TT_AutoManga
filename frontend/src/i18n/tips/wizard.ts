@@ -8,6 +8,7 @@ const en = {
   next: 'Save this step and continue',
   story: {
     name: 'The comic\'s title. You can change it later.',
+    importFile: 'Load your story from a .md or .txt file (UTF-8, UTF-16 or GBK). You can also drop the file on the box.',
     text: 'Your story in plain words: who, where, what happens. A few paragraphs are enough.',
     length: 'How many panels the AI aims for: short (1-2) to long (10+)',
     rtl: 'Manga order: panels and bubbles read from right to left',
@@ -61,6 +62,7 @@ const zh: typeof en = {
   next: '保存这一步并继续',
   story: {
     name: '漫画标题，之后可以修改。',
+    importFile: '从 .md 或 .txt 文件载入故事（支持 UTF-8、UTF-16、GBK），也可以把文件直接拖到文本框里。',
     text: '用平实的文字写故事：谁、在哪里、发生了什么。几段就够了。',
     length: 'AI 拆分的分镜数量：短（1-2 格）到长（10 格以上）',
     rtl: '日漫顺序：分格和气泡从右往左读',
