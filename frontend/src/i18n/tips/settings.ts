@@ -52,8 +52,8 @@ const en = {
   // defaults
   language: 'Language of the app',
   detailLevel: 'Starting position of the Storyboard detail slider: 1 = few panels, 5 = many',
-  exportQuality: 'Saved preference only: exports currently set their own resolution (scale) each time',
-  autoSave: 'Saved preference only: the Composer currently saves changes on its own',
+  exportQuality: 'Page resolution for every PDF, ZIP and image export. Higher looks sharper but makes bigger, slower files. Print suits paper.',
+  autoSave: 'The Composer saves 2 s after you stop editing. While you keep editing without a pause, it still saves at least this often.',
   // content rating
   defaultRating: 'Rating for comics that set none. Mature allows adult content only when every character is a known adult.',
   // access
@@ -115,8 +115,8 @@ const zh: typeof en = {
   trainingCacheText: '训练前一次性编码标注文字，而不是每一步都编码，可节省时间。',
   language: '应用界面的语言',
   detailLevel: '分镜页面细节滑块的初始位置：1 = 分镜少，5 = 分镜多',
-  exportQuality: '仅保存偏好：导出时目前会各自设置分辨率（缩放）',
-  autoSave: '仅保存偏好：编辑器目前会自行自动保存',
+  exportQuality: '所有 PDF、ZIP 和图片导出的页面分辨率。越高越清晰，但文件更大、导出更慢。“打印”适合纸质输出。',
+  autoSave: '编辑器在你停止编辑 2 秒后自动保存；如果一直不停地编辑，也至少每隔这么多秒保存一次。',
   defaultRating: '未设置分级的漫画使用此分级。成人分级只在所有角色都是已知成年人时才允许成人内容。',
   currentPassword: '当前密码，用于确认身份',
   newPassword: '至少 8 个字符。修改后其他设备都会被登出。',

@@ -10,6 +10,8 @@ import { useComposerStore, TEMPLATES, hasUnsavedPages } from '../../store/compos
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useTips } from '../../hooks/useTips';
+import { useExportScale } from '../../hooks/useExportScale';
+import { autosaveDelay, maxWaitMs } from './autosave';
 import { Canvas } from './Canvas';
 import { PropertiesPanel } from './PropertiesPanel';
 import { renderPageToImage } from './pageRenderer';
@@ -166,13 +168,13 @@ const PageThumb = memo(function PageThumb({
 });
 
 /** Autosave retries after a failure: 5 s, 15 s, then every 60 s (and at once after a sign-in). */
-const RETRY_DELAYS = [5000, 15000, 60000];
 
 const CONFLICT_MSG = "This project's pages were changed elsewhere (e.g. by a Comics import). "
   + 'Reload to see them — your unsaved changes here will be lost.';
 
 export function ComposerTab() {
   const { t } = useTranslation();
+  const exportScale = useExportScale();
   const tip = useTips().composer;
   const language = useProjectStore(s => s.settings.language);
   const composerProjectId = useProjectStore(s => s.composerProjectId);
@@ -440,20 +442,29 @@ export function ComposerTab() {
   };
 
   // autosave: only the pages, against the base they were loaded from; the
-  // `pages` reference changes on every edit (immutable updates). A failed
-  // save is retried with backoff (RETRY_DELAYS) until one goes through.
+  // `pages` reference changes on every edit (immutable updates). It saves 2 s
+  // after the last edit, and at least every Settings → Auto-save seconds
+  // while edits keep coming (autosaveDelay). A failed save is retried with
+  // backoff until one goes through.
+  const autoSaveSeconds = useProjectStore(s => s.settings.defaults?.autoSaveInterval);
+  const dirtySinceRef = useRef<number | null>(null);
   useEffect(() => {
     if (!currentProjectId || saveConflict || pages.length === 0) return;
-    if (pages === useComposerStore.getState()._savedPages) return;
-    const delay = saveFailures === 0 ? 2000 : RETRY_DELAYS[Math.min(saveFailures, RETRY_DELAYS.length) - 1];
+    if (pages === useComposerStore.getState()._savedPages) { dirtySinceRef.current = null; return; }
+    const now = Date.now();
+    dirtySinceRef.current ??= now;
+    const delay = autosaveDelay({
+      failures: saveFailures, dirtySince: dirtySinceRef.current, now, maxWaitMs: maxWaitMs(autoSaveSeconds),
+    });
     const id = setTimeout(() => {
       savePages().then(result => {
         if (result === 'error') setSaveFailures(n => n + 1);
-        else if (result === 'saved') setSaveFailures(0);
+        // edits made while the save was in flight are still unsaved: count from now
+        else if (result === 'saved') { setSaveFailures(0); dirtySinceRef.current = hasUnsavedPages(useComposerStore.getState()) ? Date.now() : null; }
       });
     }, delay);
     return () => clearTimeout(id);
-  }, [pages, currentProjectId, saveConflict, savePages, saveFailures]);
+  }, [pages, currentProjectId, saveConflict, savePages, saveFailures, autoSaveSeconds]);
 
   // a save that failed because the session ended: retry as soon as the user signs in again
   useEffect(() => {
@@ -576,7 +587,7 @@ export function ComposerTab() {
     fetch('/api/render/page', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page, scale: 2 }),
+      body: JSON.stringify({ page, scale: exportScale }),
     })
       .then(async resp => {
         if (resp.ok) {
@@ -614,7 +625,7 @@ export function ComposerTab() {
       const resp = await fetch('/api/render/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pages, format: type, scale: 2 }),
+        body: JSON.stringify({ pages, format: type, scale: exportScale }),
       });
       if (resp.ok) {
         const blob = await resp.blob();

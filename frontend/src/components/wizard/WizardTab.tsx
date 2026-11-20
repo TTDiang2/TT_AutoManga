@@ -6,6 +6,7 @@ import {
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import { useTips } from '../../hooks/useTips';
+import { useExportScale } from '../../hooks/useExportScale';
 import type { Panel, Project } from '../../types';
 import {
   STEPS, STYLE_PRESETS, DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat,
@@ -676,6 +677,7 @@ function PagesStep({ state, update, project, refresh, run, busy, goTo, w, pages,
 function FinishStep({ state, update, project, refresh, run, busy, goTo, w, panels, pages, openComposer, startNew }:
   StepProps & { openComposer: () => void; startNew: () => void }) {
   const tip = useTips().wizard;
+  const exportScale = useExportScale();
   const [title, setTitle] = useState(project?.name || '');
   const [subtitle, setSubtitle] = useState('');
   const [numbers, setNumbers] = useState(true);
@@ -698,7 +700,7 @@ function FinishStep({ state, update, project, refresh, run, busy, goTo, w, panel
   const exportAs = (format: 'pdf' | 'zip') => run(format, async () => {
     if (!project) return;
     const res = await api<{ pdf?: { url: string }; zip?: { url: string } }>('/api/agent/export', {
-      method: 'POST', json: { project_id: project.id, format, scale: 2, page_numbers: numbers },
+      method: 'POST', json: { project_id: project.id, format, scale: exportScale, page_numbers: numbers },
     });
     const url = res[format]?.url;
     if (url) {
