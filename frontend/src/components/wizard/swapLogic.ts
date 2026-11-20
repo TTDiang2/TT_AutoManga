@@ -16,7 +16,19 @@ const NOT_NAMES = new Set([
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
   'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october',
   'november', 'december', 'god', 'ext', 'int',
+  // script and camera directions: "Panel 2 (Medium):", "Close-Up", "frame left"
+  'wide', 'medium', 'close', 'closeup', 'extreme', 'splash', 'establishing', 'shot', 'shots', 'angle',
+  'pov', 'insert', 'cut', 'pan', 'zoom', 'overhead', 'aerial', 'full', 'long', 'tight', 'low', 'high',
+  'exterior', 'interior', 'inside', 'outside', 'left', 'right', 'center', 'centre', 'top', 'bottom',
+  'foreground', 'background', 'frame', 'camera', 'beat', 'silent', 'reaction', 'montage', 'flashback',
+  'transition', 'continued', 'cont', 'fade', 'still', 'day', 'night', 'morning', 'evening', 'dawn', 'dusk',
+  'am', 'pm', 'acts', 'pages', 'panels', 'scenes',
 ]);
+
+/** "Marcus's" → "Marcus", "He's" / "I've" → "He" / "I": the word without
+ *  its possessive or contraction ending. */
+const CLITIC = /['’](?:s|ve|ll|d|re|m|t)$/i;
+const bare = (word: string) => word.replace(CLITIC, '');
 
 const SPEAKER = /^[\s>*_-]*([^\s:：*_"“”()[\]]{1,24})[*_]*\s*[:：]/;
 const WORD = /\p{Lu}[\p{Ll}\p{M}'’-]*\p{Ll}/gu;
@@ -28,9 +40,10 @@ const WORD = /\p{Lu}[\p{Ll}\p{M}'’-]*\p{Ll}/gu;
  */
 export function storyNames(text: string, max = 12): string[] {
   const counts = new Map<string, { name: string; n: number; score: number }>();
-  const add = (name: string, score: number) => {
+  const add = (word: string, score: number) => {
+    const name = bare(word);
     const k = name.toLowerCase();
-    if (NOT_NAMES.has(k) || /^\d/.test(name)) return;
+    if ((name.length < 2 && !CJK.test(name)) || NOT_NAMES.has(k) || /^\d/.test(name)) return;
     const e = counts.get(k) || { name, n: 0, score: 0 };
     e.n++;
     e.score += score;
@@ -43,7 +56,7 @@ export function storyNames(text: string, max = 12): string[] {
     if (sp) add(sp[1], 3);
     for (const m of line.matchAll(WORD)) {
       const before = line.slice(0, m.index).replace(/["“'‘(*_\s]+$/, '');
-      if (before && !/[.!?…:：]$/.test(before)) midSentence.add(m[0].toLowerCase());
+      if (before && !/[.!?…:：]$/.test(before)) midSentence.add(bare(m[0]).toLowerCase());
       if (!(sp && m.index! <= line.indexOf(sp[1]))) add(m[0], 1);
     }
   }

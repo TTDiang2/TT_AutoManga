@@ -15,6 +15,18 @@ Kai: Who are you?`;
   it('reads CJK speakers', () => {
     expect(storyNames('小雪：快跑！\n李白：等等我。\n小雪：来不及了')).toEqual(['小雪', '李白']);
   });
+  it('skips shot labels, directions, pronoun contractions; merges possessives', () => {
+    const story = `ACT ONE: THE SLOW BURN
+Page 1 — Establishing Shots
+Panel 1 (Wide): Exterior of a gym. Still dark outside.
+Panel 2 (Medium): Inside. Marcus, 48, sits on a bike. He's tired. Marcus's towel slips.
+Panel 3 (Close-Up): Elena glances Left, then Right. She's smiling. I've seen Elena here.
+Panel 4 (Wide): Frame Left, Marcus waves. Elena's bike is Right of his.`;
+    expect(storyNames(story)).toEqual(['Marcus', 'Elena']);
+  });
+  it('keeps a one-character CJK speaker', () => {
+    expect(storyNames('雪：快跑！\n雪：等等')).toEqual(['雪']);
+  });
   it('ignores a capitalised word seen only once', () => {
     expect(storyNames('Once upon a time, Mira walked home.')).toEqual([]);
   });
