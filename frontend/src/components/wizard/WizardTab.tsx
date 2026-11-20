@@ -13,7 +13,7 @@ import {
   STEPS, STYLE_PRESETS, DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat,
   maxReachableStep, movePanel, newPanel, parseNames, prefersVerticalBubbles, promptForPanel,
   readSavedState, writeSavedState, type StepId, type WizardState,
-  castNote, castSuggestions, findInLibrary, libraryLook, type LibraryCharacter,
+  castNote, castSuggestions, findInLibrary, isComicsConversion, libraryLook, type LibraryCharacter,
 } from './wizardLogic';
 import { CastSwap } from './CastSwap';
 import { previewKey, previewPrompt, useStylePreviews, type PreviewState } from './stylePreviews';
@@ -696,6 +696,7 @@ function ArtStep({ state, project, refresh, run, busy, goTo, w, panels }: StepPr
           negative_prompt: p.prompt?.negativePrompt || '',
           seed: p.prompt?.seed,
           prompt_format: state.promptFormat,
+          inject_characters: !isComicsConversion(project),
         })),
       },
     });

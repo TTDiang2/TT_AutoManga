@@ -59,14 +59,31 @@ def resolve_blocks(project: Dict[str, Any]) -> Dict[str, str]:
     return merged
 
 
+# tags that claim a picture shows one person: wrong in a block injected into a
+# panel with several characters ("1boy, solo" + "1girl, solo" makes the model
+# merge the two people into one)
+_SOLO_TAGS = {"solo", "solo focus"}
+
+
+def _without_solo(block: str) -> str:
+    parts = [p.strip() for p in block.split(",")]
+    kept = [p for p in parts if p.lower() not in _SOLO_TAGS]
+    return ", ".join(p for p in kept if p) if len(kept) != len(parts) else block
+
+
 def blocks_for_panel(project: Dict[str, Any], panel: Dict[str, Any]) -> List[str]:
-    """Prompt blocks for the characters listed on a panel, in panel order."""
+    """Prompt blocks for the characters listed on a panel, in panel order.
+    On a panel with several characters, ``solo`` tags are dropped from them."""
     blocks = resolve_blocks(project)
+    names = [str(n).strip() for n in panel.get("characters") or [] if str(n).strip()]
+    several = len({n.lower() for n in names}) > 1
     out = []
-    for name in panel.get("characters") or []:
-        block = blocks.get(str(name).strip().lower())
+    for name in names:
+        block = blocks.get(name.lower())
         if block:
-            out.append(block)
+            block = _without_solo(block) if several else block
+            if block:
+                out.append(block)
     return out
 
 

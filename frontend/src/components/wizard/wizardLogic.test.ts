@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat, loadState,
   maxReachableStep, movePanel, newPanel, parseNames, prefersVerticalBubbles, promptForPanel,
-  castNote, castSuggestions, findInLibrary, libraryLook,
+  castNote, castSuggestions, findInLibrary, isComicsConversion, libraryLook,
 } from './wizardLogic';
 import type { Panel } from '../../types';
 
@@ -115,5 +115,15 @@ describe('character library', () => {
   it('keeps a valid picked cast from storage', () => {
     expect(loadState(JSON.stringify({ cast: ['Yuki', 3, 'yuki', ' Ren '] })).cast).toEqual(['Yuki', 'Ren']);
     expect(loadState(JSON.stringify({ cast: 'Yuki' })).cast).toEqual([]);
+  });
+});
+
+describe('isComicsConversion', () => {
+  it('is true only for a project marked with its Comics script', () => {
+    expect(isComicsConversion({ settings: { comicScript: 'the-space-between-us' } })).toBe(true);
+    expect(isComicsConversion({ settings: { comicScript: 'x:uncut' } })).toBe(true);
+    expect(isComicsConversion({ settings: { comicScript: ' ' } })).toBe(false);
+    expect(isComicsConversion({ settings: {} })).toBe(false);
+    expect(isComicsConversion(null)).toBe(false);
   });
 });
