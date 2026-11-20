@@ -125,8 +125,11 @@ the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
   - Always public: the SPA shell, `/assets` and `/api/health`. There is no
     `/docs`, `/redoc` or `/openapi.json`; the schema is
     `GET /api/openapi.json`, behind the gate.
-- `AUTOMANGA_DATA_DIR=<dir>` relocates `data/` (settings, projects, assets,
-  auth) for a throwaway second instance.
+- `AUTOMANGA_DATA_DIR=<dir>` relocates all of `data/` (settings, projects,
+  assets, auth, the character library and templates, layouts, archive,
+  exports, …) for a throwaway second instance. Backend code builds every
+  data path from `core.config.DATA_DIR`; `tests/test_data_dir_paths.py`
+  fails on a module that builds its own `data/` path.
 
 ## 2. Units & conventions (read before writing any geometry)
 

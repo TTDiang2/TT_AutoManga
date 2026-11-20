@@ -1,15 +1,14 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from pathlib import Path
 import json
 import logging
 
-from ..core.config import atomic_write_json
+from ..core.config import DATA_DIR, atomic_write_json
 
 router = APIRouter(prefix="/api/layouts", tags=["layouts"])
 
-LAYOUTS_FILE = Path(__file__).parent.parent.parent / "data" / "layouts.json"
+LAYOUTS_FILE = DATA_DIR / "layouts.json"
 
 LAYOUTS_FILE.parent.mkdir(parents=True, exist_ok=True)
 

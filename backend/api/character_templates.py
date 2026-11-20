@@ -1,16 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
-from pathlib import Path
 import json
 import logging
 
 from ..core.swarmui_client import swarm_client
-from ..core.config import settings, atomic_write_json
+from ..core.config import DATA_DIR, settings, atomic_write_json
 
 router = APIRouter(prefix="/api/characters/templates", tags=["character_templates"])
 
-TEMPLATES_FILE = Path(__file__).parent.parent.parent / "data" / "character_templates.json"
+TEMPLATES_FILE = DATA_DIR / "character_templates.json"
 
 TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
 
