@@ -15,6 +15,7 @@ import {
   readSavedState, writeSavedState, type StepId, type WizardState,
   castNote, castSuggestions, findInLibrary, libraryLook, type LibraryCharacter,
 } from './wizardLogic';
+import { CastSwap } from './CastSwap';
 import { previewKey, previewPrompt, useStylePreviews, type PreviewState } from './stylePreviews';
 import './wizard.css';
 
@@ -329,6 +330,11 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w, librar
           </div>
           <span className="text-sm text-muted wizard-note">{w.story.castHint}</span>
         </div>
+      )}
+
+      {library.length > 0 && state.storyText.trim() && (
+        <CastSwap storyText={state.storyText} cast={state.cast} library={library} disabled={!!busy}
+          onApply={(storyText, cast) => update({ storyText, cast })} />
       )}
 
       <div className="wizard-row">

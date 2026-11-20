@@ -254,3 +254,13 @@
   .wizard-custom-style textarea { width: 100%; }
 }
 .wizard-loading { display: flex; justify-content: center; padding: var(--space-xxl); }
+
+/* Story step: swap story names for library characters */
+.wizard-swaps { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--space-xs) var(--space-md); }
+.wizard-swap-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr); align-items: center; gap: var(--space-sm); }
+.wizard-swap-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.wizard-swap-row .select { padding: 4px 8px; font-size: 13px; min-width: 0; }
+.wizard-swap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.wizard-swap-actions .input { flex: 0 1 220px; min-width: 140px; padding: 4px 10px; font-size: 13px; }
+.wizard-swap-actions .btn { display: inline-flex; align-items: center; gap: var(--space-xs); padding: 4px 10px; font-size: 13px; }
+.wizard-swap-spacer { flex: 1; }
