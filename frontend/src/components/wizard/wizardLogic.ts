@@ -220,3 +220,13 @@ export function castNote(picked: string[], library: LibraryCharacter[]): string 
   });
   return `\n\nCharacters (use exactly these names in the panels):\n${lines.join('\n')}`;
 }
+
+/** Projects converted from a Comics script (settings.comicScript) carry a
+ *  complete prompt per panel: style, shot, place and every character with
+ *  their placement ("on the left 1boy, …"). Injecting the library's blocks on
+ *  top repeats the people without that placement and the model merges them,
+ *  so such prompts are sent as they are. */
+export function isComicsConversion(project: { settings?: Record<string, unknown> } | null | undefined): boolean {
+  const mark = project?.settings?.comicScript;
+  return typeof mark === 'string' && mark.trim() !== '';
+}
