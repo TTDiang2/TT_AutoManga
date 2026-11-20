@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FiRefreshCw, FiCopy, FiCheck, FiZap, FiTag, FiShuffle, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
+import { useTips } from '../../hooks/useTips';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Panel } from '../../types';
 
@@ -26,6 +27,7 @@ function toErrorMessage(error: unknown): string {
 export function PromptLabTab() {
   const { panels, updatePanelPrompt, settings, promptMode, setPromptMode, addPanel } = useProjectStore();
   const { t } = useTranslation();
+  const tip = useTips().prompt;
   const [selectedPanelId, setSelectedPanelId] = useState<string>('');
   const [inputText, setInputText] = useState('');
   const [outputText, setOutputText] = useState('');
@@ -270,12 +272,14 @@ export function PromptLabTab() {
             <button
               className={`mode-btn ${promptMode === 'turbo' ? 'active' : ''}`}
               onClick={() => setPromptMode('turbo')}
+              data-tip={tip.natural}
             >
               <FiZap size={16} /> {t.prompt.turbo}
             </button>
             <button
               className={`mode-btn ${promptMode === 'tags' ? 'active' : ''}`}
               onClick={() => setPromptMode('tags')}
+              data-tip={tip.tags}
             >
               <FiTag size={16} /> {t.prompt.sdxl}
             </button>
@@ -284,6 +288,7 @@ export function PromptLabTab() {
             className="btn btn-primary"
             onClick={handleBatchRefresh}
             data-tour="prompt-generate-all"
+            data-tip={tip.generateAll}
             disabled={isGenerating || panels.length === 0}
           >
             <FiRefreshCw size={16} /> {t.prompt.generateAll}
@@ -300,6 +305,7 @@ export function PromptLabTab() {
             className="input select"
             value={selectedPanelId}
             onChange={(e) => setSelectedPanelId(e.target.value)}
+            data-tip={tip.panel}
           >
             <option value="">{t.prompt.selectPanel}</option>
             {panels.map((panel, idx) => (
@@ -311,7 +317,7 @@ export function PromptLabTab() {
           <button
             className="btn btn-secondary"
             onClick={() => { setImportModalOpen(true); setImportJson(importExample); setImportError(''); }}
-            title={t.prompt.importPrompt || 'Import'}
+            data-tip={tip.import}
             style={{ whiteSpace: 'nowrap' }}
           >
             <FiUpload size={14} /> {t.prompt.importPrompt || 'Import'}
@@ -354,6 +360,7 @@ export function PromptLabTab() {
             className="input textarea"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
+            data-tip={tip.input}
             placeholder={promptMode === 'turbo'
               ? 'Enter scene description for enhancement...'
               : 'Enter tags separated by commas...'}
@@ -363,6 +370,7 @@ export function PromptLabTab() {
             className="btn btn-primary mt-md"
             onClick={handleGenerate}
             disabled={isGenerating || !inputText.trim() || !selectedPanelId}
+            data-tip={tip.generate}
           >
             {isGenerating ? <span className="loading-spinner" /> : t.prompt.generate}
             {isGenerating && (
@@ -380,6 +388,7 @@ export function PromptLabTab() {
               className="input textarea output-textarea"
               value={outputText}
               onChange={(e) => setOutputText(e.target.value)}
+              data-tip={tip.output}
               placeholder="Enhanced prompt will appear here..."
               rows={8}
             />
@@ -391,6 +400,7 @@ export function PromptLabTab() {
               className="input textarea"
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
+              data-tip={tip.negative}
               placeholder={t.prompt.negativePromptPlaceholder || 'low quality, blurry, distorted...'}
               rows={4}
             />
@@ -404,12 +414,14 @@ export function PromptLabTab() {
                 className="input"
                 value={seed}
                 onChange={(e) => setSeed(e.target.value)}
+                data-tip={tip.seed}
                 placeholder={t.prompt.seedPlaceholder || 'Random'}
               />
               <button
                 className="btn btn-secondary"
                 onClick={() => setSeed(String(Math.floor(Math.random() * 2147483647)))}
-                title="Random seed"
+                data-tip={tip.randomSeed}
+                aria-label={tip.randomSeed}
               >
                 <FiShuffle size={16} />
               </button>
@@ -420,6 +432,7 @@ export function PromptLabTab() {
                   type="checkbox"
                   checked={removeBG}
                   onChange={(e) => setRemoveBG(e.target.checked)}
+                  data-tip={tip.removeBG}
                 />
                 <span>{t.prompt.removeBG || 'Remove Background'}</span>
               </label>
@@ -430,6 +443,7 @@ export function PromptLabTab() {
                 className="btn btn-secondary"
                 onClick={handleCopy}
                 disabled={!outputText}
+                data-tip={tip.copy}
               >
                 {copied ? <FiCheck size={16} /> : <FiCopy size={16} />}
                 {copied ? t.prompt.copied : t.prompt.copy}
@@ -446,6 +460,7 @@ export function PromptLabTab() {
                   }
                 }}
                 disabled={!outputText}
+                data-tip={tip.save}
               >
                 Save
               </button>
@@ -464,6 +479,7 @@ export function PromptLabTab() {
                 <button
                   className="btn btn-ghost text-sm"
                   onClick={() => setSelectedPanelId(panel.id)}
+                  data-tip={tip.edit}
                 >
                   {t.prompt.edit}
                 </button>
@@ -615,6 +631,7 @@ export function PromptLabTab() {
               className="input textarea"
               value={importJson}
               onChange={(e) => { setImportJson(e.target.value); setImportError(''); }}
+              data-tip={tip.importJson}
               rows={12}
               style={{ fontFamily: 'monospace', fontSize: '12px', resize: 'vertical' }}
             />
@@ -628,6 +645,7 @@ export function PromptLabTab() {
               <button
                 className="btn btn-ghost"
                 onClick={handleCopyExample}
+                data-tip={tip.copyExample}
                 style={{ fontSize: '11px', padding: '2px 8px', whiteSpace: 'nowrap', marginLeft: '12px' }}
               >
                 {importCopied ? <><FiCheck size={12} /> Copied</> : <><FiCopy size={12} /> Copy Example</>}
@@ -637,7 +655,7 @@ export function PromptLabTab() {
               <button className="btn btn-secondary" onClick={() => { setImportModalOpen(false); setImportJson(''); setImportError(''); }}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={handleImport} disabled={!importJson.trim()}>
+              <button className="btn btn-primary" onClick={handleImport} disabled={!importJson.trim()} data-tip={tip.importConfirm}>
                 {t.prompt.importButton || 'Import Panels'}
               </button>
             </div>

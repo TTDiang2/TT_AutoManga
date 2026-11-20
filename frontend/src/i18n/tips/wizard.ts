@@ -1,10 +1,110 @@
-// Tooltip text for the wizard tab, keyed by control. Shown on hover/keyboard
+// Tooltip text for the Create wizard, keyed by control. Shown on hover/keyboard
 // focus by components/tooltip/TooltipLayer via a data-tip attribute.
 // `zh: typeof en` makes the compiler insist both languages have every key.
 const en = {
+  stepper: 'Jump to this step. Later steps unlock as your comic takes shape.',
+  startOver: 'Start a new comic. This one stays saved in Showcase.',
+  back: 'Go back a step. Nothing you entered is lost.',
+  next: 'Save this step and continue',
+  story: {
+    name: 'The comic\'s title. You can change it later.',
+    text: 'Your story in plain words: who, where, what happens. A few paragraphs are enough.',
+    length: 'How many panels the AI aims for: short (1-2) to long (10+)',
+    rtl: 'Manga order: panels and bubbles read from right to left',
+    ltr: 'Western order: panels and bubbles read from left to right',
+    withAI: 'Let the AI split your story into panels (needs an LLM in Settings → API). You can edit them next.',
+    manual: 'Skip the AI and write each panel yourself on the next step',
+    resume: 'Open this project in the wizard and carry on where it left off',
+  },
+  panels: {
+    up: 'Move this panel one place earlier',
+    down: 'Move this panel one place later',
+    remove: 'Delete this panel',
+    scene: 'What the picture shows: place, people, action. This becomes the image prompt.',
+    characters: 'Who appears, separated by commas. Their descriptions from the Look step are added to the picture.',
+    shot: 'Camera distance: wide shows the scene, close-up shows a face. Splash gets a whole page.',
+    dialogue: 'One line per speech bubble. Write "Name: line" so the bubble points at the speaker.',
+    add: 'Add an empty panel at the end',
+  },
+  look: {
+    preset: 'Use this art style. You can still edit the text below.',
+    style: 'Style words added to every picture, e.g. "watercolor, muted colors"',
+    tags: 'Pick this for SDXL-style models (Illustrious, NoobAI) that understand short keywords',
+    prose: 'Pick this for models that read full sentences (Qwen Image, Flux)',
+    appearance: 'How this character looks, added to every panel they are in. Hair, eyes, clothes keep them consistent.',
+  },
+  art: {
+    generate: 'Draw every panel that has no picture yet with SwarmUI. You can leave the tab while it works.',
+    redo: 'Draw this panel again with a new random seed (the number that varies the picture)',
+  },
+  pages: {
+    perPage: 'Most panels on one page. Splash panels always get a page of their own.',
+    dynamic: 'Slant the panel borders for a more dramatic, cinematic page',
+    build: 'Lay the drawn panels out on pages and add speech bubbles from the dialogue. Rebuilding replaces the pages.',
+  },
+  finish: {
+    coverTitle: 'Title printed on the cover page',
+    subtitle: 'Optional second line, e.g. "Episode 1"',
+    cover: 'Put a cover page first, using your first picture with this title',
+    pageNumbers: 'Print a number at the bottom of each page (not on the cover)',
+    pdf: 'Download the comic as one PDF file',
+    zip: 'Download every page as a PNG image, packed in a ZIP',
+    composer: 'Open the pages in the Composer to move bubbles, swap pictures or change layouts by hand',
+    newComic: 'Start a new comic from the first step. This one stays saved in Showcase.',
+  },
 };
 
 const zh: typeof en = {
+  stepper: '跳到这一步。后面的步骤会随着漫画完成逐步解锁。',
+  startOver: '新建一部漫画，当前这部仍保存在作品中。',
+  back: '返回上一步，已填写的内容不会丢失。',
+  next: '保存这一步并继续',
+  story: {
+    name: '漫画标题，之后可以修改。',
+    text: '用平实的文字写故事：谁、在哪里、发生了什么。几段就够了。',
+    length: 'AI 拆分的分镜数量：短（1-2 格）到长（10 格以上）',
+    rtl: '日漫顺序：分格和气泡从右往左读',
+    ltr: '欧美顺序：分格和气泡从左往右读',
+    withAI: '让 AI 把故事拆成分镜（需在 设置 → API 配置 LLM），下一步可以修改。',
+    manual: '不用 AI，下一步自己逐格填写',
+    resume: '在向导中打开这个项目，从上次的进度继续',
+  },
+  panels: {
+    up: '把这一格往前移一位',
+    down: '把这一格往后移一位',
+    remove: '删除这一格',
+    scene: '画面内容：地点、人物、动作。会作为生成图片的提示词。',
+    characters: '出场人物，用逗号分隔。画风步骤中的外貌描述会加入这张图。',
+    shot: '镜头远近：远景展示环境，特写展示面部。整页大图会独占一页。',
+    dialogue: '一行一个对话气泡。写成“名字：台词”，气泡会指向说话的人。',
+    add: '在末尾添加一个空白分镜',
+  },
+  look: {
+    preset: '使用这种画风，仍可在下方修改文字。',
+    style: '加到每张图的画风描述，例如“水彩，低饱和色彩”',
+    tags: '适用于理解短关键词的 SDXL 类模型（Illustrious、NoobAI）',
+    prose: '适用于能读懂完整句子的模型（Qwen Image、Flux）',
+    appearance: '这个角色的外貌，会加入其出场的每一格。写清发型、眼睛、服装能保持一致。',
+  },
+  art: {
+    generate: '用 SwarmUI 绘制所有还没有图片的分镜。绘制时可以离开这个页面。',
+    redo: '用新的随机种子（决定画面变化的数字）重画这一格',
+  },
+  pages: {
+    perPage: '每页最多几格。整页大图总是单独一页。',
+    dynamic: '让分格边框倾斜，页面更有戏剧感和电影感',
+    build: '把已绘制的分镜排到页面上，并根据台词添加气泡。重新生成会替换现有页面。',
+  },
+  finish: {
+    coverTitle: '印在封面上的标题',
+    subtitle: '可选的第二行，例如“第一话”',
+    cover: '用第一张图和这个标题生成封面，放在第一页',
+    pageNumbers: '在每页底部印页码（封面除外）',
+    pdf: '把漫画下载为一个 PDF 文件',
+    zip: '把每一页下载为 PNG 图片，打包成 ZIP',
+    composer: '在编辑器中打开页面，手动移动气泡、换图或改排版',
+    newComic: '从第一步开始新建漫画，当前这部仍保存在作品中。',
+  },
 };
 
 export default { en, zh };
