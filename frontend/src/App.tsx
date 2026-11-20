@@ -1,4 +1,5 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { FiHelpCircle } from 'react-icons/fi';
 import { Sidebar } from './components/layout/Sidebar';
 import { StoryboardTab } from './components/storyboard/StoryboardTab';
 import { PromptLabTab } from './components/prompt/PromptLabTab';
@@ -8,6 +9,11 @@ import { ShowcaseTab } from './components/showcase/ShowcaseTab';
 import { SettingsTab } from './components/settings/SettingsTab';
 import { CharacterTab } from './components/characters/CharacterTab';
 import { ComicsTab } from './components/comics/ComicsTab';
+import { WizardTab } from './components/wizard/WizardTab';
+import { Tour } from './components/tour/Tour';
+import { hasTour, isSeen } from './components/tour/tourLogic';
+import { TooltipLayer } from './components/tooltip/TooltipLayer';
+import { useTips } from './hooks/useTips';
 import { useProjectStore } from './store/projectStore';
 import { useTranslation } from './hooks/useTranslation';
 import './styles/globals.css';
@@ -16,6 +22,16 @@ function App() {
   const activeTab = useProjectStore(s => s.activeTab);
   const setSettings = useProjectStore(s => s.setSettings);
   const { t } = useTranslation();
+  const tip = useTips();
+  // the tab whose tour is open; a tab's tour starts by itself on its first visit
+  const [tourTab, setTourTab] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasTour(activeTab) || isSeen(activeTab)) return;
+    // let the tab render (and fetch its lists) before pointing at things
+    const id = window.setTimeout(() => setTourTab(activeTab), 700);
+    return () => window.clearTimeout(id);
+  }, [activeTab]);
 
   // the server's lettering fonts (data/fonts), so the Composer draws text the way the export does
   useEffect(() => {
@@ -48,6 +64,8 @@ function App() {
 
   const renderTab = () => {
     switch (activeTab) {
+      case 'wizard':
+        return <WizardTab />;
       case 'storyboard':
         return <StoryboardTab />;
       case 'prompt':
@@ -71,6 +89,7 @@ function App() {
 
   const title = t.tabs[activeTab];
   const descriptions: Record<string, string> = {
+    wizard: t.wizard.description,
     storyboard: t.storyboard.description,
     prompt: t.prompt.description,
     assets: t.assets.description,
@@ -87,13 +106,27 @@ function App() {
       <Sidebar />
       <main className="main-content">
         <header className="content-header">
-          <h1>{title}</h1>
-          <p>{description}</p>
+          <div className="content-header-row">
+            <div>
+              <h1>{title}</h1>
+              <p>{description}</p>
+            </div>
+            {hasTour(activeTab) && (
+              <button type="button" className="btn btn-ghost tour-help" data-tip={tip.common.tour}
+                onClick={() => setTourTab(activeTab)}>
+                <FiHelpCircle size={16} /> {t.tour.button}
+              </button>
+            )}
+          </div>
         </header>
         <div className="content-body animate-fadeIn" key={activeTab}>
           {renderTab()}
         </div>
       </main>
+      <TooltipLayer />
+      {tourTab === activeTab && hasTour(activeTab) && (
+        <Tour key={activeTab} tab={activeTab} onClose={() => setTourTab(null)} />
+      )}
     </div>
   );
 }

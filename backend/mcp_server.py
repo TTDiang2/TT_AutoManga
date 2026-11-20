@@ -157,6 +157,15 @@ _tool(mcp_tools.export_project, name="export_project",
       desc="Export all pages to PDF and/or ZIP; returns file paths and "
            "download URLs.")
 
+# ---- collections (episodes of a series) ----
+_tool(mcp_tools.list_collections, name="list_collections",
+      desc="Collections: projects grouped as the episodes of a series, in "
+           "episode order, with page counts.")
+_tool(mcp_tools.export_collection, name="export_collection",
+      desc="Export a whole collection to one PDF and/or ZIP (generated "
+           "cover, a title page per episode, continuous page numbers); waits "
+           "for the background job and returns download URLs.")
+
 # ---- local inference (optional onnxruntime) ----
 _tool(mcp_tools.list_inference_models, name="list_inference_models",
       desc="Local ONNX upscale models; reports whether onnxruntime is "

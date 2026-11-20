@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { FiUser, FiPlus, FiEdit2, FiTrash2, FiImage, FiCopy, FiUpload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { Character, CharacterLora } from '../../types';
 import { TrainingPanel } from './TrainingPanel';
 import { uploadSheet, isInlineImage } from './sheetAsset';
+import { parseAge } from './age';
 
 // shape returned by GET /api/character-templates
 interface CharacterTemplateMeta {
@@ -26,6 +28,7 @@ interface SwarmLora {
 const DEFAULT_LORA_WEIGHT = 0.8;
 
 export function CharacterTab() {
+  const tip = useTips().characters;
   const { characters, setCharacters, addCharacter, updateCharacter, removeCharacter, extractCharactersFromPanels } = useProjectStore();
   const { t } = useTranslation();
   const [selectedCharId, setSelectedCharId] = useState<string | null>(null);
@@ -37,6 +40,8 @@ export function CharacterTab() {
   // the sheet as an IP-Adapter reference on solo panels: 0 = off;
   // ipadapter null = not probed yet (GET /api/assets/swarmui/features)
   const [refWeight, setRefWeight] = useState(0);
+  // the age field as typed ("" = unknown); saved as a whole number or null
+  const [ageText, setAgeText] = useState('');
   const [ipadapter, setIpadapter] = useState<boolean | null>(null);
   const [generatingFor, setGeneratingFor] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -154,6 +159,7 @@ export function CharacterTab() {
     setEditForm({ name: char.name, description: char.description, appearance: char.appearance || '' });
     setLoraForm({ name: char.lora?.name || '', weight: char.lora?.weight ?? DEFAULT_LORA_WEIGHT, trigger: char.lora?.trigger || '' });
     setRefWeight(char.refWeight || 0);
+    setAgeText(char.age != null ? String(char.age) : '');
     setIsEditing(true);
   };
 
@@ -191,6 +197,11 @@ export function CharacterTab() {
   };
 
   const handleSave = () => {
+    const age = parseAge(ageText);
+    if (age === undefined) {
+      alert(`${t.characters.age}: 0-120`);
+      return;
+    }
     if (selectedCharId) {
       const lora: CharacterLora | null = loraForm.name
         ? { name: loraForm.name, weight: loraForm.weight, trigger: loraForm.trigger.trim() || null }
@@ -199,6 +210,7 @@ export function CharacterTab() {
         ...editForm,
         lora,
         refWeight: refWeight > 0 ? refWeight : null,
+        age,
         updatedAt: new Date().toISOString(),
       });
     }
@@ -249,6 +261,8 @@ export function CharacterTab() {
           }
         }
         patchChar(charId, { image, updatedAt: new Date().toISOString() });
+        // a mature request forced SFW (a minor, or no age): say why
+        if (data.notice) alert(data.notice);
       } else {
         // e.g. SwarmUI's "No model input given" when Settings has no model
         alert(`Image generation failed: ${data.error || data.detail || `HTTP ${response.status}`}`);
@@ -311,16 +325,18 @@ export function CharacterTab() {
 
   return (
     <div className="character-tab" style={{ display: 'flex', height: '100%', gap: '16px' }}>
-      <div className="character-list" style={{ width: '300px', flexShrink: 0 }}>
+      <div className="character-list" data-tour="characters-list" style={{ width: '300px', flexShrink: 0 }}>
         <div className="flex justify-between items-center mb-md">
           <h3>{t.characters.title} ({characters.length})</h3>
-          <button className="btn btn-primary" onClick={handleCreateNew}>
+          <button className="btn btn-primary" onClick={handleCreateNew} data-tour="characters-new" data-tip={tip.newChar}>
             <FiPlus size={16} /> {t.characters.newChar}
           </button>
         </div>
         
         <button 
           className="btn btn-ghost mt-sm" 
+          data-tour="characters-templates"
+          data-tip={tip.templates}
           style={{ width: '100%', justifyContent: 'flex-start' }}
           onClick={() => setShowTemplates(!showTemplates)}
         >
@@ -336,6 +352,7 @@ export function CharacterTab() {
                 className="template-item"
                 style={{ padding: '8px', borderRadius: '6px', background: 'var(--bg-tertiary)', marginBottom: '6px', cursor: 'pointer' }}
                 onClick={() => handleUseTemplate(tpl)}
+                data-tip={tip.useTemplate}
               >
                 <div style={{ fontWeight: 500, fontSize: '13px' }}>{tpl.name}</div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{tpl.description}</div>
@@ -348,7 +365,7 @@ export function CharacterTab() {
         {characters.some(c => isInlineImage(c.image)) && (
           <div className="character-migrate" style={{ margin: '8px 0 12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
             <p style={{ marginBottom: '6px' }}>{t.characters.migrateHint}</p>
-            <button className="btn btn-secondary" onClick={migrateImages} disabled={migrating}>
+            <button className="btn btn-secondary" onClick={migrateImages} disabled={migrating} data-tip={tip.migrate}>
               <FiUpload size={14} /> {migrating ? t.characters.migrating : t.characters.migrate}
             </button>
           </div>
@@ -360,6 +377,7 @@ export function CharacterTab() {
               key={char.id}
               className={`character-card card ${selectedCharId === char.id ? 'selected' : ''}`}
               onClick={() => { setSelectedCharId(char.id); setIsEditing(false); }}
+              data-tip={tip.card}
               style={{ cursor: 'pointer', padding: '12px', marginBottom: '8px', borderRadius: '8px', border: selectedCharId === char.id ? '2px solid var(--accent-primary)' : '1px solid var(--border-default)' }}
             >
               <div className="flex items-center gap-sm">
@@ -386,7 +404,7 @@ export function CharacterTab() {
               <p style={{ marginTop: '12px', color: 'var(--text-secondary)' }}>{t.characters.noCharacters}</p>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t.characters.noCharactersDesc}</p>
               {seedCandidates.length > 0 && (
-                <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={addFromStoryboard}>
+                <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={addFromStoryboard} data-tip={tip.addFromStoryboard}>
                   <FiPlus size={14} /> {fill(t.characters.addFromStoryboard, { n: seedCandidates.length })}
                 </button>
               )}
@@ -395,7 +413,7 @@ export function CharacterTab() {
         </div>
       </div>
 
-      <div className="character-detail" style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
+      <div className="character-detail" data-tour="characters-detail" style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
         {selectedChar ? (
           isEditing ? (
             <div className="card" style={{ padding: '20px', width: '100%', maxWidth: '600px' }}>
@@ -407,6 +425,7 @@ export function CharacterTab() {
                   style={{ width: '100%' }}
                   value={editForm.name}
                   onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                  data-tip={tip.name}
                 />
               </div>
               <div style={{ marginBottom: '12px' }}>
@@ -417,6 +436,7 @@ export function CharacterTab() {
                   rows={3}
                   value={editForm.description}
                   onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                  data-tip={tip.description}
                 />
               </div>
               <div style={{ marginBottom: '12px' }}>
@@ -427,6 +447,7 @@ export function CharacterTab() {
                   rows={2}
                   value={editForm.appearance}
                   onChange={e => setEditForm({ ...editForm, appearance: e.target.value })}
+                  data-tip={tip.appearance}
                   placeholder={t.characters.appearancePlaceholder}
                 />
               </div>
@@ -438,6 +459,7 @@ export function CharacterTab() {
                   style={{ width: '100%' }}
                   value={loraForm.name}
                   onChange={e => pickLora(e.target.value)}
+                  data-tip={tip.lora}
                 >
                   <option value="">{t.characters.loraNone}</option>
                   {loraForm.name && !swarmLoras.some(l => l.name === loraForm.name) && (
@@ -458,6 +480,7 @@ export function CharacterTab() {
                       step={0.05}
                       value={loraForm.weight}
                       onChange={e => setLoraForm({ ...loraForm, weight: Number(e.target.value) })}
+                      data-tip={tip.loraWeight}
                       style={{ flex: 1 }}
                     />
                     <span style={{ fontSize: '12px', width: '32px', textAlign: 'right' }}>{loraForm.weight.toFixed(2)}</span>
@@ -468,10 +491,28 @@ export function CharacterTab() {
                       onChange={e => setLoraForm({ ...loraForm, trigger: e.target.value })}
                       placeholder={t.characters.loraTrigger}
                       aria-label={t.characters.loraTrigger}
+                      data-tip={tip.loraTrigger}
                     />
                   </div>
                 )}
                 <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.loraHint}</p>
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-age">{t.characters.age}</label>
+                <input
+                  id="char-age"
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={120}
+                  step={1}
+                  placeholder={t.characters.ageUnknown}
+                  value={ageText}
+                  onChange={e => setAgeText(e.target.value)}
+                  data-tip={tip.age}
+                  style={{ width: '120px' }}
+                />
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>{t.characters.ageHint}</p>
               </div>
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px' }} htmlFor="char-ref-weight">{t.characters.refWeight}</label>
@@ -484,6 +525,7 @@ export function CharacterTab() {
                     step={0.05}
                     value={refWeight}
                     onChange={e => setRefWeight(Number(e.target.value))}
+                    data-tip={tip.refWeight}
                     disabled={!ipadapter || !selectedChar?.image}
                     style={{ flex: 1 }}
                   />
@@ -498,11 +540,11 @@ export function CharacterTab() {
                 </p>
               </div>
               <div className="flex gap-sm">
-                <button className="btn btn-primary" onClick={handleSave}>{t.characters.save}</button>
-                <button className="btn btn-secondary" onClick={handleSaveAsTemplate}>
+                <button className="btn btn-primary" onClick={handleSave} data-tip={tip.save}>{t.characters.save}</button>
+                <button className="btn btn-secondary" onClick={handleSaveAsTemplate} data-tip={tip.saveAsTemplate}>
                   <FiCopy size={16} /> {t.characters.saveAsTemplate}
                 </button>
-                <button className="btn btn-ghost" onClick={() => setIsEditing(false)}>{t.characters.cancel}</button>
+                <button className="btn btn-ghost" onClick={() => setIsEditing(false)} data-tip={tip.cancel}>{t.characters.cancel}</button>
               </div>
             </div>
           ) : (
@@ -515,10 +557,10 @@ export function CharacterTab() {
                   </p>
                 </div>
                 <div className="flex gap-sm">
-                  <button className="btn btn-secondary" onClick={() => startEdit(selectedChar)}>
+                  <button className="btn btn-secondary" onClick={() => startEdit(selectedChar)} data-tip={tip.edit}>
                     <FiEdit2 size={16} /> {t.characters.edit}
                   </button>
-                  <button className="btn btn-ghost" onClick={() => handleDelete(selectedChar.id)} style={{ color: 'var(--error)' }}>
+                  <button className="btn btn-ghost" onClick={() => handleDelete(selectedChar.id)} style={{ color: 'var(--error)' }} data-tip={tip.remove} aria-label={tip.remove}>
                     <FiTrash2 size={16} />
                   </button>
                 </div>
@@ -539,12 +581,13 @@ export function CharacterTab() {
                         className="btn btn-secondary"
                         onClick={() => handleGenerateImage(selectedChar.id)}
                         disabled={generatingFor === selectedChar.id}
+                        data-tip={tip.generateSheet}
                         style={{ fontSize: '12px', padding: '6px 12px' }}
                       >
                         {generatingFor === selectedChar.id ? <span className="loading-spinner" /> : <FiImage size={14} />}
                         {generatingFor === selectedChar.id ? t.characters.generating : t.characters.generateImage}
                       </button>
-                      <label className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <label className="btn btn-secondary" data-tip={tip.uploadSheet} style={{ fontSize: '12px', padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                         <FiUpload size={14} />
                         {t.assets.upload}
                         <input type="file" accept="image/*" onChange={handleUploadImage} hidden />
@@ -557,12 +600,13 @@ export function CharacterTab() {
                         className="btn btn-secondary"
                         onClick={() => handleGenerateImage(selectedChar.id)}
                         disabled={generatingFor === selectedChar.id}
+                        data-tip={tip.generateSheet}
                         style={{ flex: 1, fontSize: '12px', padding: '6px 12px' }}
                       >
                         {generatingFor === selectedChar.id ? <span className="loading-spinner" /> : <FiImage size={14} />}
                         {generatingFor === selectedChar.id ? t.characters.generating : t.characters.generateImage}
                       </button>
-                      <label className="btn btn-secondary" style={{ flex: 1, fontSize: '12px', padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                      <label className="btn btn-secondary" data-tip={tip.uploadSheet} style={{ flex: 1, fontSize: '12px', padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
                         <FiUpload size={14} />
                         {t.assets.upload}
                         <input type="file" accept="image/*" onChange={handleUploadImage} hidden />
@@ -595,6 +639,11 @@ export function CharacterTab() {
                       </p>
                     </div>
                   )}
+
+                  <div style={{ marginTop: '16px' }}>
+                    <h4 style={{ marginBottom: '6px', fontSize: '13px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.characters.age}</h4>
+                    <p style={{ fontSize: '14px' }}>{selectedChar.age != null ? selectedChar.age : t.characters.ageUnknown}</p>
+                  </div>
 
                   {!!selectedChar.refWeight && selectedChar.image && (
                     <div style={{ marginTop: '16px' }}>

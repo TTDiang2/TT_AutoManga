@@ -1,12 +1,21 @@
-"""Single-password login gate.
+"""Login gate: one password and/or "Sign in with Google" (OpenID Connect).
 
 State lives in ``data/auth.json`` (atomic write, chmod 600)::
 
-    {"hash": "scrypt$16384$8$1$<salt>$<key>", "secret": "<64 hex>", "version": 1}
+    {"hash": "scrypt$16384$8$1$<salt>$<key>", "secret": "<64 hex>", "version": 1,
+     "google": {"clientId": "...", "clientSecret": "..."}}
 
-A session is the cookie ``am_session`` = ``b64url({"v","iat"}).b64url(hmac)``,
-signed with ``secret``. Bumping ``version`` (``logout-all``, password change)
-invalidates every issued cookie at once.
+``hash`` and ``google`` are each optional (at least one is set). The Google
+client secret lives only here, never in settings.json, and no API returns
+it. Non-secret Google settings are in ``settings.auth`` (``publicUrl``,
+``googleAllowedEmails``, ``passwordLogin``); the flow itself is
+backend/api/auth_google.py.
+
+A session is the cookie ``am_session`` = ``b64url({"v","iat"[,"email"]}).b64url(hmac)``,
+signed with ``secret``; a Google sign-in adds ``email``, and such a session
+ends as soon as that address leaves ``googleAllowedEmails``. Bumping
+``version`` (``logout-all``, password change) invalidates every issued
+cookie at once.
 
 Local callers — peer 127.0.0.1/::1 with no forwarding headers and a Host of
 localhost, 127.0.0.1 or [::1] — never need a session: the MCP tools,
@@ -22,6 +31,15 @@ CLI (run on the server)::
     printf '%s\\n' "$PW" | .venv/bin/python -m backend.core.auth set-password --stdin
     .venv/bin/python -m backend.core.auth logout-all
     .venv/bin/python -m backend.core.auth status
+    .venv/bin/python -m backend.core.auth set-google            # client id + secret
+    printf '%s\\n%s\\n' "$ID" "$SECRET" | .venv/bin/python -m backend.core.auth set-google --stdin
+    .venv/bin/python -m backend.core.auth clear-google
+    .venv/bin/python -m backend.core.auth allow-email owner@example.com
+    .venv/bin/python -m backend.core.auth deny-email owner@example.com
+    .venv/bin/python -m backend.core.auth set-public-url https://manga.example.com
+
+The settings commands edit data/settings.json on disk: restart the server
+afterwards (it keeps its settings in memory).
 """
 from __future__ import annotations
 
@@ -30,6 +48,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import socket
 import threading
@@ -107,7 +126,8 @@ def load_auth() -> Optional[dict]:
     try:
         with open(AUTH_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if not (isinstance(data, dict) and data.get("hash") and data.get("secret")):
+        if not (isinstance(data, dict) and data.get("secret")
+                and (data.get("hash") or _google_of(data))):
             data = None
     except (OSError, ValueError):
         data = None
@@ -124,22 +144,162 @@ def _save_auth(data: dict) -> None:
         pass
 
 
+def _load_raw() -> dict:
+    """auth.json as stored, even when it holds no usable login (for edits)."""
+    try:
+        with open(AUTH_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        raise RuntimeError(f"{AUTH_FILE} is unreadable: {e}")
+
+
 def is_configured() -> bool:
+    """Some way to sign in exists (a password and/or Google)."""
     return load_auth() is not None
+
+
+def has_password() -> bool:
+    data = load_auth()
+    return bool(data and data.get("hash"))
 
 
 def set_password(password: str) -> dict:
     """Store a new password hash and bump ``version`` (all sessions end)."""
     if len(password) < MIN_PASSWORD_LEN:
         raise ValueError(f"password must be at least {MIN_PASSWORD_LEN} characters")
-    current = load_auth() or {}
-    data = {
-        "hash": hash_password(password),
-        "secret": current.get("secret") or secrets.token_hex(32),
-        "version": int(current.get("version", 0)) + 1,
-    }
+    current = _load_raw()
+    data = dict(current,
+                hash=hash_password(password),
+                secret=current.get("secret") or secrets.token_hex(32),
+                version=int(current.get("version", 0)) + 1)
     _save_auth(data)
     return data
+
+
+# ---------------------------------------------------------------- Google
+
+def _google_of(data: Optional[dict]) -> Optional[dict]:
+    g = (data or {}).get("google")
+    if isinstance(g, dict) and g.get("clientId") and g.get("clientSecret"):
+        return g
+    return None
+
+
+def google_credentials() -> Optional[dict]:
+    """``{"clientId", "clientSecret"}`` from auth.json, or None. Server-side
+    only: never put this in a response."""
+    return _google_of(load_auth())
+
+
+def google_configured() -> bool:
+    return google_credentials() is not None
+
+
+_CLIENT_FIELD_RE = re.compile(r"[A-Za-z0-9._~+/=-]{8,300}")
+
+
+def set_google(client_id: str, client_secret: str) -> dict:
+    client_id, client_secret = client_id.strip(), client_secret.strip()
+    if not _CLIENT_FIELD_RE.fullmatch(client_id):
+        raise ValueError("that does not look like a Google OAuth client id")
+    if not _CLIENT_FIELD_RE.fullmatch(client_secret):
+        raise ValueError("that does not look like a Google OAuth client secret")
+    current = _load_raw()
+    data = dict(current,
+                secret=current.get("secret") or secrets.token_hex(32),
+                version=int(current.get("version", 1)),
+                google={"clientId": client_id, "clientSecret": client_secret})
+    _save_auth(data)
+    return data
+
+
+def clear_google() -> bool:
+    """Remove the Google client; False when none was stored."""
+    current = _load_raw()
+    if "google" not in current:
+        return False
+    current.pop("google")
+    _save_auth(current)
+    return True
+
+
+_EMAIL_RE = re.compile(r"[^@\s<>()\[\],;:\"]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}"
+                       r"[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)+")
+
+
+def normalize_email(email: str) -> str:
+    """The address lowercased; ValueError when it is not an email address."""
+    e = str(email).strip().lower()
+    if len(e) > 254 or not _EMAIL_RE.fullmatch(e):
+        raise ValueError(f"not an email address: {email!r}")
+    return e
+
+
+def allowed_emails() -> set:
+    try:
+        raw = config.settings.auth.googleAllowedEmails or []
+    except AttributeError:
+        raw = []
+    return {str(e).strip().lower() for e in raw if str(e).strip()}
+
+
+def password_login_setting() -> bool:
+    try:
+        return bool(config.settings.auth.passwordLogin)
+    except AttributeError:
+        return True
+
+
+def normalize_public_url(url: str) -> str:
+    """``https://host[:port]`` without a trailing slash; ValueError otherwise
+    (no path, query, credentials; https only)."""
+    from urllib.parse import urlsplit
+    u = str(url).strip().rstrip("/")
+    try:
+        parts = urlsplit(u)
+        parts.port
+    except ValueError:
+        raise ValueError(f"not a URL: {url!r}")
+    if parts.scheme.lower() != "https" or not parts.hostname:
+        raise ValueError("the public URL must be https://<host> (Google only "
+                         "redirects to https)")
+    if parts.path or parts.query or parts.fragment or "@" in parts.netloc:
+        raise ValueError("the public URL is just https://<host>, without a path")
+    return f"https://{parts.netloc.lower()}"
+
+
+def public_url() -> str:
+    """``settings.auth.publicUrl`` normalized, or "" when unset/invalid."""
+    try:
+        raw = config.settings.auth.publicUrl or ""
+    except AttributeError:
+        raw = ""
+    if not raw.strip():
+        return ""
+    try:
+        return normalize_public_url(raw)
+    except ValueError:
+        return ""
+
+
+def public_host() -> str:
+    from urllib.parse import urlsplit
+    u = public_url()
+    return (urlsplit(u).hostname or "").lower() if u else ""
+
+
+def google_ready() -> bool:
+    """Google sign-in can work at all: a client is stored and publicUrl set."""
+    return google_configured() and bool(public_url())
+
+
+def google_available(request) -> bool:
+    """...and this request came to the public name (Google can only send the
+    browser back there, so the button is useless on the LAN address)."""
+    return google_ready() and host_name(request) == public_host()
 
 
 def bump_version() -> dict:
@@ -163,13 +323,16 @@ def _sign(secret: str, payload: str) -> str:
                           hashlib.sha256).digest())
 
 
-def make_token(data: Optional[dict] = None, now: Optional[float] = None) -> str:
+def make_token(data: Optional[dict] = None, now: Optional[float] = None,
+               email: Optional[str] = None) -> str:
     data = data or load_auth()
     if data is None:
         raise RuntimeError("no password is set")
     iat = int(now if now is not None else time.time())
-    payload = _b64e(json.dumps({"v": int(data["version"]), "iat": iat},
-                               separators=(",", ":")).encode("utf-8"))
+    claims = {"v": int(data["version"]), "iat": iat}
+    if email:
+        claims["email"] = email
+    payload = _b64e(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
     return f"{payload}.{_sign(data['secret'], payload)}"
 
 
@@ -192,7 +355,68 @@ def read_token(token: Optional[str], data: Optional[dict] = None,
     now = now if now is not None else time.time()
     if v != int(data["version"]) or iat > now + 300 or now - iat >= SESSION_MAX_AGE:
         return None
-    return {"v": v, "iat": iat}
+    out = {"v": v, "iat": iat}
+    email = claims.get("email") if isinstance(claims, dict) else None
+    if email is not None:
+        if not isinstance(email, str):
+            return None
+        out["email"] = email
+    return out
+
+
+def session_allowed(claims: Optional[dict]) -> Optional[dict]:
+    """``claims`` unless it is a Google session whose address is no longer
+    in ``googleAllowedEmails`` (removing an address signs it out)."""
+    if claims is None:
+        return None
+    email = claims.get("email")
+    if email is not None and email.lower() not in allowed_emails():
+        return None
+    return claims
+
+
+def check_session(token: Optional[str], data: Optional[dict] = None) -> Optional[dict]:
+    return session_allowed(read_token(token, data))
+
+
+# Short-lived signed values other than sessions (the Google sign-in's
+# am_oauth cookie). The key is derived from ``secret`` per purpose, so such a
+# value can never pass as a session token.
+
+def _purpose_key(secret: str, purpose: str) -> str:
+    return hmac.new(secret.encode("utf-8"), b"automanga:" + purpose.encode("ascii"),
+                    hashlib.sha256).hexdigest()
+
+
+def sign_value(purpose: str, claims: dict, data: Optional[dict] = None) -> str:
+    data = data or load_auth()
+    if data is None:
+        raise RuntimeError("login is not configured")
+    payload = _b64e(json.dumps(claims, separators=(",", ":")).encode("utf-8"))
+    return f"{payload}.{_sign(_purpose_key(data['secret'], purpose), payload)}"
+
+
+def read_value(purpose: str, token: Optional[str], max_age: float,
+               data: Optional[dict] = None, now: Optional[float] = None) -> Optional[dict]:
+    """The claims of a :func:`sign_value` token when genuine and younger than
+    ``max_age`` seconds (by its ``iat``)."""
+    if not token:
+        return None
+    data = data or load_auth()
+    if data is None:
+        return None
+    try:
+        payload, sig = token.split(".", 1)
+        if not hmac.compare_digest(sig, _sign(_purpose_key(data["secret"], purpose), payload)):
+            return None
+        claims = json.loads(_b64d(payload))
+        iat = int(claims["iat"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    now = now if now is not None else time.time()
+    if not isinstance(claims, dict) or iat > now + 60 or now - iat >= max_age:
+        return None
+    return claims
 
 
 def needs_refresh(claims: dict, now: Optional[float] = None) -> bool:
@@ -334,12 +558,13 @@ def is_https(request) -> bool:
 
 
 def session_claims(request) -> Optional[dict]:
-    return read_token(request.cookies.get(COOKIE_NAME))
+    return check_session(request.cookies.get(COOKIE_NAME))
 
 
-def set_session_cookie(response, request, data: Optional[dict] = None) -> None:
+def set_session_cookie(response, request, data: Optional[dict] = None,
+                       email: Optional[str] = None) -> None:
     response.set_cookie(
-        COOKIE_NAME, make_token(data), max_age=SESSION_MAX_AGE, path="/",
+        COOKIE_NAME, make_token(data, email=email), max_age=SESSION_MAX_AGE, path="/",
         httponly=True, samesite="lax", secure=is_https(request))
 
 
@@ -464,6 +689,71 @@ def _read_new_password(from_stdin: bool) -> str:
     return first
 
 
+def _read_google_client(from_stdin: bool) -> tuple:
+    import sys
+    if from_stdin:
+        client_id = sys.stdin.readline().strip()
+        client_secret = sys.stdin.readline().strip()
+        return client_id, client_secret
+    import getpass
+    client_id = input("Google OAuth client id: ").strip()
+    client_secret = getpass.getpass("Google OAuth client secret: ").strip()
+    return client_id, client_secret
+
+
+def _edit_settings_auth(edit) -> dict:
+    """Apply ``edit(auth_dict)`` to data/settings.json on disk. Only the
+    ``auth`` section is touched (everything else is kept byte-for-byte
+    equivalent); the result must still validate. Also updates this
+    process's in-memory settings. Returns the new auth section."""
+    path = config.SETTINGS_FILE
+    data: dict = {}
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            raise SystemExit(f"{path} is unreadable ({e}); fix it first")
+        if not isinstance(data, dict):
+            raise SystemExit(f"{path} is not a JSON object; fix it first")
+    section = dict(data.get("auth") or {})
+    edit(section)
+    try:
+        validated = config.AuthConfig(**section)
+    except Exception as e:      # pydantic.ValidationError
+        raise SystemExit(f"invalid auth settings: {e}")
+    data["auth"] = validated.model_dump()
+    atomic_write_json(path, data, indent=2)
+    try:
+        config.settings.auth = validated
+    except AttributeError:
+        pass
+    return data["auth"]
+
+
+_RESTART_HINT = ("saved to settings.json: restart the server to apply it "
+                 "(it keeps its settings in memory)")
+
+
+def _print_status() -> None:
+    try:
+        raw = _load_raw()
+    except RuntimeError as e:
+        raw = {}
+        print(str(e))
+    s = config.load_settings().auth if config.SETTINGS_FILE.exists() else config.AuthConfig()
+    print(f"auth file:        {AUTH_FILE}")
+    print(f"password:         {'set' if raw.get('hash') else 'not set'}"
+          + (f" (session version {raw.get('version')})" if raw.get("secret") else ""))
+    print(f"password login:   {'on' if s.passwordLogin else 'off (local callers only)'}")
+    g = _google_of(raw)
+    print(f"google client:    {'configured' if g else 'not configured'}")
+    print(f"public URL:       {s.publicUrl or '(not set)'}")
+    print(f"allowed emails:   {', '.join(s.googleAllowedEmails) or '(none)'}")
+    print(f"allowed hosts:    {', '.join(s.allowedHosts) or '(none)'}")
+    print(f"trusted proxy:    {s.trustedProxy or '(none)'}")
+
+
 def main(argv: Optional[list] = None) -> int:
     import argparse
     parser = argparse.ArgumentParser(prog="python -m backend.core.auth",
@@ -474,7 +764,19 @@ def main(argv: Optional[list] = None) -> int:
     sp.add_argument("--stdin", action="store_true",
                     help="read the password from the first line of stdin")
     sub.add_parser("logout-all", help="invalidate every session cookie")
-    sub.add_parser("status", help="show whether a password is set")
+    sub.add_parser("status", help="show what is configured (no secrets)")
+    sg = sub.add_parser("set-google", help="store the Google OAuth client id "
+                        "and secret (in data/auth.json)")
+    sg.add_argument("--stdin", action="store_true",
+                    help="read the client id and secret from the first two lines of stdin")
+    sub.add_parser("clear-google", help="remove the Google OAuth client")
+    ae = sub.add_parser("allow-email", help="allow a Google account to sign in")
+    ae.add_argument("email")
+    de = sub.add_parser("deny-email", help="remove a Google account (its sessions end)")
+    de.add_argument("email")
+    pu = sub.add_parser("set-public-url", help="the https URL browsers use "
+                        "(Google redirects back to <url>/api/auth/google/callback)")
+    pu.add_argument("url")
     args = parser.parse_args(argv)
 
     if args.cmd == "set-password":
@@ -489,10 +791,58 @@ def main(argv: Optional[list] = None) -> int:
         except RuntimeError as e:
             raise SystemExit(str(e))
         print(f"all sessions signed out (session version {data['version']})")
+    elif args.cmd == "set-google":
+        try:
+            set_google(*_read_google_client(args.stdin))
+        except (ValueError, RuntimeError) as e:
+            raise SystemExit(str(e))
+        print(f"Google client stored in {AUTH_FILE}")
+        if not config.load_settings().auth.publicUrl:
+            print("next: set-public-url https://<your public host>")
+    elif args.cmd == "clear-google":
+        try:
+            removed = clear_google()
+        except RuntimeError as e:
+            raise SystemExit(str(e))
+        print("Google client removed" if removed else "no Google client was stored")
+    elif args.cmd in ("allow-email", "deny-email"):
+        try:
+            email = normalize_email(args.email)
+        except ValueError as e:
+            raise SystemExit(str(e))
+
+        def edit(section: dict) -> None:
+            emails = [str(e).strip().lower() for e in section.get("googleAllowedEmails") or []]
+            emails = [e for e in emails if e and e != email]
+            if args.cmd == "allow-email":
+                emails.append(email)
+            elif not emails and section.get("passwordLogin") is False:
+                raise SystemExit("password login is off: removing the last allowed "
+                                 "email would leave no way to sign in remotely")
+            section["googleAllowedEmails"] = emails
+        auth = _edit_settings_auth(edit)
+        print(f"allowed emails: {', '.join(auth['googleAllowedEmails']) or '(none)'}")
+        print(_RESTART_HINT)
+    elif args.cmd == "set-public-url":
+        try:
+            url = normalize_public_url(args.url)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        from urllib.parse import urlsplit
+        host = urlsplit(url).hostname.lower()
+
+        def edit(section: dict) -> None:
+            section["publicUrl"] = url
+            hosts = [str(h) for h in section.get("allowedHosts") or []]
+            if host not in {h.strip().lower().strip("[]") for h in hosts}:
+                hosts.append(host)
+            section["allowedHosts"] = hosts
+        auth = _edit_settings_auth(edit)
+        print(f"public URL: {auth['publicUrl']}  (allowed hosts: {', '.join(auth['allowedHosts'])})")
+        print(f"Google redirect URI: {url}/api/auth/google/callback")
+        print(_RESTART_HINT)
     else:
-        data = load_auth()
-        print(f"{AUTH_FILE}: " + (f"configured, session version {data['version']}"
-                                  if data else "no password set"))
+        _print_status()
     return 0
 
 

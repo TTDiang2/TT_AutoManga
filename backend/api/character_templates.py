@@ -99,7 +99,7 @@ class GenerateCharacterImageRequest(BaseModel):
     negative_prompt: str = ""
     seed: Optional[int] = None
     character_id: str
-    project_id: str
+    project_id: str = ""
 
 
 @router.post("/generate-image")
@@ -110,10 +110,38 @@ async def generate_character_image(req: GenerateCharacterImageRequest):
         # settings loras are LoraConfig models (settings.py normalizes on save)
         loras = [l for l in swarmsettings.currentLoras if l.name]
 
+    # the content rating (backend/content_rating.py): the project's (else the
+    # global default), judged on this character's own age and description
+    from ..content_rating import RatingRefused, apply_rating, character_record
+    from ..storage.manager import storage, InvalidProjectIdError
+    project = None
+    try:
+        project = storage.load_project(req.project_id) if req.project_id else None
+    except InvalidProjectIdError:
+        project = None
+    from .characters import _load_characters
+    try:
+        library = _load_characters()
+    except Exception as e:   # unreadable library: the character's age is unknown
+        logging.warning("characters library unreadable: %s", e)
+        library = []
+    char = next((c for c in library if isinstance(c, dict) and c.get("id") == req.character_id), None)
+    if char:
+        rec = character_record(char.get("name") or "", None, [char])
+    else:
+        rec = {"name": "this character", "age": None, "text": req.prompt}
+    rec["text"] = f"{rec['text']}, {req.prompt}"
+    try:
+        rated = apply_rating(req.prompt, req.negative_prompt, project=project, cast=[rec])
+    except RatingRefused as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if rated["notice"]:
+        logging.info("character sheet %s: %s", req.character_id, rated["notice"])
+
     try:
         result = await swarm_client.generate_image(
-            prompt=req.prompt,
-            negative_prompt=req.negative_prompt,
+            prompt=rated["prompt"],
+            negative_prompt=rated["negative"],
             model=swarmsettings.currentModel or None,
             steps=swarmsettings.currentSteps,
             cfg_scale=swarmsettings.currentCfgScale,
@@ -123,6 +151,9 @@ async def generate_character_image(req: GenerateCharacterImageRequest):
             loras=loras,
             seed=req.seed
         )
+        result["content_rating"] = rated["rating"]
+        if rated["notice"]:
+            result["notice"] = rated["notice"]
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

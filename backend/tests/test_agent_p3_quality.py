@@ -118,7 +118,10 @@ def test_generated_png_carries_parameters(client, pid, mock_swarm):
     # the human block does not repeat the prompt in the settings line
     meta = __import__("json").loads(img.info["automanga"])
     assert meta["prompt"] == "bridge at dusk" and meta["seed"] == 123
-    assert meta["negative_prompt"] == "blurry"
+    # the negative actually sent: the request's plus the SFW negatives
+    # (the default content rating, backend/content_rating.py)
+    assert meta["negative_prompt"].startswith("blurry, nsfw, nude")
+    assert meta["content_rating"] == "sfw"
     settings_line = params.splitlines()[-1]
     assert "prompt:" not in settings_line and "seed: 123" in settings_line
 

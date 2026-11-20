@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation, fill } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 
 /** settings.swarmui's IP-Adapter fields (character-sheet references). */
 export interface IpAdapterSettings {
@@ -29,6 +30,7 @@ export function IpAdapterSection({ value, onChange }: {
 }) {
   const { t } = useTranslation();
   const s = t.settings;
+  const tip = useTips().settings;
   const [presets, setPresets] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export function IpAdapterSection({ value, onChange }: {
           <select
             id="ipa-preset"
             className="input select"
+            data-tip={tip.ipadapterPreset}
             value={value.ipadapterPreset}
             onChange={(e) => onChange({ ...value, ipadapterPreset: e.target.value })}
           >
@@ -73,6 +76,7 @@ export function IpAdapterSection({ value, onChange }: {
           <select
             id="ipa-weight-type"
             className="input select"
+            data-tip={tip.ipadapterWeightType}
             value={value.ipadapterWeightType}
             onChange={(e) => onChange({ ...value, ipadapterWeightType: e.target.value })}
           >
@@ -85,6 +89,7 @@ export function IpAdapterSection({ value, onChange }: {
         <input
           id="ipa-end"
           type="range"
+          data-tip={tip.ipadapterEnd}
           className="slider"
           min={0.3}
           max={1}
@@ -104,6 +109,11 @@ export function TrainingSection({ value, onChange }: {
 }) {
   const { t } = useTranslation();
   const s = t.settings;
+  const tip = useTips().settings;
+  const tipKey = {
+    host: tip.trainingHost, toolkitDir: tip.trainingToolkitDir, python: tip.trainingPython,
+    baseModel: tip.trainingBaseModel, loraFolder: tip.trainingLoraFolder,
+  };
   const text = (key: 'host' | 'toolkitDir' | 'python' | 'baseModel' | 'loraFolder',
                 label: string, placeholder: string) => (
     <div className="form-group">
@@ -111,6 +121,7 @@ export function TrainingSection({ value, onChange }: {
       <input
         id={`training-${key}`}
         className="input"
+        data-tip={tipKey[key]}
         type="text"
         spellCheck={false}
         value={value[key]}
@@ -143,7 +154,7 @@ export function TrainingSection({ value, onChange }: {
         <label>{s.trainingResolution}</label>
         <div className="training-resolutions">
           {sizes.map((r) => (
-            <label key={r} className="training-check">
+            <label key={r} className="training-check" data-tip={tip.trainingResolution}>
               <input
                 type="checkbox"
                 checked={value.resolution.includes(r)}
@@ -157,7 +168,7 @@ export function TrainingSection({ value, onChange }: {
         <span className="text-xs text-muted">{s.trainingResolutionHint}</span>
       </div>
       <div className="form-group">
-        <label className="training-check">
+        <label className="training-check" data-tip={tip.trainingSampling}>
           <input
             type="checkbox"
             checked={value.sampling}
@@ -168,7 +179,7 @@ export function TrainingSection({ value, onChange }: {
         <span className="text-xs text-muted">{s.trainingSamplingHint}</span>
       </div>
       <div className="form-group">
-        <label className="training-check">
+        <label className="training-check" data-tip={tip.trainingCacheText}>
           <input
             type="checkbox"
             checked={value.cacheTextEmbeddings}

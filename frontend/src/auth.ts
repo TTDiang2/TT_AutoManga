@@ -6,6 +6,57 @@ export interface AuthStatus {
   configured: boolean;
   authenticated: boolean;
   local: boolean;
+  /** The password form works for this visitor. */
+  passwordLogin?: boolean;
+  /** "Sign in with Google" works on this page (right host, configured). */
+  google?: boolean;
+  /** Google sign-in is set up, but only on this URL (e.g. on the LAN address). */
+  googleUrl?: string | null;
+  /** The Google account of this session, if it signed in with Google. */
+  email?: string | null;
+}
+
+/** GET /api/auth/google (needs a session or a local caller). */
+export interface GoogleConfig {
+  configured: boolean;
+  publicUrl: string;
+  redirectUri: string;
+  allowedEmails: string[];
+  passwordLogin: boolean;
+  password: boolean;
+}
+
+export type LoginErrorCode = 'denied' | 'not_allowed' | 'invalid' | 'misconfigured' | 'rate';
+const LOGIN_ERRORS: LoginErrorCode[] = ['denied', 'not_allowed', 'invalid', 'misconfigured', 'rate'];
+
+/** Where the Google button goes: the server redirects to Google and back to `next`. */
+export function googleStartUrl(next = currentPath()): string {
+  return `/api/auth/google/start?next=${encodeURIComponent(next)}`;
+}
+
+function currentPath(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('login_error');
+  return url.pathname + url.search;
+}
+
+let loginErrorRead = false;
+let loginError: LoginErrorCode | null = null;
+
+/** The ?login_error=<code> the Google callback redirected with, read once
+    (and removed from the address bar). */
+export function takeLoginError(): LoginErrorCode | null {
+  if (loginErrorRead) return loginError;
+  loginErrorRead = true;
+  try {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('login_error');
+    if (code === null) return null;
+    loginError = (LOGIN_ERRORS as string[]).includes(code) ? code as LoginErrorCode : 'invalid';
+    url.searchParams.delete('login_error');
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
+  } catch { /* no URL / history */ }
+  return loginError;
 }
 
 /** Fired on window when an /api request comes back 401 (session gone). */
@@ -53,13 +104,13 @@ export function installFetchGuard() {
 
 export type AuthResult =
   | { ok: true }
-  | { ok: false; reason: 'wrong' | 'rate' | 'unconfigured' | 'invalid' | 'error'; retryAfter?: number; detail?: string };
+  | { ok: false; reason: 'wrong' | 'rate' | 'unconfigured' | 'invalid' | 'disabled' | 'conflict' | 'error'; retryAfter?: number; detail?: string };
 
-async function postJson(path: string, body?: unknown): Promise<AuthResult> {
+async function postJson(path: string, body?: unknown, method = 'POST'): Promise<AuthResult> {
   let res: Response;
   try {
     res = await fetch(path, {
-      method: 'POST',
+      method,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -75,7 +126,9 @@ async function postJson(path: string, body?: unknown): Promise<AuthResult> {
   if (res.status === 429) {
     return { ok: false, reason: 'rate', retryAfter: Number(res.headers.get('Retry-After')) || 60, detail };
   }
+  if (res.status === 403 && detail === 'password login is disabled') return { ok: false, reason: 'disabled', detail };
   if (res.status === 401 || res.status === 403) return { ok: false, reason: 'wrong', detail };
+  if (res.status === 409 && method === 'PUT') return { ok: false, reason: 'conflict', detail };
   if (res.status === 503 || res.status === 409) return { ok: false, reason: 'unconfigured', detail };
   if (res.status === 400) return { ok: false, reason: 'invalid', detail };
   return { ok: false, reason: 'error', detail };
@@ -86,6 +139,16 @@ export const logout = () => postJson('/api/auth/logout');
 export const logoutAll = () => postJson('/api/auth/logout-all');
 export const changePassword = (current: string, next: string) =>
   postJson('/api/auth/password', { current, new: next });
+export const setAllowedEmails = (emails: string[]) =>
+  postJson('/api/auth/google/allowed', { emails }, 'PUT');
+export const setPasswordLogin = (enabled: boolean) =>
+  postJson('/api/auth/password-login', { enabled }, 'PUT');
+
+export async function fetchGoogleConfig(): Promise<GoogleConfig> {
+  const res = await fetch('/api/auth/google', { cache: 'no-store' });
+  if (!res.ok) throw new Error(`google config ${res.status}`);
+  return res.json();
+}
 
 /** Language for screens shown before /api/settings is readable: the last
     one the app used, else the browser's. */

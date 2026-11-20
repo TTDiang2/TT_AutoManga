@@ -28,8 +28,14 @@ export interface Project {
   composerPages?: ComposerPage[];
 }
 
+/** Content rating: "sfw" (default) or "mature" (adult fictional characters only;
+    minors and characters of unknown age are always SFW). */
+export type ContentRating = 'sfw' | 'mature';
+
 export interface ProjectSettings {
   detailLevel: number;
+  // unset: the global default (Settings → Content rating)
+  contentRating?: ContentRating;
 }
 
 export interface PromptPreset {
@@ -90,7 +96,7 @@ export interface SwarmUIPreset {
   promptSuffix: string;
 }
 
-export type TabId = 'storyboard' | 'prompt' | 'assets' | 'composer' | 'showcase' | 'settings' | 'characters' | 'comics';
+export type TabId = 'wizard' | 'storyboard' | 'prompt' | 'assets' | 'composer' | 'showcase' | 'settings' | 'characters' | 'comics';
 
 export type BubbleType = 'speech' | 'thought' | 'shout' | 'whisper' | 'narration' | 'inner-voice';
 
@@ -153,6 +159,8 @@ export interface Character {
   lora?: CharacterLora | null;
   // 0-1: the sheet guides the character's solo panels via IP-Adapter; null/0 = off
   refWeight?: number | null;
+  // 0-120; null/undefined = unknown (mature projects need 18+)
+  age?: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -25,7 +25,7 @@ idea ──► storyboard ──► image generation ──► page assembly ─
 ```
 
 The pipeline is **agent-first**: every step above is exposed as a typed tool
-(28 MCP tools, 30 REST endpoints, a CLI and an agent skill), so an LLM agent
+(30 MCP tools, 30 REST endpoints, a CLI and an agent skill), so an LLM agent
 can take *"make me a comic about X"* and run the whole thing — while a human
 can open the same project in the UI and polish anything by hand. Both read
 and write the same project JSON.
@@ -77,6 +77,13 @@ frame where the art's own perspective calls for it.
 </p>
 
 ## ✨ Features
+
+**Create wizard (start here)**
+- The **Create** tab (compass icon, first in the sidebar) walks you from story to finished comic in six steps: Story → Panels → Look → Art → Pages → Finish
+- Plain-language hints at each step, a SwarmUI connection check, a progress bar while panels are drawn, page previews, a cover page and PDF/ZIP download
+- It builds an ordinary project, so you can switch to Storyboard, Prompt Lab or Composer at any point for fine control. The wizard remembers where you were.
+- Every tab, Create included, has a short spotlight tour that starts the first time you open it (on Create it doubles as a welcome for new users). Replay it with the **Tour** button at the top right, or turn tours off from the first step.
+- Hover over (or tab to) any button or field for a short tooltip explaining what it does, in English or Chinese.
 
 **Storyboard & story**
 - LLM storyboard generation from novel text (detail-level slider), or write panels by hand
@@ -146,7 +153,7 @@ npm --prefix frontend run build
 python -m backend.main 5180
 ```
 
-On Windows, `run.bat` does all of the above.
+On Windows, `run.bat` does all of the above. Open the UI and start in the **Create** tab.
 
 ## 🤖 Agent access (MCP / Skill / CLI)
 
@@ -208,7 +215,7 @@ Settings live in `data/settings.json` (gitignored, created on first change):
 ```
 backend/          FastAPI app (api/, storage/, render/)
   agent.py        30 agent endpoints — the whole pipeline over HTTP
-  mcp_tools.py    28 MCP tools mirroring the API
+  mcp_tools.py    30 MCP tools mirroring the API
   assembly.py     template filling + automatic dialogue bubbles
   render/         server-side page renderer + vertical typesetting
   inference.py    local Real-ESRGAN upscaling

@@ -1,0 +1,344 @@
+/* Showcase: collections (episodes of a series). Colors come from the theme
+   variables in styles/globals.css, so dark mode follows automatically. */
+
+.showcase-view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.showcase-view-toggle button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.showcase-view-toggle button.active {
+  background: var(--accent-primary);
+  color: var(--accent-contrast);
+}
+
+.collections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-lg);
+}
+
+.collection-card {
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.collection-strip {
+  display: flex;
+  gap: 2px;
+  aspect-ratio: 4 / 3;
+  background: var(--bg-tertiary);
+  align-items: stretch;
+  justify-content: center;
+}
+
+.collection-strip > .cover-placeholder {
+  display: flex;
+  align-items: center;
+}
+
+.collection-strip-cell {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+}
+
+.collection-strip-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.collection-auto-badge {
+  margin-left: var(--space-sm);
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+.collection-detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-lg);
+}
+
+.collection-detail-title {
+  flex: 1;
+  min-width: 200px;
+}
+
+.episode-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.episode-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+}
+
+.episode-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  display: inline-flex;
+  touch-action: none;
+}
+
+.episode-index {
+  width: 24px;
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.episode-thumb {
+  width: 42px;
+  aspect-ratio: 3 / 4;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.episode-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.episode-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.episode-name {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.collection-picker {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+}
+
+.collection-picker-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.collection-picker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px var(--space-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.collection-picker-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.collection-picker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-content.collection-export {
+  width: 440px;
+  max-width: calc(100vw - 32px);
+}
+
+.collection-export-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.collection-export-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  font-size: 13px;
+}
+
+.collection-export-row .select,
+.collection-export-row .input {
+  width: 160px;
+}
+
+.collection-export-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.collection-progress-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+
+.collection-progress-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  transition: width 0.3s ease;
+}
+
+.collection-warnings {
+  margin: var(--space-sm) 0 0;
+  padding-left: 18px;
+  color: var(--warning);
+}
+
+.collection-error {
+  color: var(--error);
+}
+
+.collection-toast {
+  position: fixed;
+  bottom: var(--space-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-elevated);
+  font-size: 13px;
+  max-width: calc(100vw - 32px);
+}
+
+.collection-toast.error {
+  border-color: var(--error);
+}
+
+@media (max-width: 640px) {
+  .episode-row {
+    flex-wrap: wrap;
+  }
+  .episode-actions {
+    width: 100%;
+  }
+}
+
+/* content rating: mature covers blurred until clicked, the Mature badge */
+.rated-cover {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.rated-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.rated-cover-hidden img {
+  filter: blur(18px);
+  transform: scale(1.15);
+}
+.rated-cover-reveal {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  cursor: pointer;
+}
+span.rated-cover-reveal {
+  cursor: inherit;
+}
+.mature-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #b3261e;
+  vertical-align: middle;
+}
+.rating-select {
+  font-size: 12px;
+  padding: 2px 6px;
+  margin-top: 6px;
+  width: 100%;
+}
+.collection-mature-notice {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: rgba(179, 38, 30, 0.12);
+  color: var(--text-primary);
+}

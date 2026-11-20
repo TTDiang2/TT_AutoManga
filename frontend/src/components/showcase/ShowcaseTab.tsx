@@ -1,13 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload } from 'react-icons/fi';
+import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
-import { useTranslation } from '../../hooks/useTranslation';
+import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { renderPageToImage } from '../composer/pageRenderer';
-import type { Project, ComposerPage } from '../../types';
+import type { Project, ComposerPage, ContentRating } from '../../types';
+import { CollectionsView } from './CollectionsView';
+import { MatureCover } from './MatureCover';
+import { effectiveRating } from './rating';
+import './collections.css';
 
 export function ShowcaseTab() {
   const { setCurrentProject, setActiveTab, setComposerProjectId, loadProjectWithImages } = useProjectStore();
   const { t } = useTranslation();
+  const tip = useTips().showcase;
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'browse' | 'viewing' | 'editing'>('browse');
@@ -18,6 +24,39 @@ export function ShowcaseTab() {
   const [coverImages, setCoverImages] = useState<Record<string, string>>({});
   const [showNewModal, setShowNewModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  // browse: every comic (as before) or the collections (series of episodes)
+  const [view, setView] = useState<'comics' | 'collections'>('comics');
+  const [openCollectionId, setOpenCollectionId] = useState<string | null>(null);
+  // settings.content.defaultRating: the rating of projects that set none
+  const [defaultRating, setDefaultRating] = useState<ContentRating>('sfw');
+
+  useEffect(() => {
+    fetch('/api/settings/')
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => { if (data?.content?.defaultRating === 'mature') setDefaultRating('mature'); })
+      .catch(() => { /* keep sfw */ });
+  }, []);
+
+  // a project's own rating ("" = the default), saved in its settings
+  const handleSetRating = async (project: Project, value: string) => {
+    const rating = value === 'mature' || value === 'sfw' ? value : '';
+    const becomesMature = rating === 'mature' || (rating === '' && defaultRating === 'mature');
+    if (becomesMature && effectiveRating(project.settings, defaultRating) !== 'mature'
+        && !confirm(fill(t.showcase.ratingConfirm, { name: project.name }))) return;
+    try {
+      const r = await fetch(`/api/agent/projects/${encodeURIComponent(project.id)}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentRating: rating }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      setProjects(prev => prev.map(p => (p.id === project.id
+        ? { ...p, settings: { ...(data.settings || {}) } as Project['settings'] } : p)));
+    } catch (err) {
+      alert(fill(t.showcase.requestFailed, { error: String(err) }));
+    }
+  };
 
   const loadProjects = async () => {
     setIsLoading(true);
@@ -180,7 +219,8 @@ export function ShowcaseTab() {
             {mode === 'editing' && (activeProject?.name + ' — Editing')}
           </h3>
           <p className="text-sm text-secondary mt-sm">
-            {mode === 'browse' && `${projects.length} comic${projects.length !== 1 ? 's' : ''}`}
+            {mode === 'browse' && view === 'comics' && `${projects.length} comic${projects.length !== 1 ? 's' : ''}`}
+            {mode === 'browse' && view === 'collections' && t.showcase.collections}
             {mode === 'viewing' && `Page ${readerPage + 1} of ${activeProject?.composerPages?.length || 0}`}
             {mode === 'editing' && 'Editing in Composer'}
           </p>
@@ -190,14 +230,28 @@ export function ShowcaseTab() {
             <button
               className="btn btn-secondary"
               onClick={() => { setMode('browse'); setActiveProject(null); }}
+              data-tip={tip.allComics}
             >
               <FiFolder size={14} /> All Comics
             </button>
           )}
           {mode === 'browse' && (
+            <div className="showcase-view-toggle" role="tablist" data-tour="showcase-view">
+              <button role="tab" aria-selected={view === 'comics'} className={view === 'comics' ? 'active' : ''}
+                onClick={() => setView('comics')} data-tip={tip.viewComics}>
+                <FiGrid size={13} /> {t.showcase.comics}
+              </button>
+              <button role="tab" aria-selected={view === 'collections'} className={view === 'collections' ? 'active' : ''}
+                onClick={() => setView('collections')} data-tip={tip.viewCollections}>
+                <FiLayers size={13} /> {t.showcase.collections}
+              </button>
+            </div>
+          )}
+          {mode === 'browse' && (
             <label
               className="flex items-center gap-xs text-sm"
               style={{ marginRight: 8, cursor: 'pointer', userSelect: 'none' }}
+              data-tip={tip.pageNumbers}
             >
               <input
                 type="checkbox"
@@ -207,58 +261,84 @@ export function ShowcaseTab() {
               {t.showcase.pageNumbers || 'Page numbers'}
             </label>
           )}
-          {mode === 'browse' && (
-            <button className="btn btn-secondary" onClick={() => setShowNewModal(true)}>
+          {mode === 'browse' && view === 'comics' && (
+            <button className="btn btn-secondary" onClick={() => setShowNewModal(true)} data-tour="showcase-new" data-tip={tip.newComic}>
               <FiPlus size={14} /> New Comic
             </button>
           )}
         </div>
       </div>
 
-      {mode === 'browse' && projects.length === 0 && !isLoading ? (
+      {mode === 'browse' && view === 'collections' ? (
+        <CollectionsView
+          projects={projects}
+          openId={openCollectionId}
+          onOpen={setOpenCollectionId}
+          onView={id => handleLoadProject(id, 'view')}
+          onEdit={id => handleLoadProject(id, 'edit')}
+          onExport={handleExportProject}
+          exportingId={exportingId}
+        />
+      ) : mode === 'browse' && projects.length === 0 && !isLoading ? (
         <div className="empty-state">
           <FiFolder size={48} />
           <h3>{t.showcase.noProjects}</h3>
           <p>{t.showcase.noProjectsDesc}</p>
         </div>
       ) : mode === 'browse' ? (
-        <div className="projects-grid">
-          {projects.map(project => (
+        <div className="projects-grid" data-tour="showcase-grid">
+          {projects.map(project => {
+            const mature = effectiveRating(project.settings, defaultRating) === 'mature';
+            const own = project.settings?.contentRating;
+            return (
             <div key={project.id} className="project-card card">
               <div className="project-cover">
-                {coverImages[project.id] ? (
-                  <img src={coverImages[project.id]} alt={project.name} />
-                ) : (
-                  <div className="cover-placeholder">
-                    <FiGrid size={24} />
-                  </div>
-                )}
+                <MatureCover id={project.id} src={coverImages[project.id]} alt={project.name} mature={mature}
+                  placeholder={<div className="cover-placeholder"><FiGrid size={24} /></div>} />
               </div>
               <div className="project-info">
-                <h4>{project.name}</h4>
+                <h4>
+                  {project.name}
+                  {mature && <span className="mature-badge">{t.showcase.matureBadge}</span>}
+                </h4>
                 <p className="text-sm text-muted">
                   {project.composerPages?.length || 0} pages • {new Date(project.updatedAt).toLocaleDateString()}
                 </p>
+                <select
+                  className="input select rating-select"
+                  aria-label={t.showcase.ratingLabel}
+                  data-tip={tip.rating}
+                  value={own === 'mature' || own === 'sfw' ? own : ''}
+                  onChange={e => handleSetRating(project, e.target.value)}
+                >
+                  <option value="">{fill(t.showcase.ratingDefault, {
+                    rating: defaultRating === 'mature' ? t.showcase.ratingMature : t.showcase.ratingSfw })}</option>
+                  <option value="sfw">{t.showcase.ratingSfw}</option>
+                  <option value="mature">{t.showcase.ratingMature}</option>
+                </select>
               </div>
               <div className="project-card-actions">
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleLoadProject(project.id, 'view')}
-                  title="View"
+                  aria-label={tip.view}
+                  data-tip={tip.view}
                 >
                   <FiEye size={14} />
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleLoadProject(project.id, 'edit')}
-                  title="Edit"
+                  aria-label={tip.edit}
+                  data-tip={tip.edit}
                 >
                   <FiEdit2 size={14} />
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleExportProject(project.id)}
-                  title="Export PDF"
+                  aria-label={tip.exportPdf}
+                  data-tip={tip.exportPdf}
                   disabled={exportingId === project.id}
                 >
                   <FiDownload size={14} />
@@ -266,13 +346,15 @@ export function ShowcaseTab() {
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => handleDeleteProject(project.id)}
-                  title="Delete"
+                  aria-label={tip.delete}
+                  data-tip={tip.delete}
                 >
                   <FiTrash2 size={14} />
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : mode === 'viewing' && activeProject ? (
         <ComicReader
@@ -293,13 +375,14 @@ export function ShowcaseTab() {
               placeholder={t.showcase.projectName}
               value={newProjectName}
               onChange={(e) => setNewProjectName(e.target.value)}
+              data-tip={tip.projectName}
               autoFocus
             />
             <div className="flex gap-sm mt-lg justify-end">
               <button className="btn btn-secondary" onClick={() => setShowNewModal(false)}>
                 {t.showcase.cancel}
               </button>
-              <button className="btn btn-primary" onClick={handleCreateProject}>
+              <button className="btn btn-primary" onClick={handleCreateProject} data-tip={tip.create}>
                 {t.showcase.create}
               </button>
             </div>
@@ -451,6 +534,7 @@ function ComicReader({ project, page, onPageChange, onBack, onEdit }: {
   onBack: () => void;
   onEdit: () => void;
 }) {
+  const tip = useTips().showcase;
   const pages: ComposerPage[] = project.composerPages || [];
   const total = pages.length;
 
@@ -483,17 +567,17 @@ function ComicReader({ project, page, onPageChange, onBack, onEdit }: {
         ) : null)
       )}
       <div className="comic-reader-nav">
-        <button className="btn btn-secondary" onClick={prev} disabled={page === 0}>
+        <button className="btn btn-secondary" onClick={prev} disabled={page === 0} data-tip={tip.readerPrev}>
           <FiChevronLeft size={16} /> Previous
         </button>
         <span>{total === 0 ? 0 : page + 1} / {total}</span>
-        <button className="btn btn-secondary" onClick={next} disabled={page >= total - 1}>
+        <button className="btn btn-secondary" onClick={next} disabled={page >= total - 1} data-tip={tip.readerNext}>
           Next <FiChevronRight size={16} />
         </button>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn btn-primary" onClick={onEdit}>Edit in Composer</button>
+        <button className="btn btn-secondary" onClick={onBack} data-tip={tip.readerBack}>Back</button>
+        <button className="btn btn-primary" onClick={onEdit} data-tip={tip.readerEdit}>Edit in Composer</button>
       </div>
     </div>
   );

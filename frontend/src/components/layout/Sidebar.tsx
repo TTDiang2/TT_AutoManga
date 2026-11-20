@@ -13,10 +13,12 @@ import {
   FiBookOpen,
   FiMonitor,
   FiSun,
-  FiMoon
+  FiMoon,
+  FiCompass
 } from 'react-icons/fi';
 
 const tabs: { id: TabId; icon: React.ReactNode }[] = [
+  { id: 'wizard', icon: <FiCompass size={20} /> },
   { id: 'storyboard', icon: <FiFileText size={20} /> },
   { id: 'characters', icon: <FiUser size={20} /> },
   { id: 'prompt', icon: <FiEdit3 size={20} /> },
@@ -43,7 +45,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">AM</div>
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" data-tour="app-tabs">
         {tabs.map((tab) => (
           <div
             key={tab.id}

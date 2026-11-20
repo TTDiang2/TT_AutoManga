@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { FiPlus } from 'react-icons/fi';
 import { useComposerStore } from '../../store/composerStore';
+import { useTips } from '../../hooks/useTips';
 import { ImagePicker } from './ImagePicker';
 import { DEFAULT_CORNERS } from '../../types';
 import { tailGeometry, wedgePath } from './tailGeometry';
@@ -666,6 +667,7 @@ const ElementRenderer = memo(function ElementRenderer({
   onTextContentChange,
   setEditingId,
 }: ElementRendererProps) {
+  const tips = useTips().composer;
   const isDraggable = activeTool === 'select' && !el.locked;
 
   // Frames (image-slot + image + page-image) share quadrilateral rendering:
@@ -798,7 +800,7 @@ const ElementRenderer = memo(function ElementRenderer({
             <div
               className="composer-tail-handle"
               style={{ left: tip.x * bw, top: tip.y * bh }}
-              title="Drag to aim the tail"
+              data-tip={tips.tailHandle}
               onMouseDown={(e) => onTailDown(e, el.id)}
             />
           )}
@@ -841,6 +843,7 @@ function FrameElement({
   onImageMouseDown,
   onDoubleClick,
 }: FrameElementProps) {
+  const tip = useTips().composer;
   const corners = el.corners ?? DEFAULT_CORNERS;
   const polygonPts = `${corners.tl.x}% ${corners.tl.y}%, ${corners.tr.x}% ${corners.tr.y}%, ${corners.br.x}% ${corners.br.y}%, ${corners.bl.x}% ${corners.bl.y}%`;
   const svgPts = `${corners.tl.x},${corners.tl.y} ${corners.tr.x},${corners.tr.y} ${corners.br.x},${corners.br.y} ${corners.bl.x},${corners.bl.y}`;
@@ -944,7 +947,8 @@ function FrameElement({
             e.stopPropagation();
             onAddImageClick(el.id, isSlot ? 'slot' : 'pageImage');
           }}
-          title="Add image"
+          data-tip={tip.addSlotImage}
+          aria-label={tip.addSlotImage}
         >
           <FiPlus size={18} />
         </button>

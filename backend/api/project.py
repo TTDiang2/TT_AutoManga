@@ -106,18 +106,28 @@ async def put_composer_pages(project_id: str, req: ComposerPagesUpdate):
             "updatedAt": saved.get("updatedAt")}
 
 
+def project_cover_src(project: Dict[str, Any], page_id: Optional[str] = None) -> Optional[str]:
+    """First image src on a page (the first page by default) — the
+    Showcase grid thumbnail (also used for collection covers)."""
+    pages = project.get("composerPages") or []
+    if not pages:
+        return None
+    page = next((p for p in pages if p.get("id") == page_id), None) if page_id else None
+    for el in (page or pages[0]).get("elements", []):
+        if el.get("type") == "image" and el.get("src"):
+            return el["src"]
+    return None
+
+
 @router.get("/covers")
 async def list_project_covers():
     try:
         projects = storage.list_projects()
         covers = {}
         for proj in projects:
-            if proj.get("composerPages"):
-                first_page = proj["composerPages"][0]
-                for el in first_page.get("elements", []):
-                    if el.get("type") == "image" and el.get("src"):
-                        covers[proj["id"]] = el["src"]
-                        break
+            src = project_cover_src(proj)
+            if src:
+                covers[proj["id"]] = src
         return {"covers": covers}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

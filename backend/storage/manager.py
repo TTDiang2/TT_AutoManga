@@ -132,6 +132,9 @@ class StorageManager:
         proj_dir = PROJECTS_DIR / project_id
         if proj_dir.exists():
             shutil.rmtree(proj_dir)
+            # a deleted project is no longer an episode of any collection
+            from .collections import remove_project
+            remove_project(project_id)
             return True
         return False
 
