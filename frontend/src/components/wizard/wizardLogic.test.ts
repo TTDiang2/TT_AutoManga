@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat, loadState,
   maxReachableStep, movePanel, newPanel, parseNames, prefersVerticalBubbles, promptForPanel,
+  castNote, castSuggestions, findInLibrary, libraryLook,
 } from './wizardLogic';
 import type { Panel } from '../../types';
 
@@ -81,5 +82,35 @@ describe('prefersVerticalBubbles', () => {
     expect(prefersVerticalBubbles([{ dialogue: 'ユキ：待って！' }, { dialogue: 'OK' }])).toBe(true);
     expect(prefersVerticalBubbles([{ dialogue: 'Yuki: Get away from me!' }])).toBe(false);
     expect(prefersVerticalBubbles([{ dialogue: '' }])).toBe(false);
+  });
+});
+
+describe('character library', () => {
+  const lib = [
+    { name: 'Yuki', description: 'A quiet  swordswoman\nfrom the north.', appearance: '1girl, white hair' },
+    { name: 'Ren', description: 'Street kid' },
+    { name: 'Old Mo', appearance: '' },
+  ];
+  it('matches names like generation does (trimmed, any case)', () => {
+    expect(findInLibrary(' yuki ', lib)?.name).toBe('Yuki');
+    expect(findInLibrary('Kim', lib)).toBeUndefined();
+  });
+  it('uses the appearance, else the description, as the look', () => {
+    expect(libraryLook(lib[0])).toBe('1girl, white hair');
+    expect(libraryLook(lib[1])).toBe('Street kid');
+    expect(libraryLook(lib[2])).toBe('');
+  });
+  it('suggests picked, then comic, then library names, minus the panel\'s own', () => {
+    expect(castSuggestions(['yuki'], ['Ren'], ['Kai', 'Yuki'], lib)).toEqual(['Ren', 'Kai', 'Old Mo']);
+    expect(castSuggestions([], [], [], lib, 2)).toEqual(['Yuki', 'Ren']);
+  });
+  it('tells the AI the exact names, with a short description', () => {
+    expect(castNote([], lib)).toBe('');
+    expect(castNote(['yuki', 'Kim'], lib)).toBe(
+      '\n\nCharacters (use exactly these names in the panels):\n- Yuki: A quiet swordswoman from the north.\n- Kim');
+  });
+  it('keeps a valid picked cast from storage', () => {
+    expect(loadState(JSON.stringify({ cast: ['Yuki', 3, 'yuki', ' Ren '] })).cast).toEqual(['Yuki', 'Ren']);
+    expect(loadState(JSON.stringify({ cast: 'Yuki' })).cast).toEqual([]);
   });
 });

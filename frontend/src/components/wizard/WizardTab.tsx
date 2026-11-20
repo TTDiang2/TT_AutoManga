@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FiArrowLeft, FiArrowRight, FiArrowUp, FiArrowDown, FiCheck, FiDownload, FiUpload,
+  FiArrowLeft, FiArrowRight, FiArrowUp, FiArrowDown, FiCheck, FiDownload, FiUpload, FiUser,
   FiImage, FiLayers, FiPlus, FiRefreshCw, FiTrash2, FiZap, FiEdit3,
 } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
@@ -13,6 +13,7 @@ import {
   STEPS, STYLE_PRESETS, DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat,
   maxReachableStep, movePanel, newPanel, parseNames, prefersVerticalBubbles, promptForPanel,
   readSavedState, writeSavedState, type StepId, type WizardState,
+  castNote, castSuggestions, findInLibrary, libraryLook, type LibraryCharacter,
 } from './wizardLogic';
 import './wizard.css';
 
@@ -75,6 +76,14 @@ export function WizardTab() {
 
   useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the Characters tab's library: picked on Story, offered on Panels, shown on Look
+  const [library, setLibrary] = useState<LibraryCharacter[]>([]);
+  useEffect(() => {
+    api<LibraryCharacter[]>('/api/characters/')
+      .then(list => setLibrary(Array.isArray(list) ? list.filter(c => c?.name?.trim()) : []))
+      .catch(() => setLibrary([]));
+  }, []);
+
   // a step other than Story needs its project; wait for the first load
   const loading = !!state.projectId && !project && !error && !busy;
   const panels = project?.panels || [];
@@ -103,7 +112,7 @@ export function WizardTab() {
     setState({ ...DEFAULT_STATE, reading: state.reading, promptFormat: state.promptFormat });
   };
 
-  const stepProps = { state, update, project, refresh, run, busy, goTo, w, panels, pages };
+  const stepProps = { state, update, project, refresh, run, busy, goTo, w, panels, pages, library };
 
   return (
     <div className="wizard">
@@ -186,6 +195,7 @@ interface StepProps {
   w: W;
   panels: Panel[];
   pages: NonNullable<WizardProject['composerPages']>;
+  library: LibraryCharacter[];
 }
 
 function Nav({ back, next, nextLabel, nextTip, nextDisabled, busy, extra }: {
@@ -221,7 +231,7 @@ function Tip({ children }: { children: React.ReactNode }) {
 
 // --- 1. Story --------------------------------------------------------------
 
-function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: StepProps) {
+function StoryStep({ state, update, project, refresh, run, busy, goTo, w, library }: StepProps) {
   const tip = useTips().wizard;
   const [name, setName] = useState(project?.name || '');
   const [existing, setExisting] = useState<{ id: string; name: string; stats: { panels: number } }[]>([]);
@@ -252,7 +262,7 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
     const id = await ensureProject();
     await api('/api/agent/storyboard', {
       method: 'POST',
-      json: { project_id: id, text: state.storyText, detail_level: state.detailLevel, replace: true },
+      json: { project_id: id, text: state.storyText + castNote(state.cast, library), detail_level: state.detailLevel, replace: true },
     }).catch((e: Error) => { throw new Error(`${e.message} — ${w.story.llmHint}`); });
     await refresh(id);
     goTo('panels');
@@ -296,6 +306,29 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
           {...storyImport.dropProps}
           placeholder={w.story.textPlaceholder} data-tip={tip.story.text} />
       </div>
+
+      {library.length > 0 && (
+        <div className="wizard-field">
+          <span>{w.story.cast} <em className="text-muted">({w.story.optional})</em></span>
+          <div className="wizard-choice">
+            {library.map(c => {
+              const on = state.cast.some(n => n.toLowerCase() === c.name.trim().toLowerCase());
+              return (
+                <button key={c.id || c.name} type="button" className={`wizard-chip wizard-person ${on ? 'is-on' : ''}`}
+                  aria-pressed={on}
+                  data-tip={fill(on ? tip.story.castRemove : tip.story.castAdd, { name: c.name })}
+                  onClick={() => update({ cast: on
+                    ? state.cast.filter(n => n.toLowerCase() !== c.name.trim().toLowerCase())
+                    : [...state.cast, c.name.trim()] })}>
+                  {c.image ? <img src={c.image} alt="" /> : <FiUser size={14} />}
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-sm text-muted wizard-note">{w.story.castHint}</span>
+        </div>
+      )}
 
       <div className="wizard-row">
         <label className="wizard-field">
@@ -352,10 +385,15 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
 
 // --- 2. Panels -------------------------------------------------------------
 
-function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved }: StepProps) {
+function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved, library }: StepProps) {
   const tip = useTips().wizard;
   const [list, setList] = useState<Panel[]>(() => (saved.length ? saved : [newPanel([])]));
   const [charText, setCharText] = useState<Record<string, string>>({});
+
+  const namesOf = (p: Panel) => charText[p.id] ?? (p.characters || []).join(', ');
+  const comicCast = parseNames(list.map(namesOf).join(','));
+  const addName = (p: Panel, name: string) =>
+    setCharText(c => ({ ...c, [p.id]: [...parseNames(namesOf(p)), name].join(', ') }));
 
   const edit = (i: number, patch: Partial<Panel>) =>
     setList(l => l.map((p, j) => (j === i ? { ...p, ...patch } : p)));
@@ -401,8 +439,21 @@ function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved
               <label className="wizard-field">
                 <span>{w.panels.characters}</span>
                 <input className="input" placeholder={w.panels.charactersPlaceholder} data-tip={tip.panels.characters}
-                  value={charText[p.id] ?? (p.characters || []).join(', ')}
+                  value={namesOf(p)}
                   onChange={e => setCharText(c => ({ ...c, [p.id]: e.target.value }))} />
+                {(() => {
+                  const offer = castSuggestions(parseNames(namesOf(p)), state.cast, comicCast, library);
+                  return offer.length > 0 && (
+                    <span className="wizard-suggest">
+                      {offer.map(name => (
+                        <button key={name} type="button" className="wizard-chip wizard-chip-sm"
+                          onClick={() => addName(p, name)} data-tip={fill(tip.panels.addCharacter, { name })}>
+                          + {name}
+                        </button>
+                      ))}
+                    </span>
+                  );
+                })()}
               </label>
               <label className="wizard-field">
                 <span>{w.panels.shot}</span>
@@ -430,7 +481,7 @@ function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved
 
 // --- 3. Look ---------------------------------------------------------------
 
-function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels, swarmModel }: StepProps & { swarmModel: string }) {
+function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels, swarmModel, library }: StepProps & { swarmModel: string }) {
   const tip = useTips().wizard;
   const cast = useMemo(() => castFromPanels(panels), [panels]);
   const [style, setStyle] = useState(project?.settings?.style || '');
@@ -490,13 +541,29 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
           <p className="text-muted text-sm">{w.look.noCast}</p>
         ) : (
           <div className="wizard-cast">
-            {cast.map(n => (
-              <label key={n} className="wizard-field">
-                <span className="badge">{n}</span>
-                <input className="input" value={blocks[n] || ''} placeholder={w.look.appearancePlaceholder}
-                  onChange={e => setBlocks(b => ({ ...b, [n]: e.target.value }))} data-tip={tip.look.appearance} />
-              </label>
-            ))}
+            {cast.map(n => {
+              const lib = findInLibrary(n, library);
+              const look = lib ? libraryLook(lib) : '';
+              return (
+                <div key={n} className="wizard-cast-row">
+                  <label className="wizard-field">
+                    <span className="badge">{lib?.image && <img src={lib.image} alt="" />}{n}</span>
+                    <input className="input" value={blocks[n] || ''}
+                      placeholder={look ? `${w.look.fromLibrary}: ${look}` : w.look.appearancePlaceholder}
+                      onChange={e => setBlocks(b => ({ ...b, [n]: e.target.value }))}
+                      data-tip={lib ? fill(tip.look.appearanceLibrary, { name: lib.name }) : tip.look.appearance} />
+                  </label>
+                  {lib && (
+                    <span className="text-sm text-muted wizard-note">
+                      {w.look.inLibrary}
+                      {lib.lora?.name ? ` · ${w.look.hasLora}` : ''}
+                      {lib.image && lib.refWeight ? ` · ${w.look.hasSheet}` : ''}
+                      {' · '}{blocks[n]?.trim() ? w.look.overridden : w.look.usingLibrary}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

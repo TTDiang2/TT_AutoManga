@@ -9,6 +9,8 @@ const en = {
   story: {
     name: 'The comic\'s title. You can change it later.',
     importFile: 'Load your story from a .md or .txt file (UTF-8, UTF-16 or GBK). You can also drop the file on the box.',
+    castAdd: 'Use {name} from your library in this comic',
+    castRemove: 'Stop using {name} in this comic',
     text: 'Your story in plain words: who, where, what happens. A few paragraphs are enough.',
     length: 'How many panels the AI aims for: short (1-2) to long (10+)',
     rtl: 'Manga order: panels and bubbles read from right to left',
@@ -23,6 +25,7 @@ const en = {
     remove: 'Delete this panel',
     scene: 'What the picture shows: place, people, action. This becomes the image prompt.',
     characters: 'Who appears, separated by commas. Their descriptions from the Look step are added to the picture.',
+    addCharacter: 'Add {name} to this panel',
     shot: 'Camera distance: wide shows the scene, close-up shows a face. Splash gets a whole page.',
     dialogue: 'One line per speech bubble. Write "Name: line" so the bubble points at the speaker.',
     add: 'Add an empty panel at the end',
@@ -33,6 +36,7 @@ const en = {
     tags: 'Pick this for SDXL-style models (Illustrious, NoobAI) that understand short keywords',
     prose: 'Pick this for models that read full sentences (Qwen Image, Flux)',
     appearance: 'How this character looks, added to every panel they are in. Hair, eyes, clothes keep them consistent.',
+    appearanceLibrary: '{name} is in your character library: leave this empty to use its look, LoRA and sheet. Text here replaces the look in this comic only.',
   },
   art: {
     generate: 'Draw every panel that has no picture yet with SwarmUI. You can leave the tab while it works.',
@@ -63,6 +67,8 @@ const zh: typeof en = {
   story: {
     name: '漫画标题，之后可以修改。',
     importFile: '从 .md 或 .txt 文件载入故事（支持 UTF-8、UTF-16、GBK），也可以把文件直接拖到文本框里。',
+    castAdd: '在本漫画中使用角色库里的 {name}',
+    castRemove: '不再在本漫画中使用 {name}',
     text: '用平实的文字写故事：谁、在哪里、发生了什么。几段就够了。',
     length: 'AI 拆分的分镜数量：短（1-2 格）到长（10 格以上）',
     rtl: '日漫顺序：分格和气泡从右往左读',
@@ -77,6 +83,7 @@ const zh: typeof en = {
     remove: '删除这一格',
     scene: '画面内容：地点、人物、动作。会作为生成图片的提示词。',
     characters: '出场人物，用逗号分隔。画风步骤中的外貌描述会加入这张图。',
+    addCharacter: '把 {name} 加到这一格',
     shot: '镜头远近：远景展示环境，特写展示面部。整页大图会独占一页。',
     dialogue: '一行一个对话气泡。写成“名字：台词”，气泡会指向说话的人。',
     add: '在末尾添加一个空白分镜',
@@ -87,6 +94,7 @@ const zh: typeof en = {
     tags: '适用于理解短关键词的 SDXL 类模型（Illustrious、NoobAI）',
     prose: '适用于能读懂完整句子的模型（Qwen Image、Flux）',
     appearance: '这个角色的外貌，会加入其出场的每一格。写清发型、眼睛、服装能保持一致。',
+    appearanceLibrary: '{name} 在你的角色库中：留空即使用其外貌、LoRA 和设定图。这里填写的内容只在本漫画中替换外貌。',
   },
   art: {
     generate: '用 SwarmUI 绘制所有还没有图片的分镜。绘制时可以离开这个页面。',

@@ -178,6 +178,13 @@
 .wizard-panel .is-missing { border-color: var(--warning); }
 
 .wizard-cast { display: grid; gap: var(--space-md); }
+.wizard-cast-row { display: flex; flex-direction: column; gap: 4px; }
+.wizard-cast .badge img { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; margin-right: 6px; }
+.wizard-note { margin-left: 2px; }
+.wizard-person { display: inline-flex; align-items: center; gap: 6px; }
+.wizard-person img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
+.wizard-suggest { display: flex; flex-wrap: wrap; gap: 4px; }
+.wizard-chip-sm { padding: 2px 10px; font-size: 12px; }
 .wizard-cast .wizard-field { flex-direction: row; align-items: center; }
 .wizard-cast .badge { flex: none; min-width: 80px; justify-content: center; }
 
