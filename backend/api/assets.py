@@ -37,7 +37,8 @@ class UploadRequest(BaseModel):
     panel_id: str
 
 
-def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> str:
+def _save_panel_image(project_id: str, panel_id: str, image_data: str,
+                      meta: Optional[Dict[str, Any]] = None) -> str:
     """Store panel image reference; returns the final ref (asset URL or original)."""
     try:
         project = storage.load_project(project_id)
@@ -51,6 +52,7 @@ def _save_panel_image(project_id: str, panel_id: str, image_data: str) -> str:
             image_data,
             project_id=project_id or None,
             kind="panel",
+            meta=meta,
         )
         image_data = asset_store.url_for(entry["asset_id"])
     for panel in project.get("panels", []):
@@ -151,15 +153,25 @@ async def generate_with_swarmui(req: GenerateImageRequest):
         # a solo panel's character sheet (refWeight > 0) guides it via IP-Adapter
         ref_kwargs = ipadapter_args(reference_for_panel(project, panel))
 
+    # the content rating (backend/content_rating.py) for the project's panel
+    from ..content_rating import RatingRefused, apply_rating
+    try:
+        rated = apply_rating(prompt, req.negative_prompt, project=project, panel=panel,
+                             free_prompt=req.prompt)
+    except RatingRefused as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     try:
         import logging
         logger = logging.getLogger(__name__)
+        if rated["notice"]:
+            logger.info("[Generate] panel %s: %s", req.panel_id, rated["notice"])
         logger.info(f"[Generate] REQ from frontend: prompt='{req.prompt}', negative_prompt='{req.negative_prompt}', seed={req.seed}, panel_id={req.panel_id}")
         logger.info(f"[Generate] Using settings: steps={swarmsettings.currentSteps}, cfg={swarmsettings.currentCfgScale}, model={swarmsettings.currentModel}, w={swarmsettings.currentWidth}, h={swarmsettings.currentHeight}")
         
         result = await swarm_client.generate_image(
-            prompt=prompt,
-            negative_prompt=req.negative_prompt,
+            prompt=rated["prompt"],
+            negative_prompt=rated["negative"],
             model=swarmsettings.currentModel or None,
             steps=swarmsettings.currentSteps,
             cfg_scale=swarmsettings.currentCfgScale,
@@ -178,11 +190,16 @@ async def generate_with_swarmui(req: GenerateImageRequest):
             # Persist as asset file and hand the URL back so the frontend
             # store does not re-embed a dataURL (which would duplicate assets
             # on the next autosave normalization).
-            ref = _save_panel_image(req.project_id, req.panel_id, result["image"])
+            ref = _save_panel_image(req.project_id, req.panel_id, result["image"],
+                                    meta={"prompt": rated["prompt"], "negative_prompt": rated["negative"],
+                                          "seed": req.seed, "content_rating": rated["rating"],
+                                          "injected": [rated["injected"]]})
             result["image"] = ref
             result["asset_id"] = ref.rsplit("/", 1)[-1] if ref.startswith("/api/assets/file/") else None
             result["path"] = ref
-
+        result["content_rating"] = rated["rating"]
+        if rated["notice"]:
+            result["notice"] = rated["notice"]
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

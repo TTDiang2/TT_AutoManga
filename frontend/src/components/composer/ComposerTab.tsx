@@ -9,6 +9,7 @@ import {
 import { useComposerStore, TEMPLATES, hasUnsavedPages } from '../../store/composerStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { Canvas } from './Canvas';
 import { PropertiesPanel } from './PropertiesPanel';
 import { renderPageToImage } from './pageRenderer';
@@ -145,13 +146,15 @@ const PageThumb = memo(function PageThumb({
       <div className="composer-page-thumb-label">{page.name}</div>
       <div className="composer-page-thumb-actions">
         <button
-          title={duplicateTitle}
+          data-tip={duplicateTitle}
+          aria-label={duplicateTitle}
           onClick={(e) => { e.stopPropagation(); onDuplicate(page.id); }}
         >
           <FiCopy size={9} />
         </button>
         <button
-          title={deleteTitle}
+          data-tip={deleteTitle}
+          aria-label={deleteTitle}
           onClick={(e) => { e.stopPropagation(); if (canDelete) onDelete(page.id); }}
           disabled={!canDelete}
         >
@@ -170,6 +173,7 @@ const CONFLICT_MSG = "This project's pages were changed elsewhere (e.g. by a Com
 
 export function ComposerTab() {
   const { t } = useTranslation();
+  const tip = useTips().composer;
   const language = useProjectStore(s => s.settings.language);
   const composerProjectId = useProjectStore(s => s.composerProjectId);
   const setComposerProjectId = useProjectStore(s => s.setComposerProjectId);
@@ -654,7 +658,7 @@ export function ComposerTab() {
 
   return (
     <div className="composer-tab">
-      <div className="composer-page-list">
+      <div className="composer-page-list" data-tour="composer-pages">
         <div className="composer-page-list-header">
           <span>{t.composer.pages}</span>
         </div>
@@ -665,22 +669,22 @@ export function ComposerTab() {
               page={page}
               active={currentPageId === page.id}
               canDelete={pages.length > 1}
-              duplicateTitle={t.composer.duplicatePage}
-              deleteTitle={t.composer.deletePage}
+              duplicateTitle={tip.duplicatePage}
+              deleteTitle={tip.deletePage}
               onSelect={setCurrentPage}
               onDuplicate={duplicatePage}
               onDelete={removePage}
             />
           ))}
         </div>
-        <button className="composer-add-page-btn" onClick={() => addPage('blank')}>
+        <button className="composer-add-page-btn" onClick={() => addPage('blank')} data-tip={tip.addPage}>
           {t.composer.addPage}
         </button>
         <button
           className="composer-add-page-btn"
           onClick={autoPaginate}
           disabled={!currentProjectId || paginating || saveConflict}
-          title={t.composer.autoPaginate || 'Auto Pages'}
+          data-tip={tip.autoPages}
         >
           <FiLayout size={13} style={{ marginRight: 4, verticalAlign: -2 }} />
           {t.composer.autoPaginate || 'Auto Pages'}
@@ -689,10 +693,10 @@ export function ComposerTab() {
 
       <div className="composer-canvas-workspace">
         <div className="composer-toolbar">
-          <div className="composer-toolbar-group">
+          <div className="composer-toolbar-group" data-tour="composer-tools">
             <button
               className={`composer-tool-btn composer-tool-labeled ${activeTool === 'select' ? 'active' : ''}`}
-              title={t.composer.select}
+              data-tip={tip.select}
               onClick={() => setActiveTool('select')}
             >
               <FiMousePointer size={15} />
@@ -700,7 +704,7 @@ export function ComposerTab() {
             </button>
             <button
               className={`composer-tool-btn composer-tool-labeled ${activeTool === 'split' ? 'active' : ''}`}
-              title={t.composer.split || 'Cut'}
+              data-tip={tip.split}
               onClick={() => setActiveTool('split')}
             >
               <FiScissors size={15} />
@@ -708,7 +712,7 @@ export function ComposerTab() {
             </button>
             <button
               className={`composer-tool-btn composer-tool-labeled ${activeTool === 'text' ? 'active' : ''}`}
-              title={t.composer.text}
+              data-tip={tip.text}
               onClick={() => setActiveTool('text')}
             >
               <FiType size={15} />
@@ -716,7 +720,7 @@ export function ComposerTab() {
             </button>
             <button
               className={`composer-tool-btn composer-tool-labeled ${activeTool === 'bubble' ? 'active' : ''}`}
-              title={t.composer.bubble}
+              data-tip={tip.bubble}
               onClick={() => setActiveTool('bubble')}
             >
               <FiMessageCircle size={15} />
@@ -731,7 +735,7 @@ export function ComposerTab() {
                   key={bt}
                   className={`composer-bubble-pill ${activeBubbleType === bt ? 'active' : ''}`}
                   onClick={() => setActiveBubbleType(bt)}
-                  title={bt === 'inner-voice' ? t.composer.innerVoice : bt}
+                  data-tip={tip.bubbleType[bt]}
                 >
                   <BubbleIcon type={bt} />
                   <span className="composer-bubble-pill-label">
@@ -742,11 +746,12 @@ export function ComposerTab() {
             </div>
           )}
 
-          <div className="composer-toolbar-group">
+          <div className="composer-toolbar-group" data-tour="composer-templates">
             <select
               className="composer-template-select"
               value={currentPage?.templateId || 'blank'}
               onChange={handleTemplateChange}
+              data-tip={tip.template}
             >
               <optgroup label={t.composer.builtInTemplates || 'Built-in'}>
                 {TEMPLATES.map(tmpl => (
@@ -767,7 +772,7 @@ export function ComposerTab() {
             </select>
             <button
               className="composer-tool-btn composer-add-frame-btn"
-              title={t.composer.addFrame || 'Add Frame'}
+              data-tip={tip.addFrame}
               onClick={() => addFrame()}
             >
               <FiPlusSquare size={15} />
@@ -775,7 +780,7 @@ export function ComposerTab() {
             </button>
             <button
               className="composer-tool-btn composer-add-image-btn"
-              title={t.composer.addImage || 'Add Image'}
+              data-tip={tip.addImage}
               onClick={() => openImagePicker({ kind: 'newPageImage', id: '' })}
             >
               <FiImage size={15} />
@@ -784,7 +789,7 @@ export function ComposerTab() {
             <div ref={sfxRef} style={{ position: 'relative', display: 'inline-flex' }}>
               <button
                 className="composer-tool-btn composer-add-image-btn"
-                title={t.composer.sfx || 'SFX'}
+                data-tip={tip.sfx}
                 onClick={toggleSfxMenu}
               >
                 <FiZap size={15} />
@@ -817,7 +822,7 @@ export function ComposerTab() {
             </div>
             <button
               className="composer-tool-btn composer-save-template-btn"
-              title={t.composer.saveTemplate || 'Save current layout as template'}
+              data-tip={tip.saveTemplate}
               onClick={() => { setTplName(currentPage?.name || 'My Template'); setShowSaveTplModal(true); }}
             >
               <FiBook size={15} />
@@ -826,7 +831,8 @@ export function ComposerTab() {
             <div style={{ position: 'relative' }}>
               <button
                 className="composer-tool-btn composer-manage-templates-btn"
-                title={t.composer.manageTemplates || 'Manage templates'}
+                data-tip={tip.manageTemplates}
+                aria-label={t.composer.manageTemplates || 'Manage templates'}
                 onClick={() => setShowTemplateMenu(v => !v)}
               >
                 <span className="composer-manage-templates-icon">⋯</span>
@@ -846,7 +852,8 @@ export function ComposerTab() {
                         <span className="composer-template-menu-name">{tpl.name}</span>
                         <button
                           className="composer-template-menu-delete"
-                          title={t.composer.deleteTemplate || 'Delete'}
+                          data-tip={tip.deleteTemplate}
+                          aria-label={tip.deleteTemplate}
                           onClick={(e) => handleDeleteUserTemplate(e, tpl.id)}
                         >
                           <FiTrash size={11} />
@@ -862,19 +869,19 @@ export function ComposerTab() {
           <div className="composer-toolbar-spacer" />
 
           <div className="composer-toolbar-group">
-            <button className="composer-tool-btn" title={t.composer.undo} onClick={undo}>
+            <button className="composer-tool-btn" data-tip={tip.undo} aria-label={t.composer.undo} onClick={undo}>
               <FiRotateCcw size={15} />
             </button>
-            <button className="composer-tool-btn" title={t.composer.redo} onClick={redo}>
+            <button className="composer-tool-btn" data-tip={tip.redo} aria-label={t.composer.redo} onClick={redo}>
               <FiRotateCw size={15} />
             </button>
           </div>
 
           <div className="composer-toolbar-group">
             <div className="composer-zoom-controls">
-              <button onClick={() => setZoom(zoom - 0.1)} title="Zoom out">−</button>
+              <button onClick={() => setZoom(zoom - 0.1)} data-tip={tip.zoomOut} aria-label={tip.zoomOut}>−</button>
               <span>{Math.round(zoom * 100)}%</span>
-              <button onClick={() => setZoom(zoom + 0.1)} title="Zoom in">+</button>
+              <button onClick={() => setZoom(zoom + 0.1)} data-tip={tip.zoomIn} aria-label={tip.zoomIn}>+</button>
             </div>
           </div>
 
@@ -897,10 +904,11 @@ export function ComposerTab() {
             </span>
           )}
 
-          <div className="composer-toolbar-group">
+          <div className="composer-toolbar-group" data-tour="composer-save">
             <button
               className="composer-tool-btn"
-              title="Save to Showcase"
+              data-tip={tip.save}
+              aria-label="Save to Showcase"
               disabled={saveConflict}
               onClick={() => {
                 if (currentProjectId) {
@@ -915,20 +923,21 @@ export function ComposerTab() {
             <div style={{ position: 'relative' }}>
               <button
                 className="composer-tool-btn"
-                title={t.composer.export}
+                data-tip={tip.export}
+                aria-label={t.composer.export}
                 onClick={() => setShowExportMenu(v => !v)}
               >
                 <FiDownload size={15} />
               </button>
               {showExportMenu && (
                 <div className="composer-export-menu">
-                  <button onClick={() => { handleExport('png'); setShowExportMenu(false); }}>
+                  <button onClick={() => { handleExport('png'); setShowExportMenu(false); }} data-tip={tip.exportPng}>
                     Download PNG (current page)
                   </button>
-                  <button onClick={() => { handleExport('pdf'); setShowExportMenu(false); }}>
+                  <button onClick={() => { handleExport('pdf'); setShowExportMenu(false); }} data-tip={tip.exportPdf}>
                     Export as PDF
                   </button>
-                  <button onClick={() => { handleExport('zip'); setShowExportMenu(false); }}>
+                  <button onClick={() => { handleExport('zip'); setShowExportMenu(false); }} data-tip={tip.exportZip}>
                     Export as ZIP
                   </button>
                 </div>
@@ -942,7 +951,7 @@ export function ComposerTab() {
             <span className="composer-canvas-hint-dot" />
             <span>{saveConflict ? (t.composer.pagesConflict || CONFLICT_MSG) : loadError}</span>
             {saveConflict && currentProjectId && (
-              <button className="btn btn-secondary composer-save-conflict-btn" onClick={reloadProject}>
+              <button className="btn btn-secondary composer-save-conflict-btn" onClick={reloadProject} data-tip={tip.reload}>
                 {t.composer.reload || 'Reload'}
               </button>
             )}
@@ -950,7 +959,8 @@ export function ComposerTab() {
               <button
                 className="composer-canvas-hint-cancel"
                 onClick={() => setLoadError('')}
-                title="Dismiss"
+                data-tip={tip.dismiss}
+                aria-label={tip.dismiss}
               >
                 <FiX size={12} />
               </button>
@@ -969,7 +979,8 @@ export function ComposerTab() {
             <button
               className="composer-canvas-hint-cancel"
               onClick={() => setActiveTool('select')}
-              title="Cancel (Switch to Select tool)"
+              data-tip={tip.cancelTool}
+              aria-label={tip.cancelTool}
             >
               <FiX size={12} />
             </button>
@@ -986,7 +997,7 @@ export function ComposerTab() {
           <div className="composer-image-picker" onClick={e => e.stopPropagation()} style={{ width: 360 }}>
             <div className="composer-image-picker-header">
               <h3>Save to Showcase</h3>
-              <button className="composer-tool-btn" onClick={() => setShowSaveModal(false)}>
+              <button className="composer-tool-btn" onClick={() => setShowSaveModal(false)} data-tip={tip.closeDialog} aria-label={tip.closeDialog}>
                 <FiX size={16} />
               </button>
             </div>
@@ -999,6 +1010,7 @@ export function ComposerTab() {
                 autoFocus
                 value={saveProjectName}
                 onChange={e => setSaveProjectName(e.target.value)}
+                data-tip={tip.projectName}
                 onKeyDown={e => e.key === 'Enter' && saveToShowcase()}
                 placeholder="My Manga Chapter 1"
               />
@@ -1025,7 +1037,7 @@ export function ComposerTab() {
           <div className="composer-image-picker" onClick={e => e.stopPropagation()} style={{ width: 360 }}>
             <div className="composer-image-picker-header">
               <h3>{t.composer.saveTemplate || 'Save as Template'}</h3>
-              <button className="composer-tool-btn" onClick={() => setShowSaveTplModal(false)}>
+              <button className="composer-tool-btn" onClick={() => setShowSaveTplModal(false)} data-tip={tip.closeDialog} aria-label={tip.closeDialog}>
                 <FiX size={16} />
               </button>
             </div>
@@ -1041,6 +1053,7 @@ export function ComposerTab() {
                 autoFocus
                 value={tplName}
                 onChange={e => setTplName(e.target.value)}
+                data-tip={tip.templateName}
                 onKeyDown={e => e.key === 'Enter' && handleSaveTemplate()}
                 placeholder="My Manga Layout"
               />

@@ -28,14 +28,15 @@ Human ──UI────> /api/*      ──┴──> project.json (panels + 
 Start the server: `python -m backend.main 5180` (probe: `GET /api/health`).
 CLI alternative: `python -m backend.agent_cli <cmd>` (set `AUTOMANGA_URL` to
 override the base URL).
-MCP alternative: `python -m backend.mcp_server` exposes the same API as 26
+MCP alternative: `python -m backend.mcp_server` exposes the same API as 30
 typed MCP tools (any MCP client; `render_page_preview` returns image
 content). A portable workflow skill lives at `skills/manga-maker/SKILL.md`
 (agentskills.io format).
 
 ### Access (login gate)
 
-`/api/*` is behind one password (`backend/core/auth.py`, middleware
+`/api/*` is behind one password and/or "Sign in with Google"
+(`backend/core/auth.py`, `backend/api/auth_google.py`, middleware
 `auth_gate` in `backend/main.py`). **Local callers are exempt**: a request
 whose TCP peer is `127.0.0.1`/`::1`, whose `Host` is `localhost`, `127.0.0.1`
 or `[::1]` (any port) and that carries no `X-Forwarded-For`, `Forwarded` or
@@ -62,11 +63,51 @@ the reverse proxy (Caddy on `settings.auth.trustedProxy`, default
 - Set or change the password on the server:
   `.venv/bin/python -m backend.core.auth set-password`. Add `--stdin` to read
   it from the first line of stdin. `logout-all` signs every device out, and
-  `status` shows whether a password is set. The password lives in
+  `status` shows what is configured (never a secret). The password lives in
   `data/auth.json` (chmod 600) as a scrypt hash, a 32-byte secret and a
   version. Changing the password or running `logout-all` bumps the version.
+- Sign in with Google (OpenID Connect; setup: `docs/GOOGLE_LOGIN.md`):
+  - The OAuth client id and secret live only in `data/auth.json`
+    (`set-google`, `--stdin` reads "id\nsecret"; `clear-google`), never in
+    settings.json, and no API returns them.
+  - `settings.auth.publicUrl` (default `""` = off) is the https URL browsers
+    use; the redirect URI is always `<publicUrl>/api/auth/google/callback`
+    (never derived from Host). `set-public-url <url>` sets it and adds its
+    host to `allowedHosts`.
+  - `settings.auth.googleAllowedEmails` (exact, lowercased; `allow-email` /
+    `deny-email`, or Settings → Access). Removing an address ends its
+    sessions at once.
+  - `settings.auth.passwordLogin` (default `true`). `false`: remote
+    `POST /api/auth/login` gets 403 `password login is disabled`. Local
+    callers and the CLI still work, so the owner can't be locked out.
+  - The CLI settings commands edit `data/settings.json` on disk; restart the
+    server afterwards (it holds settings in memory).
+  - `GET /api/auth/google/start?next=/path` (public) 302s to Google with
+    PKCE S256, state, nonce and `prompt=select_account`. On any Host other
+    than publicUrl's it 302s to publicUrl's start first. state, nonce,
+    verifier and next ride in a signed HttpOnly `am_oauth` cookie
+    (Path `/api/auth/google`, 10 min), not server memory.
+  - `GET /api/auth/google/callback` (public) checks state, exchanges the
+    code (client_secret_post + code_verifier), checks the ID token's claims
+    (iss, aud/azp, exp, nonce, email_verified, allowlist; no signature check,
+    since the token comes straight from Google over TLS), then sets
+    `am_session` with `email` and 302s to `next`. `next` must be a relative
+    `/path` (not `//`, no `\`), else `/`. On failure it 302s to
+    `/?login_error=denied|not_allowed|invalid|misconfigured|rate`. Failures
+    count against the login rate limiter.
 - Endpoints:
-  - `GET /api/auth/status` returns `{configured, authenticated, local}`.
+  - `GET /api/auth/status` returns `{configured, authenticated, local,
+    passwordLogin, google, googleUrl, email}`. `passwordLogin`: the password
+    form works for this caller. `google`: the Google button works on this
+    page (client stored, publicUrl set, and this Host is publicUrl's).
+    `googleUrl`: publicUrl, when Google is set up but this is another host
+    (e.g. the LAN IP). `email`: the session's Google account, if any.
+  - `GET /api/auth/google` (gated) returns `{configured, publicUrl,
+    redirectUri, allowedEmails, passwordLogin, password}`.
+  - `PUT /api/auth/google/allowed {emails: [...]}` (gated): 400 on an
+    invalid address, 409 when emptying the list while password login is off.
+  - `PUT /api/auth/password-login {enabled}` (gated): turning it off gets 409
+    unless a Google client, publicUrl and at least one allowed email exist.
   - `POST /api/auth/login {password}` logs in. 5 failures within 15 min
     lock that IP out (429 with `Retry-After`) for 15 min, each further
     lockout doubling up to 1 h; a successful login resets the IP. No global
@@ -296,8 +337,58 @@ curl -s -X DELETE $BASE/api/export/download/manga_1a2b3c4d_20261117_120000.pdf
 
 Exports are pruned on every new export: `data/exports/` keeps nothing older
 than 7 days and at most the 20 newest exports per project (grouped by the
-name's `manga_<project id, first 8>` / `composer` prefix; other files there
-are left alone).
+name's `manga_<project id, first 8>` / `collection_<collection id, first 8>` /
+`composer` prefix; other files there are left alone).
+
+### Collections (episodes of a series)
+
+A collection groups projects as the ordered episodes of a series
+(`data/collections.json`; a project may be in several; deleting a project
+removes it from every collection; ids of vanished projects are skipped with a
+warning and reported under `missing`). Single-project export is unchanged.
+
+```bash
+curl -s $BASE/api/collections        # [{id, name, description, projectIds, cover, auto,
+                                     #   episodes: [{id, name, pages, firstPageId, cover}],
+                                     #   missing, pages, coverUrl}]
+curl -s -X POST $BASE/api/collections -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Jade & Haile\",\"projectIds\":[\"$P1\",\"$P2\"]}"
+# full new order (existing projects, no duplicates); cover = the page the
+# generated collection cover uses ({projectId, pageId} or null)
+curl -s -X PATCH $BASE/api/collections/$CID -H 'Content-Type: application/json' \
+  -d "{\"name\":\"...\",\"description\":\"...\",\"projectIds\":[\"$P2\",\"$P1\"],
+       \"cover\":{\"projectId\":\"$P1\",\"pageId\":\"$PG\"}}"
+curl -s -X DELETE $BASE/api/collections/$CID        # projects untouched
+# group "<Title> — <Subtitle>" names (also " - "), or identical names, >= 2
+# per title, ordered by "Episode 3" / "Ep. 3" / "Part Two" / "Part II" in the
+# subtitle, else by name. Creates/refreshes `auto: true` collections only; a
+# collection you created or edited (auto false) is never touched.
+curl -s -X POST $BASE/api/collections/auto-group
+# → {created: [...], updated: [...], unchanged: [...], skipped: [...], collections}
+```
+
+**Collection export** (background job, one at a time → 409 while one runs):
+
+```bash
+curl -s -X POST $BASE/api/collections/$CID/export -H 'Content-Type: application/json' \
+  -d '{"format":"both","scale":2,"pageNumbers":true,"episodeTitlePages":true,"cover":true}'
+# → 202 {id, status:"running", done:0, total:N, warnings:[...]}
+curl -s $BASE/api/collections/exports/$JOB
+# → {status: running|done|error, done, total, error, warnings,
+#    pdf: {url, name} | null, zip: {url, name} | null}
+```
+
+`cover` adds a generated page 1 (collection name over the chosen cover page,
+else the first episode's first page); `episodeTitlePages` (default on) puts a
+generated page before each episode (collection name, the episode's subtitle,
+a thumbnail of its first page); `pageNumbers` numbers every page
+continuously across the collection, the cover excepted. Titles use font
+family `title` when `data/fonts/` has one. Pages render one at a time, so
+length does not matter. Files are `collection_<id8>_<timestamp>.pdf|.zip` in
+`data/exports/`, pruned like other exports and deletable with
+`DELETE /api/export/download/{name}`. Episodes whose project is missing or
+has no pages are skipped (listed in `warnings`). MCP: `list_collections`,
+`export_collection` (waits for the job).
 
 **Preview-adjust loop**: render `preview.png` at every meaningful step and
 actually inspect it (you can read images). Overlapping bubbles, clipped
@@ -429,6 +520,63 @@ reproducible outside the asset index.
 - `POST /api/assets/file` registers arbitrary image bytes (e.g. your own
   post-processing output) as a reusable asset.
 
+### Content rating (SFW default, opt-in Mature) and minor protections
+
+Every generation path — `/api/agent/generate` and `/generate-batch` (so the
+MCP `generate_image`/`generate_batch` tools and `agent_cli`), the Assets tab's
+`/api/assets/swarmui/generate`, the Characters tab's sheet
+`/api/characters/templates/generate-image` and the LoRA dataset generator —
+runs through one function, `backend/content_rating.py` `apply_rating`, right
+before SwarmUI is called.
+
+- **The rating.** `data/settings.json` → `content.defaultRating`
+  (`"sfw"` by default, or `"mature"`; Settings → Content rating, or
+  `POST /api/settings/ {"content": {"defaultRating": "..."}}`) applies to
+  generations without a project and to projects that set none. A project's
+  own `settings.contentRating` (`"sfw"` | `"mature"`) wins:
+  `PUT /api/agent/projects/$PID/settings {"contentRating": "mature"}` (`""`
+  unsets it; anything else is 400), or the rating selector on its Showcase
+  card. A character sheet uses the rating of the project it is generated for
+  (the Characters tab sends none: the default). The LoRA dataset generator is
+  **always SFW**.
+- **Character ages.** Library characters have `age` (whole number 0-120, or
+  `null` = unknown; Characters tab "Age", `PATCH /api/characters/<id>
+  {"age": 34}`; 422 outside 0-120). A project entry in `settings.characters[]`
+  may carry `age` too (it wins). A character is a **minor** if its age is
+  under 18, or its name/appearance/description/prompt block reads as a minor
+  ("N years old" / "N-year-old" / "aged N" / "N yo" with N < 18, or teen,
+  teenage, kid, child, toddler, baby, schoolgirl, schoolboy, loli, shota,
+  young girl/boy, little girl/boy, middle school, high school student,
+  minor, ...; a minor description wins over an adult age). It is an
+  **adult** if not a minor and its age is 18+, or its text says
+  "N years old" with N >= 18 or "adult". Otherwise its age is **unknown**.
+- **SFW** generations get `nsfw, nude, naked, nipples, cleavage, underwear,
+  lingerie` added to the negative prompt (prompt otherwise unchanged).
+- **Mature** generations drop those, and always get `adult, mature adult`
+  in the prompt and `child, loli, shota, childlike, teen, young, underage,
+  petite child body` in the negative — but only when every character on the
+  panel (`panel.characters`, resolved like the LoRA/prompt-block injection)
+  is a known adult and the panel's scene mentions no minor. A panel with a
+  minor or a character of unknown age (or not in the library) is **forced to
+  SFW**; the response carries `"notice": "forced SFW: Kim has no age ..."`
+  and the `injected` list a `{"kind": "rating", "rating": "sfw",
+  "requested": "mature", "forced": true, "notice": ...}` entry. Set the
+  character's age to fix an unknown one.
+- **Refusals.** In mature mode a prompt that mentions a minor (the terms
+  above, "16 years old", "teenage", "schoolgirl", "underage", "preteen", ...)
+  is refused with **HTTP 400** and a message naming the words — never
+  silently rewritten. `/generate-batch` checks every job up front (400
+  `job <i>: ...`).
+- Every response and asset records the outcome: `content_rating` in the
+  `/generate` response, the asset metadata (`GET /api/agent/assets/<id>`,
+  with the `negative_prompt` actually sent) and the PNG's parameters.
+- Showcase: mature projects show a "Mature" badge and blurred covers until
+  clicked (once per browser session); the collection export dialog notes
+  mature episodes (`/api/collections` episodes carry `contentRating`, the
+  collection `mature`).
+- Negative prompts reduce what a model draws; they do not guarantee it.
+  Check mature output yourself.
+
 ## 7. Errors & limits
 
 - FastAPI standard errors: `{"detail": "..."}`. 404 unknown project/page/
@@ -474,6 +622,16 @@ which paints with comic.js and rebuilds the project here. Names are
 
 - `GET/PUT /api/comics/scripts[/{name}]` list, read, save (`{text}`; 409
   while that script is being converted).
+- `POST /api/comics/scripts/upload` (multipart: `files` up to 20, `overwrite`
+  false by default; the Comics tab's upload button and drop on the script list)
+  adds `.comic`/`.txt` files to `scripts/`. The name comes from the file name
+  (lower-cased, accents dropped, other characters `-`: "Rooftop Static.comic" →
+  `rooftop-static`); UTF-8 only (a BOM is dropped), ≤ 1 MB each. Per file
+  `{file, name, status: saved|replaced|exists|busy|invalid, error?, plan?}`:
+  an existing script is replaced only with `overwrite` (else `exists`, nothing
+  written) and never while it is being converted (`busy`); a saved script is
+  checked with `comic.js --plan` (`plan {ok, error, line}`) and kept even when
+  it has a script error.
 - `POST /api/comics/scripts/{name}/plan {text?, face?}` → `comic.js --plan`
   (`--stdin` when `text` is given, so unsaved text can be checked; the script
   need not exist then). Read-only, allowed during a run, 20 s timeout. Returns
@@ -483,7 +641,7 @@ which paints with comic.js and rebuilds the project here. Names are
   line}` (HTTP 200 either way). `current` = painted from this prompt/seed;
   `same` = the variant was painted from the current prompt, so pinning its
   seed reuses the picture.
-- `POST /api/comics/runs {script, mode, face?, panels?, force?, variants?}`,
+- `POST /api/comics/runs {script, mode, face?, panels?, force?, variants?, uncut?}`,
   one run at a time (409), detached; poll `GET /api/comics/runs/current?since=N`,
   stop with `POST /api/comics/runs/current/stop`. Modes: `paint`,
   `no-paint`, `dry-run`, `repaint` (`--panels a,b [--force]`; without
@@ -491,9 +649,89 @@ which paints with comic.js and rebuilds the project here. Names are
   `PANEL seed=` is copied in: the log says `from variant seed=`), `variants`
   (`--panels a,b --variants N`, N 2-8: paints seeds into `out/<name>/variants/`
   and imports nothing). `panels` are ids like `"1.2"`.
+- `POST /api/comics/scripts/{name}/rewrite {text, start, end, action,
+  instruction?, model?, remove_todo?}` (`backend/api/comics_rewrite.py`, the
+  editor's "AI rewrite"): the configured LLM (`OpenAIClient.for_request`,
+  stored endpoint/key, `model` overrides; temperature 0.7, max 4096 tokens,
+  5 min timeout) rewrites `text[start:end]` (UTF-16 offsets, as a textarea
+  gives them; unsaved text is fine, nothing is saved). `action`:
+  `tighten_dialogue` | `enrich_description` | `draft_uncut` (only inside a
+  `PAGE uncut`/`PANEL uncut` block; keeps `todo` unless `remove_todo`) |
+  `custom` (needs `instruction`, ≤ 2000 chars). The model gets the header,
+  the block and 40 lines around it. Minor protection: for `draft_uncut`, any
+  uncut block and any block of a `rating: mature` script, the block's panels
+  are planned as uncut panels (`comic.js --plan --stdin --uncut`) BEFORE the
+  model is called; a minor, an unknown age or a plan error → 400 and nothing
+  is sent. Returns `{suggestion, original, plan: {ok, error, line}, model,
+  durationMs}`: `plan` checks the text with the block replaced (`--uncut`
+  when the script has uncut blocks) plus the same minor check on the new
+  block; a failing suggestion is still returned, flagged.
+  `tighten_dialogue` and `enrich_description` must keep the block's
+  PAGE/PANEL marker lines (count, order, arguments), else `plan.ok` is false
+  with "the model changed the panel structure (expected N panels, got M)";
+  and every line the action may not rewrite must come back unchanged and in
+  order (blank lines ignored, whitespace normalised): `tighten_dialogue` may
+  change only speech, `CAPTION` and `TEXT` lines, `enrich_description` only
+  description prose, both `//` comments. Otherwise `plan.ok` is false with
+  e.g. `the model removed "SFX (tr): KRZZT" (only dialogue may change)`.
+  The prompt gives the header and context first, then the block between
+  `<<<BLOCK>>>` and `<<<END>>>`, then the task; the answer is read between
+  those markers when present and cut at any echoed prompt section
+  (`<<<CONTEXT_AFTER>>>`, ...), trailing blank lines trimmed to the block's. LLM failures → 502
+  with a hint (endpoint must end in `/v1`; model crashed in LM Studio).
+  Concurrent calls are allowed.
+- Batch AI rewrite (`backend/api/comics_rewrite_batch.py`, the Outline panel's
+  "Batch AI…" and the "AI batch" view): `POST /api/comics/scripts/{name}/rewrite-batch
+  {text, blocks: [{start, end, label, kind}], action, instruction?, model?, remove_todo?}`
+  → 202 with the job. The client sends the block list (its outline of the same
+  `text`: scenes, pages or panels, `kind` scene|page|panel|selection); blocks
+  must be sorted, non-overlapping, non-empty and within the text (UTF-16
+  offsets), ≤ 500, and `draft_uncut` needs every block uncut (400 otherwise).
+  Each block is rewritten exactly like the single rewrite above, against the
+  same snapshot `text`, one block and one LLM call at a time, in order, in a
+  background thread; the minor pre-check runs per block and a refused block
+  (`refused`) never reaches the model; a failing block doesn't stop the rest,
+  but 3 blocks in a row that can't reach the LLM fail the job. One batch at a
+  time on the server: 409 names the running one's script. `GET
+  /api/comics/rewrite-batch/current?since=<seq>` → `{batch: {id, script,
+  action, instruction, kind, model, status running|done|stopped|failed, error,
+  total, done, failed, refused, snapshotHash, seq, startedAt, endedAt,
+  results: [{index, label, kind, start, end, status
+  pending|running|done|failed|refused, original, suggestion, plan {ok, error,
+  line}, error, durationMs, seq}], partial}}` (with `since`, only results
+  changed after that seq); `POST …/current/stop` (the block in flight goes
+  back to pending); `DELETE …/current` clears a finished batch (409 while it
+  runs). Nothing is written to the script: the UI applies accepted
+  suggestions to its editor (bottom-up; when the text drifted from the
+  snapshot, each block is found again by its `original`, near its offsets
+  then anywhere unique, else skipped). `snapshotHash` is FNV-1a 32 over the
+  text's UTF-16 units, `"<length>:<hex>"`. Restart-proof: the job (snapshot
+  text included) is in `data/rewrite_batch.json`, written atomically on every
+  change; at startup a running job's running block goes back to pending and
+  the batch carries on.
 - Images: `GET /api/comics/scripts/{name}/file/page_01.png` (or `draft_01`),
   `/panel/p01-02.png` (`p01-02.prev.png` = the one it replaced),
   `/variant/p01-02_seed4301.png`.
+
+Content rating: a script's `rating: sfw|mature` header (default sfw; a
+panel's `rating: sfw` keeps one panel SFW) and `age NAME: <n>` lines follow
+the same rules as here (Comics README); `automanga.js` sets the project's
+`contentRating` to the script's rating and fills a library character's `age`
+from the script when it has none. A mature script's `--plan` panels carry
+`rating` (and `notice` when forced SFW).
+
+Uncut editions: a script's `PAGE uncut` / `PANEL uncut` blocks (Comics README,
+"Uncut editions") make a second comic, built by `comic.js --uncut` into
+`out/<name>-uncut/` and imported as its own project, "<Title> (Uncut) —
+<Subtitle>", marked `comicScript: "<name>:uncut"` and rated `mature`. Runs and
+`/plan` take `uncut: true` (→ `--uncut`; uncut panel ids `1.u1` / `u1.2` need
+it), the page/panel/variant file routes take `?uncut=1` (uncut files
+`p01-u01.png`, `u01-02.png`). `--plan --uncut` panels add `edition`, `stem`,
+`regular` (copied from the regular edition), `rating`, `notice`, and the plan
+lists `slots` (todo slots). The script listing adds `uncut`, `uncut_slots` and
+`uncut_project_id`. Collections auto-group puts uncut editions in their own
+collection "<Title> (Uncut)" (stored `mature: true`), never with the regular
+episodes.
 
 Pick a variant: `variants` run → set the seed in the script (`seed: N` line if
 the panel has one, else `PANEL … seed=N`) → `PUT` the script → `repaint`

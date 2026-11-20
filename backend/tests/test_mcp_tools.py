@@ -94,3 +94,30 @@ async def test_build_page_rows_template(transport):
     body = transport[-1][2].decode().replace(" ", "")
     assert '"kind":"rows"' in body
     assert "[2,3]" in body
+
+
+@pytest.mark.asyncio
+async def test_export_collection_polls_the_job(monkeypatch):
+    polls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        key = (request.method, request.url.path)
+        if key == ("GET", "/api/collections"):
+            return httpx.Response(200, json={"collections": [{"id": "c1"}]})
+        if key == ("POST", "/api/collections/c1/export"):
+            return httpx.Response(202, json={"id": "j1", "status": "running",
+                                             "done": 0, "total": 3})
+        if key == ("GET", "/api/collections/exports/j1"):
+            polls.append(1)
+            done = len(polls) >= 2
+            return httpx.Response(200, json={
+                "id": "j1", "status": "done" if done else "running",
+                "done": 3 if done else 1, "total": 3,
+                "pdf": {"url": "/api/export/download/c.pdf"} if done else None})
+        return httpx.Response(404, json={"detail": f"no route {key}"})
+
+    monkeypatch.setattr(mcp_tools, "_TRANSPORT", httpx.MockTransport(handler))
+    assert (await mcp_tools.list_collections())["collections"][0]["id"] == "c1"
+    job = await mcp_tools.export_collection("c1", poll_interval=0)
+    assert job["status"] == "done" and job["pdf"]["url"].endswith("c.pdf")
+    assert len(polls) == 2

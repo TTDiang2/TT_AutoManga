@@ -20,6 +20,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { Panel } from '../../types';
 
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
@@ -30,6 +31,7 @@ function SortablePanel({ panel, index, onUpdate, onDelete }: {
   onUpdate: (id: string, updates: Partial<Panel>) => void;
   onDelete: (id: string) => void;
 }) {
+  const tip = useTips().storyboard;
   const [isEditing, setIsEditing] = useState(false);
   const [editScene, setEditScene] = useState(panel.scene);
   const [editDialogue, setEditDialogue] = useState(panel.dialogue);
@@ -58,12 +60,12 @@ function SortablePanel({ panel, index, onUpdate, onDelete }: {
     <div ref={setNodeRef} style={style} className="card panel-card">
       <div className="panel-header">
         <div className="panel-number">
-          <span {...attributes} {...listeners} className="drag-handle">
+          <span {...attributes} {...listeners} className="drag-handle" data-tip={tip.drag}>
             <FiMove size={14} />
           </span>
           <span className="badge">Panel {index + 1}</span>
         </div>
-        <button className="btn btn-ghost" onClick={() => onDelete(panel.id)}>
+        <button className="btn btn-ghost" onClick={() => onDelete(panel.id)} data-tip={tip.remove} aria-label={tip.remove}>
           <FiTrash2 size={16} />
         </button>
       </div>
@@ -74,6 +76,7 @@ function SortablePanel({ panel, index, onUpdate, onDelete }: {
             className="input textarea"
             value={editScene}
             onChange={(e) => setEditScene(e.target.value)}
+            data-tip={tip.scene}
             placeholder="Scene description..."
             rows={3}
           />
@@ -81,14 +84,15 @@ function SortablePanel({ panel, index, onUpdate, onDelete }: {
             className="input textarea"
             value={editDialogue}
             onChange={(e) => setEditDialogue(e.target.value)}
+            data-tip={tip.dialogue}
             placeholder="Dialogue..."
             rows={2}
           />
           <div className="flex gap-sm mt-sm">
-            <button className="btn btn-primary" onClick={handleSave}>
+            <button className="btn btn-primary" onClick={handleSave} data-tip={tip.save}>
               <FiCheck size={14} /> Save
             </button>
-            <button className="btn btn-secondary" onClick={() => setIsEditing(false)}>
+            <button className="btn btn-secondary" onClick={() => setIsEditing(false)} data-tip={tip.cancel}>
               <FiX size={14} /> Cancel
             </button>
           </div>
@@ -110,7 +114,7 @@ function SortablePanel({ panel, index, onUpdate, onDelete }: {
               ))}
             </div>
           )}
-          <button className="btn btn-ghost mt-sm" onClick={() => setIsEditing(true)}>
+          <button className="btn btn-ghost mt-sm" onClick={() => setIsEditing(true)} data-tip={tip.edit}>
             <FiEdit2 size={14} /> Edit
           </button>
         </div>
@@ -122,6 +126,7 @@ function SortablePanel({ panel, index, onUpdate, onDelete }: {
 export function StoryboardTab() {
   const { panels, setPanels, updatePanel, removePanel, settings } = useProjectStore();
   const { t } = useTranslation();
+  const tip = useTips().storyboard;
   const [novelText, setNovelText] = useState('');
   const [detailLevel, setDetailLevel] = useState(settings.defaults.detailLevel);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -238,7 +243,7 @@ export function StoryboardTab() {
 
   return (
     <div className="storyboard-tab">
-      <div className="input-section">
+      <div className="input-section" data-tour="storyboard-input">
         <textarea
           className={`input textarea novel-input${isDragOver ? ' drag-over' : ''}`}
           value={novelText}
@@ -251,11 +256,12 @@ export function StoryboardTab() {
           }}
           onDragLeave={() => setIsDragOver(false)}
           onDrop={handleDrop}
+          data-tip={tip.story}
           placeholder={t.storyboard.inputPlaceholder}
           rows={8}
         />
         <div className="flex items-center justify-between mt-md">
-          <div className="precision-control">
+          <div className="precision-control" data-tour="storyboard-detail" data-tip={tip.detail}>
             <div className="flex items-center gap-md">
               <span className="text-sm text-secondary">{t.storyboard.detailLevel}:</span>
               <input
@@ -294,6 +300,8 @@ export function StoryboardTab() {
           </button>
           <button 
             className="btn btn-primary" 
+            data-tour="storyboard-generate"
+            data-tip={tip.generate}
             onClick={handleGenerate}
             disabled={isGenerating || !novelText.trim()}
           >
@@ -303,10 +311,10 @@ export function StoryboardTab() {
         </div>
       </div>
 
-      <div className="panels-section mt-lg">
+      <div className="panels-section mt-lg" data-tour="storyboard-panels">
         <div className="flex items-center justify-between mb-md">
           <h3>Storyboard Panels ({panels.length})</h3>
-          <button className="btn btn-secondary" onClick={handleAddPanel}>
+          <button className="btn btn-secondary" onClick={handleAddPanel} data-tip={tip.addPanel}>
             <FiPlus size={16} /> {t.storyboard.addPanel}
           </button>
         </div>

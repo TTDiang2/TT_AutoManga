@@ -33,7 +33,8 @@ EXPORT_KEEP_PER_PROJECT = 20
 
 # <kind>[_<project id>]_<timestamp or 8 hex>: manga_<id8>_20261117_073326
 # (agent export), manga_<project id>_ab12cd34 (/api/export/pdf|images),
-# composer_ab12cd34 (/api/export/composer-*). Anything else is left alone.
+# composer_ab12cd34 (/api/export/composer-*), collection_<collection id8>_
+# 20261117_073326 (collection export). Anything else is left alone.
 _EXPORT_STEM_RE = re.compile(
     r"(?P<kind>[a-z]+)(?:_(?P<pid>[\w-]+?))?_(?:\d{8}_\d{6}|[0-9a-f]{8})")
 
@@ -107,12 +108,16 @@ def _stamp_page_number(img: Image.Image, index: int, scale: float) -> None:
     """Number a page bottom-center; page 1 (the cover) stays unnumbered."""
     if index == 0:
         return
+    stamp_label(img, str(index + 1), scale)
+
+
+def stamp_label(img: Image.Image, label: str, scale: float) -> None:
+    """Draw a page number (any label) bottom-center."""
     from PIL import ImageDraw
     from .fonts import get_font
     d = ImageDraw.Draw(img)
     fs = max(10, int(14 * scale))
     font = get_font(fs)
-    label = str(index + 1)
     w = font.getlength(label)
     d.text(((img.width - w) / 2, img.height - fs * 1.8), label,
            font=font, fill=(102, 102, 102, 255))
@@ -134,7 +139,7 @@ def _iter_pages(pages: List[dict], scale: float, resolve,
         yield i, page, img
 
 
-class _PdfWriter:
+class PdfWriter:
     """Incremental PDF: each page is embedded as soon as it is rendered."""
 
     def __init__(self, target):
@@ -172,7 +177,7 @@ def export_pages_to_bytes(pages: List[dict], fmt: str, scale: float,
         raise ValueError(f"unknown export format: {fmt}")
     pdf_buf = io.BytesIO() if fmt in ("pdf", "both") else None
     zip_buf = io.BytesIO() if fmt in ("zip", "both") else None
-    pdf = _PdfWriter(pdf_buf) if pdf_buf else None
+    pdf = PdfWriter(pdf_buf) if pdf_buf else None
     # PNGs are already deflate-compressed: store them, don't re-compress
     zf = zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_STORED) if zip_buf else None
     try:
@@ -200,7 +205,7 @@ def export_pages(pages: List[dict], fmt: str, scale: float, resolve,
     png_dir.mkdir(exist_ok=True)
 
     pdf_path = out_dir / f"{base_name}.pdf"
-    pdf = _PdfWriter(str(pdf_path)) if fmt in ("pdf", "both") else None
+    pdf = PdfWriter(str(pdf_path)) if fmt in ("pdf", "both") else None
     png_files: List[Path] = []
     for i, page, img in _iter_pages(pages, scale, resolve, page_numbers):
         f = png_dir / f"page_{i + 1:03d}.png"
