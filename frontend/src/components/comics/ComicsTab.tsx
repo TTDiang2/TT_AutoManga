@@ -12,6 +12,7 @@ import { parseOutline, targetAt, targetLabel, type OutlineEntry, type OutlineKin
 import { useComicsDrafts, openedDraft, isDirty } from './scriptDrafts';
 import { comicFiles, postUpload, uploaded, uploadSummary, type UploadResult } from './comicsUpload';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { Project } from '../../types';
 import './comics.css';
 
@@ -300,6 +301,7 @@ export function ComicsTab() {
   const toggleOutline = useCallback(() => setOutlineOpen(o => { writeStored(OUTLINE_OPEN_KEY, o ? '0' : '1'); return !o; }), []);
   const pickMode = useCallback((m: OutlineKind) => { setOutlineMode(m); writeStored(OUTLINE_MODE_KEY, m); }, []);
   const c = t.comics;
+  const tip = useTips().comics;
   const words: OutlineWords = useMemo(() => ({
     page: c.outlinePage, uncutPage: c.outlineUncutPage, noPlace: c.outlineNoPlace, panel: c.outlinePanel, scene: c.outlineScene,
   }), [c]);
@@ -727,28 +729,28 @@ export function ComicsTab() {
         <div className="comics-list-head">
           <span className="text-sm text-muted" title={comicsDir}>{scripts.length} scripts</span>
           <div className="flex gap-xs">
-            <button className="btn btn-ghost btn-icon" onClick={loadScripts} title="Refresh"><FiRefreshCw size={14} /></button>
-            <button className="btn btn-ghost btn-icon" onClick={() => uploadInput.current?.click()} title={c.uploadOpen} aria-label={c.uploadOpen}><FiUpload size={14} /></button>
-            <button className="btn btn-secondary btn-icon" onClick={() => setNewName('')} title="New script"><FiPlus size={14} /></button>
+            <button className="btn btn-ghost btn-icon" onClick={loadScripts} data-tip={tip.refresh} aria-label={tip.refresh}><FiRefreshCw size={14} /></button>
+            <button className="btn btn-ghost btn-icon" onClick={() => uploadInput.current?.click()} data-tip={tip.upload} aria-label={c.uploadOpen}><FiUpload size={14} /></button>
+            <button className="btn btn-secondary btn-icon" onClick={() => setNewName('')} data-tip={tip.newScript} aria-label={tip.newScript}><FiPlus size={14} /></button>
             <input ref={uploadInput} type="file" accept=".comic,.txt" multiple hidden
               onChange={e => { upload([...(e.target.files ?? [])]); e.target.value = ''; }} />
           </div>
         </div>
         {dropping && <div className="comics-drop-hint">{c.uploadDrop}</div>}
         {uploadNotice && (
-          <div className={`comics-upload-notice ${uploadNotice.warn ? 'warn' : ''}`} onClick={() => setUploadNotice(null)} title="Dismiss">
+          <div className={`comics-upload-notice ${uploadNotice.warn ? 'warn' : ''}`} onClick={() => setUploadNotice(null)} data-tip={tip.dismiss}>
             {uploadNotice.text}
           </div>
         )}
         {newName !== null && (
           <form className="comics-new" onSubmit={e => { e.preventDefault(); create(); }}>
             <input className="input" autoFocus placeholder="file name, e.g. rooftop-static" value={newName}
-              onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Escape' && setNewName(null)} />
+              onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Escape' && setNewName(null)} data-tip={tip.newName} />
             <button className="btn btn-primary" type="submit">Create</button>
           </form>
         )}
         {scripts.map(s => (
-          <button key={s.name} className={`comics-item ${s.name === selected ? 'active' : ''}`} onClick={() => select(s.name)}>
+          <button key={s.name} className={`comics-item ${s.name === selected ? 'active' : ''}`} onClick={() => select(s.name)} data-tip={tip.item}>
             <span className="comics-item-title">{s.title}</span>
             {s.subtitle && <span className="comics-item-sub">{s.subtitle}</span>}
             <span className="comics-item-meta">
@@ -778,33 +780,33 @@ export function ComicsTab() {
                 </span>
               </div>
               <div className="comics-actions">
-                <label className="comics-check" title="A second pass on the face of single-character panels">
+                <label className="comics-check" data-tip={tip.face}>
                   <input type="checkbox" checked={face} onChange={e => setFace(e.target.checked)} disabled={running} /> Face pass
                 </label>
-                <label className="comics-check" title={t.comics.uncutEditionHint}>
+                <label className="comics-check" data-tip={t.comics.uncutEditionHint}>
                   <input type="checkbox" checked={uncut} onChange={e => { setUncut(e.target.checked); setPicked(new Set()); }} disabled={running} /> {t.comics.uncutEdition}
                 </label>
-                <button className="btn btn-secondary" onClick={() => start('dry-run')} disabled={running} title="Lay out with placeholders; no painting, nothing sent to AutoManga">
+                <button className="btn btn-secondary" onClick={() => start('dry-run')} disabled={running} data-tip={tip.dryRun}>
                   <FiEye size={14} /> Dry run
                 </button>
-                <button className="btn btn-secondary" onClick={() => start('no-paint')} disabled={running} title="Use the panels already painted; unpainted ones stay empty">
+                <button className="btn btn-secondary" onClick={() => start('no-paint')} disabled={running} data-tip={tip.import}>
                   <FiLayers size={14} /> Import
                 </button>
-                <button className="btn btn-primary" onClick={() => start('paint')} disabled={running} title="Paint missing or changed panels on SwarmUI, then import">
+                <button className="btn btn-primary" onClick={() => start('paint')} disabled={running} data-tip={tip.paint}>
                   <FiPlay size={14} /> Paint & import
                 </button>
                 {running && runIsHere && (
-                  <button className="btn btn-secondary comics-stop" onClick={stop}><FiSquare size={14} /> Stop</button>
+                  <button className="btn btn-secondary comics-stop" onClick={stop} data-tip={tip.stop}><FiSquare size={14} /> Stop</button>
                 )}
                 {projectId && !running && (
-                  <button className="btn btn-secondary" onClick={() => openInComposer(projectId)}>
+                  <button className="btn btn-secondary" onClick={() => openInComposer(projectId)} data-tip={tip.openComposer}>
                     <FiBookOpen size={14} /> Open in Composer
                   </button>
                 )}
               </div>
             </div>
 
-            {error && <div className="comics-error" onClick={() => setError(null)}>{error}</div>}
+            {error && <div className="comics-error" onClick={() => setError(null)} data-tip={tip.dismiss}>{error}</div>}
             {batchNotice && <div className="comics-note" role="status" onClick={() => setBatchNotice(null)}>{batchNotice}</div>}
             {running && !runIsHere && run && (
               <div className="comics-note">Converting <b>{run.script}</b>; one run at a time.</div>
@@ -822,7 +824,7 @@ export function ComicsTab() {
               </div>
             ) : (
               <button className="comics-plan comics-plan-error" disabled={plan.line == null}
-                onClick={() => plan.line != null && gotoLine(plan.line)} title={plan.line != null ? 'Go to the line' : undefined}>
+                onClick={() => plan.line != null && gotoLine(plan.line)} data-tip={plan.line != null ? tip.gotoLine : undefined}>
                 {plan.line != null && <b>line {plan.line}</b>} {plan.error.replace(/^[^\n]*?:\d+: /, '')}
               </button>
             ))}
@@ -842,31 +844,31 @@ export function ComicsTab() {
             )}
 
             <div className="comics-views">
-              <button className={view === 'script' ? 'active' : ''} onClick={() => setView('script')}>
+              <button className={view === 'script' ? 'active' : ''} onClick={() => setView('script')} data-tip={tip.viewScript}>
                 <FiFileText size={13} /> Script{dirty ? ' •' : ''}
               </button>
-              <button className={view === 'log' ? 'active' : ''} onClick={() => setView('log')} disabled={!runIsHere}>
+              <button className={view === 'log' ? 'active' : ''} onClick={() => setView('log')} disabled={!runIsHere} data-tip={tip.viewLog}>
                 <FiTerminal size={13} /> Log
               </button>
-              <button className={view === 'pages' ? 'active' : ''} onClick={() => { setView('pages'); loadPages(current.name); }}>
+              <button className={view === 'pages' ? 'active' : ''} onClick={() => { setView('pages'); loadPages(current.name); }} data-tip={tip.viewPages}>
                 <FiEye size={13} /> Pages{pages.length ? ` (${pages.length})` : ''}
               </button>
-              <button className={view === 'panels' ? 'active' : ''} onClick={() => setView('panels')}>
+              <button className={view === 'panels' ? 'active' : ''} onClick={() => setView('panels')} data-tip={tip.viewPanels}>
                 <FiGrid size={13} /> Panels{stale ? ` (${stale} stale)` : ''}
               </button>
               {batchHere && (
-                <button className={view === 'batch' ? 'active' : ''} onClick={() => setView('batch')} title={c.batchTabHint}>
+                <button className={view === 'batch' ? 'active' : ''} onClick={() => setView('batch')} data-tip={c.batchTabHint}>
                   <FiCpu size={13} /> {fill(c.batchTab, { a: finished(batchHere), b: batchHere.total })}{batchHere.status === 'running' ? ' …' : ''}
                 </button>
               )}
               {view === 'script' && (
                 <>
                   <button className="comics-save" onClick={openAi} disabled={!llmReady || !!ai}
-                    title={llmReady ? `${t.comics.aiRewriteHint}\n${shortcutHint}` : t.comics.aiNoLlm}
+                    data-tip={llmReady ? `${t.comics.aiRewriteHint}\n${shortcutHint}` : t.comics.aiNoLlm}
                     aria-keyshortcuts={IS_MAC ? 'Meta+Shift+E Meta+Shift+L' : 'Control+Shift+E Control+Shift+L'}>
                     <FiZap size={13} /> {t.comics.aiRewrite}
                   </button>
-                  <button onClick={() => save()} disabled={!dirty || scriptBusy}>
+                  <button onClick={() => save()} disabled={!dirty || scriptBusy} data-tip={tip.save}>
                     <FiSave size={13} /> Save
                   </button>
                 </>
@@ -941,23 +943,23 @@ export function ComicsTab() {
               ) : (
                 <>
                   <div className="comics-panel-actions">
-                    <label className="comics-check">
+                    <label className="comics-check" data-tip={tip.selectAll}>
                       <input type="checkbox" checked={pickedIds.length > 0 && pickedIds.length === planPanels.length}
                         onChange={e => setPicked(new Set(e.target.checked ? planPanels.map(p => p.id) : []))} />
                       {pickedIds.length ? `${pickedIds.length} selected` : 'Select all'}
                     </label>
                     <button className="btn btn-secondary" disabled={running || planStale || !pickedIds.length}
-                      onClick={() => start('repaint', { panels: pickedIds, force: true })} title="Paint the selected panels again, even if they are current, then import">
+                      onClick={() => start('repaint', { panels: pickedIds, force: true })} data-tip={tip.repaint}>
                       <FiRefreshCw size={14} /> Repaint selected
                     </button>
                     {[2, 4, 6].map(n => (
                       <button key={n} className="btn btn-secondary" disabled={running || planStale || !pickedIds.length}
-                        onClick={() => start('variants', { panels: pickedIds, variants: n })} title={`Paint ${n} seeds of each selected panel to choose from (nothing is imported)`}>
+                        onClick={() => start('variants', { panels: pickedIds, variants: n })} data-tip={fill(tip.variants, { n })}>
                         <FiShuffle size={14} /> Variants ×{n}
                       </button>
                     ))}
                     <button className="btn btn-primary" disabled={running || planStale || !pinned.length}
-                      onClick={() => start('repaint', { panels: pinned })} title="Put the pinned variants into their panels (no painting), then import">
+                      onClick={() => start('repaint', { panels: pinned })} data-tip={tip.applyPinned}>
                       <FiCheck size={14} /> Apply pinned{pinned.length ? ` (${pinned.length})` : ''}
                     </button>
                   </div>
@@ -968,11 +970,11 @@ export function ComicsTab() {
                       const url = `/api/comics/scripts/${current.name}/panel/${panelStem(p)}.png?${fromRegular ? '' : edQuery}v=${p.mtime}`;
                       return (
                         <div key={p.id} className={`comics-panel ${picked.has(p.id) ? 'picked' : ''}`}>
-                          <div className="comics-panel-thumb" style={{ aspectRatio: `${p.gen[0]} / ${p.gen[1]}` }} onClick={() => togglePick(p.id)}>
+                          <div className="comics-panel-thumb" style={{ aspectRatio: `${p.gen[0]} / ${p.gen[1]}` }} onClick={() => togglePick(p.id)} data-tip={tip.pickPanel}>
                             {p.painted || fromRegular ? <img src={url} alt={p.id} loading="lazy" /> : <span>not painted</span>}
                           </div>
                           <div className="comics-panel-head">
-                            <label className="comics-check">
+                            <label className="comics-check" data-tip={tip.pickPanel}>
                               <input type="checkbox" checked={picked.has(p.id)} onChange={() => togglePick(p.id)} /> <b>{p.id}</b>
                             </label>
                             <span className="comics-badges">
@@ -987,17 +989,17 @@ export function ComicsTab() {
                             </span>
                           </div>
                           <button className="btn btn-ghost comics-panel-ai" onClick={() => aiOnPlanPanel(p)}
-                            disabled={!llmReady || aiLocked} title={!llmReady ? c.aiNoLlm : aiLocked ? c.aiLocked : c.aiPanelCardHint}
+                            disabled={!llmReady || aiLocked} data-tip={!llmReady ? c.aiNoLlm : aiLocked ? c.aiLocked : c.aiPanelCardHint}
                             aria-label={fill(c.outlineAi, { label: `${c.outlinePanel} ${p.id}` })}>
                             <FiZap size={13} /> {c.aiPanelCard}
                           </button>
                           <details className="comics-panel-prompt">
-                            <summary>Prompt</summary>
+                            <summary data-tip={tip.promptDetails}>Prompt</summary>
                             <dl>
-                              <dt>prompt <button className="btn btn-ghost btn-icon" onClick={() => copy(p.prompt)} title="Copy"><FiCopy size={12} /></button></dt>
+                              <dt>prompt <button className="btn btn-ghost btn-icon" onClick={() => copy(p.prompt)} data-tip={tip.copyPrompt} aria-label={tip.copyPrompt}><FiCopy size={12} /></button></dt>
                               <dd>{p.prompt}</dd>
                               {p.fix && <><dt>pair fix</dt><dd>{p.fix}</dd></>}
-                              <dt>negative <button className="btn btn-ghost btn-icon" onClick={() => copy(p.negative)} title="Copy"><FiCopy size={12} /></button></dt>
+                              <dt>negative <button className="btn btn-ghost btn-icon" onClick={() => copy(p.negative)} data-tip={tip.copyNegative} aria-label={tip.copyNegative}><FiCopy size={12} /></button></dt>
                               <dd>{p.negative}</dd>
                               <dt>model</dt><dd>{p.model}{p.face ? ' · face pass' : ''}</dd>
                               <dt>size</dt><dd>{p.gen.join('×')}</dd>
@@ -1010,13 +1012,13 @@ export function ComicsTab() {
                                 const variantUrl = `/api/comics/scripts/${current.name}/variant/${panelStem(p)}_seed${v.seed}.png?${edQuery}v=${v.mtime ?? variantStamp}`;
                                 return (
                                   <figure key={v.seed} className={chosen ? 'chosen' : ''}>
-                                    <a href={variantUrl} target="_blank" rel="noreferrer">
+                                    <a href={variantUrl} target="_blank" rel="noreferrer" data-tip={tip.variantOpen}>
                                       <img src={variantUrl} alt={`seed ${v.seed}`} loading="lazy" />
                                     </a>
                                     <figcaption>
                                       {chosen ? <span>seed {v.seed} ✓</span> : (
                                         <button className="btn btn-ghost" disabled={scriptBusy || planStale} onClick={() => chooseSeed(p, v.seed)}
-                                          title={v.same ? 'Pin this seed; Apply pinned then uses this picture' : 'Painted from an older prompt: pinning the seed repaints it'}>
+                                          data-tip={v.same ? tip.useSeed : tip.useSeedOld}>
                                           Use seed {v.seed}{v.same ? '' : ' *'}
                                         </button>
                                       )}

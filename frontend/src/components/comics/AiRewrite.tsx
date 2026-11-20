@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FiAlertTriangle, FiCheck, FiRefreshCw, FiX, FiZap } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { resolveBlock, type AiBlock, type TargetKind } from './aiBlock';
 import type { OutlineKind, OutlineWords } from './outline';
 import './aiRewrite.css';
@@ -76,6 +77,7 @@ export function PlanStatus({ plan }: { plan: { ok: boolean; error: string | null
 export function AiRewrite({ script, text, caret, model, target, words, onLockChange, onAccept, onClose }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
+  const tip = useTips().comics;
   const [kind, setKind] = useState<TargetKind | null>(target?.kind ?? null);
   const anchor = target ? (target.anchor ?? target.start) : caret.start;
   const [action, setAction] = useState<AiAction>('enrich_description');
@@ -193,14 +195,14 @@ export function AiRewrite({ script, text, caret, model, target, words, onLockCha
           <span className="ai-rewrite-block">{c.aiNoBlock}</span>
         )}
         {!ran && (
-          <label className="ai-rewrite-target" title={c.aiTargetHint}>
+          <label className="ai-rewrite-target" data-tip={c.aiTargetHint}>
             <select className="input" value={shownKind} aria-label={c.aiTarget}
               onChange={e => setKind(e.target.value as TargetKind)}>
               {kinds.map(k => <option key={k} value={k}>{kindNames[k]}</option>)}
             </select>
           </label>
         )}
-        <button className="btn btn-ghost btn-icon ai-rewrite-close" onClick={close} title={`${c.aiClose} (Esc)`}><FiX size={14} /></button>
+        <button className="btn btn-ghost btn-icon ai-rewrite-close" onClick={close} data-tip={`${c.aiClose} (Esc)`} aria-label={c.aiClose}><FiX size={14} /></button>
       </div>
 
       {!result && (
@@ -208,17 +210,17 @@ export function AiRewrite({ script, text, caret, model, target, words, onLockCha
           <div className="ai-rewrite-actions" role="radiogroup">
             {actions.map(a => (
               <button key={a.id} role="radio" aria-checked={chosen === a.id} disabled={busy}
-                className={`ai-rewrite-action ${chosen === a.id ? 'active' : ''}`} onClick={() => setAction(a.id)} title={a.hint}>
+                className={`ai-rewrite-action ${chosen === a.id ? 'active' : ''}`} onClick={() => setAction(a.id)} data-tip={a.hint}>
                 {a.label}
               </button>
             ))}
           </div>
           <textarea className="input ai-rewrite-instruction" rows={2} maxLength={2000} disabled={busy}
             placeholder={chosen === 'custom' ? c.aiInstructionCustom : c.aiInstruction}
-            value={instruction} onChange={e => setInstruction(e.target.value)}
+            value={instruction} onChange={e => setInstruction(e.target.value)} data-tip={tip.aiInstruction}
             onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) { e.preventDefault(); run(); } }} />
           {chosen === 'draft_uncut' && block?.todo && (
-            <label className="comics-check">
+            <label className="comics-check" data-tip={tip.aiRemoveTodo}>
               <input type="checkbox" checked={removeTodo} disabled={busy} onChange={e => setRemoveTodo(e.target.checked)} /> {c.aiRemoveTodo}
             </label>
           )}
@@ -227,10 +229,10 @@ export function AiRewrite({ script, text, caret, model, target, words, onLockCha
             {busy ? (
               <>
                 <span className="ai-rewrite-busy"><span className="ai-rewrite-spinner" /> {fill(c.aiRunning, { s: elapsed })}</span>
-                <button className="btn btn-secondary" onClick={cancel}>{c.aiCancel}</button>
+                <button className="btn btn-secondary" onClick={cancel} data-tip={tip.aiCancel}>{c.aiCancel}</button>
               </>
             ) : (
-              <button className="btn btn-primary" onClick={run} disabled={!block || (chosen === 'custom' && !instruction.trim())}>
+              <button className="btn btn-primary" onClick={run} disabled={!block || (chosen === 'custom' && !instruction.trim())} data-tip={tip.aiRun}>
                 <FiZap size={14} /> {c.aiRun}
               </button>
             )}
@@ -246,9 +248,9 @@ export function AiRewrite({ script, text, caret, model, target, words, onLockCha
             meta={`${result.model} · ${fill(c.aiTook, { s: Math.round(result.durationMs / 100) / 10 })}`} />
           <PlanStatus plan={result.plan} />
           <div className="ai-rewrite-foot">
-            <button className="btn btn-ghost" onClick={discard}>{c.aiDiscard}</button>
-            <button className="btn btn-secondary" onClick={run}><FiRefreshCw size={14} /> {c.aiRetry}</button>
-            <button className="btn btn-primary" onClick={accept}><FiCheck size={14} /> {acceptFailing ? c.aiAcceptAnyway : c.aiAccept}</button>
+            <button className="btn btn-ghost" onClick={discard} data-tip={tip.aiDiscard}>{c.aiDiscard}</button>
+            <button className="btn btn-secondary" onClick={run} data-tip={tip.aiRetry}><FiRefreshCw size={14} /> {c.aiRetry}</button>
+            <button className="btn btn-primary" onClick={accept} data-tip={acceptFailing ? tip.aiAcceptAnyway : tip.aiAccept}><FiCheck size={14} /> {acceptFailing ? c.aiAcceptAnyway : c.aiAccept}</button>
           </div>
         </>
       )}

@@ -103,6 +103,9 @@ export function TooltipLayer() {
   }, [shown]);
 
   if (!shown) return null;
+  // a modal <dialog> sits in the browser's top layer, above anything in
+  // <body>: render the tip inside it, or it would be hidden behind the dialog
+  const host = shown.el.closest<HTMLElement>('dialog[open]') ?? document.body;
   return createPortal(
     <div
       ref={tipRef}
@@ -113,6 +116,6 @@ export function TooltipLayer() {
     >
       {shown.text}
     </div>,
-    document.body,
+    host,
   );
 }
