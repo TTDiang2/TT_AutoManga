@@ -15,12 +15,13 @@ from pathlib import Path
 from ..render.export_service import prune_exports
 from ..render.resolve import ref_to_bytes
 from ..storage.manager import validate_project_id, InvalidProjectIdError
+from ..core.config import DATA_DIR
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
 logger = logging.getLogger(__name__)
 
-EXPORTS_DIR = Path(__file__).parent.parent.parent / "data" / "exports"
+EXPORTS_DIR = DATA_DIR / "exports"
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 EXPORTS_ROOT = EXPORTS_DIR.resolve()
 

@@ -2,7 +2,6 @@ from contextlib import contextmanager
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from typing import Optional, List, Dict, Any
-from pathlib import Path
 import base64
 import binascii
 import json
@@ -11,13 +10,13 @@ import math
 import re
 import threading
 
-from ..core.config import atomic_write_json
+from ..core.config import DATA_DIR, atomic_write_json
 
 router = APIRouter(prefix="/api/characters", tags=["characters"])
 
 logger = logging.getLogger(__name__)
 
-CHARACTERS_FILE = Path(__file__).parent.parent.parent / "data" / "characters.json"
+CHARACTERS_FILE = DATA_DIR / "characters.json"
 
 # One lock around every read-modify-write of characters.json: the API
 # handlers here and the training worker (training._set_character_lora).

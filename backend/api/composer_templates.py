@@ -11,16 +11,15 @@ pattern as ``backend/api/layouts.py``.
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
-from pathlib import Path
 import json
 import logging
 
-from ..core.config import atomic_write_json
+from ..core.config import DATA_DIR, atomic_write_json
 import time
 
 router = APIRouter(prefix="/api/composer/templates", tags=["composer-templates"])
 
-TEMPLATES_FILE = Path(__file__).parent.parent.parent / "data" / "composer_templates.json"
+TEMPLATES_FILE = DATA_DIR / "composer_templates.json"
 TEMPLATES_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 

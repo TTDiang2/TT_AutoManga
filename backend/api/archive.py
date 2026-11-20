@@ -12,13 +12,13 @@ import base64
 import zipfile
 import io
 
-from ..core.config import _backup_corrupt, atomic_write_json
+from ..core.config import DATA_DIR, _backup_corrupt, atomic_write_json
 
 router = APIRouter(prefix="/api/archive", tags=["archive"])
 
 logger = logging.getLogger(__name__)
 
-ARCHIVE_DIR = Path(__file__).parent.parent.parent / "data" / "archive"
+ARCHIVE_DIR = DATA_DIR / "archive"
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_FILE = ARCHIVE_DIR / "metadata.json"
 ARCHIVE_ROOT = ARCHIVE_DIR.resolve()
