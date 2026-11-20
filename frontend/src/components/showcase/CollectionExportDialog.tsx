@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FiDownload, FiX } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { clampScale, exportPercent } from './collectionUtils';
 import { matureNames } from './rating';
 import type { Collection, CollectionExportJob } from './collectionUtils';
@@ -13,6 +14,7 @@ export function CollectionExportDialog({ collection, onClose }: {
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const tip = useTips().showcase;
   const [format, setFormat] = useState<Format>('pdf');
   const [scale, setScale] = useState(2);
   const [pageNumbers, setPageNumbers] = useState(true);
@@ -77,7 +79,7 @@ export function CollectionExportDialog({ collection, onClose }: {
       <div className="modal-content collection-export" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3>{t.showcase.exportCollection}</h3>
-          <button className="btn btn-ghost btn-sm" onClick={onClose} title={t.showcase.close}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label={t.showcase.close} data-tip={tip.closeDialog}>
             <FiX size={16} />
           </button>
         </div>
@@ -92,7 +94,7 @@ export function CollectionExportDialog({ collection, onClose }: {
         <div className="collection-export-options mt-md">
           <label className="collection-export-row">
             <span>{t.showcase.format}</span>
-            <select className="select" value={format} disabled={running}
+            <select className="select" value={format} disabled={running} data-tip={tip.format}
               onChange={e => setFormat(e.target.value as Format)}>
               <option value="pdf">PDF</option>
               <option value="zip">ZIP (PNG)</option>
@@ -101,22 +103,22 @@ export function CollectionExportDialog({ collection, onClose }: {
           </label>
           <label className="collection-export-row">
             <span>{t.showcase.scale}</span>
-            <input className="input" type="number" min={0.5} max={8} step={0.5}
+            <input className="input" type="number" min={0.5} max={8} step={0.5} data-tip={tip.scale}
               value={scale} disabled={running}
               onChange={e => setScale(Number(e.target.value))}
               onBlur={() => setScale(s => clampScale(s))} />
           </label>
-          <label className="collection-export-check">
+          <label className="collection-export-check" data-tip={tip.exportPageNumbers}>
             <input type="checkbox" checked={pageNumbers} disabled={running}
               onChange={e => setPageNumbers(e.target.checked)} />
             {t.showcase.pageNumbers}
           </label>
-          <label className="collection-export-check">
+          <label className="collection-export-check" data-tip={tip.titlePages}>
             <input type="checkbox" checked={titlePages} disabled={running}
               onChange={e => setTitlePages(e.target.checked)} />
             {t.showcase.episodeTitlePages}
           </label>
-          <label className="collection-export-check">
+          <label className="collection-export-check" data-tip={tip.exportCover}>
             <input type="checkbox" checked={cover} disabled={running}
               onChange={e => setCover(e.target.checked)} />
             {t.showcase.collectionCover}
@@ -162,7 +164,7 @@ export function CollectionExportDialog({ collection, onClose }: {
 
         <div className="flex gap-sm mt-lg justify-end">
           <button className="btn btn-secondary" onClick={onClose}>{t.showcase.close}</button>
-          <button className="btn btn-primary" onClick={start} disabled={running}>
+          <button className="btn btn-primary" onClick={start} disabled={running} data-tip={tip.startExport}>
             <FiDownload size={14} /> {t.showcase.startExport}
           </button>
         </div>

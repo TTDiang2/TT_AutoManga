@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FiSave, FiRefreshCw, FiCheck, FiEye, FiEyeOff, FiX } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { AppSettings, ContentRating } from '../../types';
 import { changePassword, fetchAuthStatus, fetchGoogleConfig, logout, logoutAll, setAllowedEmails, setPasswordLogin } from '../../auth';
 import type { AuthStatus, GoogleConfig } from '../../auth';
@@ -33,6 +34,7 @@ function errorText(body: unknown, status: number): string {
 export function SettingsTab() {
   const { settings, setSettings } = useProjectStore();
   const { t } = useTranslation();
+  const tip = useTips().settings;
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings);
   const [showApiKey, setShowApiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -159,10 +161,10 @@ export function SettingsTab() {
           </p>
         </div>
         <div className="flex gap-sm">
-          <button className="btn btn-secondary" onClick={handleReset}>
+          <button data-tip={tip.reset} className="btn btn-secondary" onClick={handleReset}>
             <FiRefreshCw size={14} /> Reset to Defaults
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={isSaving} data-tour="settings-save">
+          <button data-tip={tip.save} className="btn btn-primary" onClick={handleSave} disabled={isSaving} data-tour="settings-save">
             {saveSuccess ? <FiCheck size={14} /> : <FiSave size={14} />}
             {saveSuccess ? 'Saved!' : 'Save Settings'}
           </button>
@@ -179,7 +181,7 @@ export function SettingsTab() {
           
           <div className="form-group">
             <label>API Endpoint</label>
-            <input
+            <input data-tip={tip.endpoint}
               className="input"
               type="text"
               value={localSettings.api.endpoint}
@@ -194,7 +196,7 @@ export function SettingsTab() {
           <div className="form-group">
             <label>API Key</label>
             <div className="input-with-icon">
-              <input
+              <input data-tip={tip.apiKey}
                 className="input"
                 type={showApiKey ? 'text' : 'password'}
                 value={localSettings.api.api_key}
@@ -204,7 +206,7 @@ export function SettingsTab() {
                 })}
                 placeholder="sk-..."
               />
-              <button 
+              <button data-tip={tip.showKey} aria-label={tip.showKey} 
                 className="icon-btn"
                 onClick={() => setShowApiKey(!showApiKey)}
               >
@@ -216,7 +218,7 @@ export function SettingsTab() {
           <div className="form-row">
             <div className="form-group">
               <label>{t.settings.model}</label>
-              <input
+              <input data-tip={tip.model}
                 className="input"
                 type="text"
                 value={localSettings.api.model}
@@ -232,7 +234,7 @@ export function SettingsTab() {
             <div className="form-group">
               <label>{t.settings.thinking}</label>
               <label className="toggle-switch">
-                <input
+                <input data-tip={tip.thinking}
                   type="checkbox"
                   checked={localSettings.api.thinking}
                   onChange={(e) => setLocalSettings({
@@ -247,7 +249,7 @@ export function SettingsTab() {
 
             <div className="form-group">
               <label>Temperature</label>
-              <input
+              <input data-tip={tip.temperature}
                 className="input"
                 type="number"
                 min={0}
@@ -259,7 +261,7 @@ export function SettingsTab() {
                   api: { ...localSettings.api, temperature: parseFloat(e.target.value) }
                 })}
               />
-              <input 
+              <input data-tip={tip.temperature} 
                 type="range" 
                 className="slider mt-sm"
                 min={0}
@@ -275,7 +277,7 @@ export function SettingsTab() {
 
             <div className="form-group">
               <label>Max Tokens</label>
-              <input
+              <input data-tip={tip.maxTokens}
                 className="input"
                 type="number"
                 min={100}
@@ -293,7 +295,7 @@ export function SettingsTab() {
           <div className="form-group mt-md">
             <label>{t.settings.storyboardSystemPrompt}</label>
             <div className="flex gap-sm items-start">
-              <select
+              <select data-tip={tip.storyboardPreset}
                 className="input select"
                 style={{ minWidth: '160px' }}
                 value={localSettings.api.storyboardPresets?.find(p => p.content === localSettings.api.storyboard_system_prompt)?.id || ''}
@@ -312,7 +314,7 @@ export function SettingsTab() {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <button
+              <button data-tip={tip.storyboardPresetSave}
                 className="btn btn-secondary"
                 style={{ flexShrink: 0, padding: '6px 12px' }}
                 onClick={() => {
@@ -328,7 +330,7 @@ export function SettingsTab() {
                 Save Current as Preset
               </button>
               {(localSettings.api.storyboardPresets || []).length > 0 && (
-                <button
+                <button data-tip={tip.storyboardPresetDelete}
                   className="btn btn-ghost"
                   style={{ color: '#ef4444', flexShrink: 0 }}
                   onClick={() => {
@@ -342,7 +344,7 @@ export function SettingsTab() {
                 </button>
               )}
             </div>
-            <textarea
+            <textarea data-tip={tip.storyboardSystemPrompt}
               className="input textarea"
               value={localSettings.api.storyboard_system_prompt || ''}
               onChange={(e) => setLocalSettings({
@@ -357,7 +359,7 @@ export function SettingsTab() {
           <div className="form-group">
             <label>{t.settings.enhanceSystemPrompt}</label>
             <div className="flex gap-sm items-start">
-              <select
+              <select data-tip={tip.promptPreset}
                 className="input select"
                 style={{ minWidth: '160px' }}
                 value={localSettings.api.promptPresets?.find(p => p.content === localSettings.api.prompt_system_prompt)?.id || ''}
@@ -376,7 +378,7 @@ export function SettingsTab() {
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-              <button
+              <button data-tip={tip.promptPresetSave}
                 className="btn btn-secondary"
                 style={{ flexShrink: 0, padding: '6px 12px' }}
                 onClick={() => {
@@ -392,7 +394,7 @@ export function SettingsTab() {
                 Save Current as Preset
               </button>
               {(localSettings.api.promptPresets || []).length > 0 && (
-                <button
+                <button data-tip={tip.promptPresetDelete}
                   className="btn btn-ghost"
                   style={{ color: '#ef4444', flexShrink: 0 }}
                   onClick={() => {
@@ -406,7 +408,7 @@ export function SettingsTab() {
                 </button>
               )}
             </div>
-            <textarea
+            <textarea data-tip={tip.promptSystemPrompt}
               className="input textarea"
               value={localSettings.api.prompt_system_prompt || ''}
               onChange={(e) => setLocalSettings({
@@ -428,7 +430,7 @@ export function SettingsTab() {
           <div className="form-group">
             <label>{t.settings.address}</label>
             <div className="flex gap-sm">
-              <input
+              <input data-tip={tip.swarmAddress}
                 className="input"
                 type="text"
                 value={localSettings.swarmui.address}
@@ -438,7 +440,7 @@ export function SettingsTab() {
                 })}
                 placeholder="http://127.0.0.1:7801"
               />
-              <button 
+              <button data-tip={tip.swarmTest} 
                 className="btn btn-secondary"
                 onClick={testSwarmUIConnection}
                 disabled={isTestingSwarmUI}
@@ -459,7 +461,7 @@ export function SettingsTab() {
           <div className="form-group">
             <label>Preset</label>
             <div className="flex gap-sm items-center">
-              <select
+              <select data-tip={tip.swarmPreset}
                 className="input select"
                 style={{ minWidth: '200px' }}
                 value={localSettings.swarmui.activePresetId}
@@ -497,7 +499,7 @@ export function SettingsTab() {
                   <option key={preset.id} value={preset.id}>{preset.name}</option>
                 ))}
               </select>
-              <button
+              <button data-tip={tip.swarmPresetSave}
                 className="btn btn-secondary"
                 onClick={() => {
                   const name = prompt('Preset name:');
@@ -527,7 +529,7 @@ export function SettingsTab() {
                 Save Current as Preset
               </button>
               {localSettings.swarmui.activePresetId && (
-                <button
+                <button data-tip={tip.swarmPresetDelete}
                   className="btn btn-ghost"
                   onClick={() => {
                     setLocalSettings({
@@ -549,7 +551,7 @@ export function SettingsTab() {
           <div className="form-row">
             <div className="form-group">
               <label>Model (SD Model)</label>
-              <input
+              <input data-tip={tip.swarmModel}
                 className="input"
                 type="text"
                 value={localSettings.swarmui.currentModel}
@@ -562,7 +564,7 @@ export function SettingsTab() {
             </div>
             <div className="form-group">
               <label>Sampler</label>
-              <select
+              <select data-tip={tip.sampler}
                 className="input select"
                 value={localSettings.swarmui.currentSamplerName}
                 onChange={(e) => setLocalSettings({
@@ -583,7 +585,7 @@ export function SettingsTab() {
           <div className="form-row">
             <div className="form-group">
               <label>Steps</label>
-              <input
+              <input data-tip={tip.steps}
                 className="input"
                 type="number"
                 min={1}
@@ -597,7 +599,7 @@ export function SettingsTab() {
             </div>
             <div className="form-group">
               <label>CFG Scale</label>
-              <input
+              <input data-tip={tip.cfg}
                 className="input"
                 type="number"
                 min={1}
@@ -625,7 +627,7 @@ export function SettingsTab() {
                 { label: '2:3 (512x768)', w: 512, h: 768 },
                 { label: '16:9 (1920x1080)', w: 1920, h: 1080 },
               ].map(ratio => (
-                <button
+                <button data-tip={tip.aspect}
                   key={ratio.label}
                   className={`btn btn-sm ${localSettings.swarmui.currentWidth === ratio.w && localSettings.swarmui.currentHeight === ratio.h ? 'btn-primary' : 'btn-secondary'}`}
                   onClick={() => setLocalSettings({
@@ -644,7 +646,7 @@ export function SettingsTab() {
             <div className="lora-list">
               {(localSettings.swarmui.currentLoras || []).map((lora, idx) => (
                 <div key={idx} className="lora-item flex items-center gap-sm mb-sm">
-                  <input
+                  <input data-tip={tip.loraName}
                     className="input"
                     type="text"
                     value={lora.name}
@@ -658,7 +660,7 @@ export function SettingsTab() {
                     }}
                     placeholder="lora_name.safetensors"
                   />
-                  <input
+                  <input data-tip={tip.loraWeight}
                     className="input"
                     type="number"
                     min={-2}
@@ -675,7 +677,7 @@ export function SettingsTab() {
                     }}
                     style={{ width: '80px' }}
                   />
-                  <button
+                  <button data-tip={tip.loraRemove} aria-label={tip.loraRemove}
                     className="btn btn-ghost"
                     onClick={() => {
                       const newLoras = (localSettings.swarmui.currentLoras || []).filter((_, i) => i !== idx);
@@ -689,7 +691,7 @@ export function SettingsTab() {
                   </button>
                 </div>
               ))}
-              <button
+              <button data-tip={tip.loraAdd}
                 className="btn btn-secondary"
                 onClick={() => {
                   setLocalSettings({
@@ -710,7 +712,7 @@ export function SettingsTab() {
 
           <div className="form-group mt-md">
             <label>Prompt Suffix</label>
-            <textarea
+            <textarea data-tip={tip.promptSuffix}
               className="input textarea"
               rows={3}
               value={localSettings.swarmui.promptSuffix}
@@ -739,7 +741,7 @@ export function SettingsTab() {
           <div className="form-row">
             <div className="form-group">
               <label>Language / 语言</label>
-              <select
+              <select data-tip={tip.language}
                 className="input select"
                 value={localSettings.language}
                 onChange={(e) => setLocalSettings({
@@ -754,7 +756,7 @@ export function SettingsTab() {
 
             <div className="form-group">
               <label>Default Detail Level</label>
-              <input
+              <input data-tip={tip.detailLevel}
                 className="input"
                 type="number"
                 min={1}
@@ -765,7 +767,7 @@ export function SettingsTab() {
                   defaults: { ...localSettings.defaults, detailLevel: parseInt(e.target.value) }
                 })}
               />
-              <input 
+              <input data-tip={tip.detailLevel} 
                 type="range" 
                 className="slider mt-sm"
                 min={1}
@@ -784,7 +786,7 @@ export function SettingsTab() {
 
             <div className="form-group">
               <label>Export Quality</label>
-              <select
+              <select data-tip={tip.exportQuality}
                 className="input select"
                 value={localSettings.defaults.exportQuality}
                 onChange={(e) => setLocalSettings({
@@ -799,7 +801,7 @@ export function SettingsTab() {
 
             <div className="form-group">
               <label>Auto-save Interval (seconds)</label>
-              <input
+              <input data-tip={tip.autoSave}
                 className="input"
                 type="number"
                 min={30}
@@ -822,7 +824,7 @@ export function SettingsTab() {
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="content-default-rating">{t.settings.defaultRating}</label>
-                <select
+                <select data-tip={tip.defaultRating}
                   id="content-default-rating"
                   className="input select"
                   value={defaultRating}
@@ -958,6 +960,7 @@ export function SettingsTab() {
 /** Settings → Access: the login gate (backend/core/auth.py). */
 function AccessSection() {
   const { t } = useTranslation();
+  const tip = useTips().settings;
   const a = t.auth;
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [current, setCurrent] = useState('');
@@ -1027,34 +1030,34 @@ function AccessSection() {
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="access-current">{a.currentPassword}</label>
-                <input id="access-current" className="input" type="password"
+                <input data-tip={tip.currentPassword} id="access-current" className="input" type="password"
                        autoComplete="current-password" value={current} required
                        onChange={(e) => setCurrent(e.target.value)} />
               </div>
               <div className="form-group">
                 <label htmlFor="access-new">{a.newPassword}</label>
-                <input id="access-new" className="input" type="password"
+                <input data-tip={tip.newPassword} id="access-new" className="input" type="password"
                        autoComplete="new-password" minLength={8} value={next} required
                        onChange={(e) => setNext(e.target.value)} />
               </div>
               <div className="form-group">
                 <label htmlFor="access-confirm">{a.confirmPassword}</label>
-                <input id="access-confirm" className="input" type="password"
+                <input data-tip={tip.confirmPassword} id="access-confirm" className="input" type="password"
                        autoComplete="new-password" minLength={8} value={confirmNext} required
                        onChange={(e) => setConfirmNext(e.target.value)} />
               </div>
             </div>
             <div className="access-actions">
-              <button type="submit" className="btn btn-primary"
+              <button data-tip={tip.changePassword} type="submit" className="btn btn-primary"
                       disabled={busy || !current || !next || !confirmNext}>
                 {a.changePassword}
               </button>
               {!status.local && status.authenticated && (
-                <button type="button" className="btn btn-secondary" onClick={signOut}>
+                <button data-tip={tip.signOut} type="button" className="btn btn-secondary" onClick={signOut}>
                   {a.signOut}
                 </button>
               )}
-              <button type="button" className="btn btn-secondary" onClick={signOutAll}>
+              <button data-tip={tip.signOutAll} type="button" className="btn btn-secondary" onClick={signOutAll}>
                 {a.signOutAll}
               </button>
             </div>
@@ -1115,6 +1118,7 @@ const EMAIL_RE = /^[^@\s<>()[\],;:"]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
     password-login switch (backend/api/auth_google.py; docs/GOOGLE_LOGIN.md). */
 function GoogleAccess({ onChange }: { onChange: () => void }) {
   const { t } = useTranslation();
+  const tip = useTips().settings;
   const a = t.auth;
   const [cfg, setCfg] = useState<GoogleConfig | null>(null);
   const [draft, setDraft] = useState('');
@@ -1187,8 +1191,8 @@ function GoogleAccess({ onChange }: { onChange: () => void }) {
                 {cfg.allowedEmails.map((email) => (
                   <li key={email}>
                     <span>{email}</span>
-                    <button type="button" className="btn btn-ghost btn-icon" disabled={busy}
-                            title={fill(a.removeEmail, { email })} aria-label={fill(a.removeEmail, { email })}
+                    <button data-tip={tip.removeEmail} type="button" className="btn btn-ghost btn-icon" disabled={busy}
+                            aria-label={fill(a.removeEmail, { email })}
                             onClick={() => saveEmails(cfg.allowedEmails.filter((x) => x !== email))}>
                       <FiX size={14} />
                     </button>
@@ -1197,10 +1201,10 @@ function GoogleAccess({ onChange }: { onChange: () => void }) {
               </ul>
             )}
           <form className="access-email-add" onSubmit={add}>
-            <input id="access-email" className="input" type="email" autoComplete="off"
+            <input data-tip={tip.addEmailField} id="access-email" className="input" type="email" autoComplete="off"
                    placeholder={a.emailPlaceholder} value={draft}
                    onChange={(e) => setDraft(e.target.value)} />
-            <button type="submit" className="btn btn-secondary" disabled={busy || !draft.trim()}>
+            <button data-tip={tip.addEmail} type="submit" className="btn btn-secondary" disabled={busy || !draft.trim()}>
               {a.addEmail}
             </button>
           </form>
@@ -1210,7 +1214,7 @@ function GoogleAccess({ onChange }: { onChange: () => void }) {
       {cfg.password && (
         <div className="access-toggle-row">
           <label className="toggle-switch">
-            <input type="checkbox" checked={cfg.passwordLogin} disabled={busy}
+            <input data-tip={tip.passwordLogin} type="checkbox" checked={cfg.passwordLogin} disabled={busy}
                    aria-label={a.passwordLoginToggle}
                    onChange={(e) => togglePassword(e.target.checked)} />
             <span className="toggle-slider"></span>

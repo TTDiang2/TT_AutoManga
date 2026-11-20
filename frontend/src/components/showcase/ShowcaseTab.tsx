@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { FiGrid, FiPlus, FiTrash2, FiFolder, FiEye, FiEdit2, FiChevronLeft, FiChevronRight, FiDownload, FiLayers } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { renderPageToImage } from '../composer/pageRenderer';
 import type { Project, ComposerPage, ContentRating } from '../../types';
 import { CollectionsView } from './CollectionsView';
@@ -12,6 +13,7 @@ import './collections.css';
 export function ShowcaseTab() {
   const { setCurrentProject, setActiveTab, setComposerProjectId, loadProjectWithImages } = useProjectStore();
   const { t } = useTranslation();
+  const tip = useTips().showcase;
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [mode, setMode] = useState<'browse' | 'viewing' | 'editing'>('browse');
@@ -228,6 +230,7 @@ export function ShowcaseTab() {
             <button
               className="btn btn-secondary"
               onClick={() => { setMode('browse'); setActiveProject(null); }}
+              data-tip={tip.allComics}
             >
               <FiFolder size={14} /> All Comics
             </button>
@@ -235,11 +238,11 @@ export function ShowcaseTab() {
           {mode === 'browse' && (
             <div className="showcase-view-toggle" role="tablist" data-tour="showcase-view">
               <button role="tab" aria-selected={view === 'comics'} className={view === 'comics' ? 'active' : ''}
-                onClick={() => setView('comics')}>
+                onClick={() => setView('comics')} data-tip={tip.viewComics}>
                 <FiGrid size={13} /> {t.showcase.comics}
               </button>
               <button role="tab" aria-selected={view === 'collections'} className={view === 'collections' ? 'active' : ''}
-                onClick={() => setView('collections')}>
+                onClick={() => setView('collections')} data-tip={tip.viewCollections}>
                 <FiLayers size={13} /> {t.showcase.collections}
               </button>
             </div>
@@ -248,6 +251,7 @@ export function ShowcaseTab() {
             <label
               className="flex items-center gap-xs text-sm"
               style={{ marginRight: 8, cursor: 'pointer', userSelect: 'none' }}
+              data-tip={tip.pageNumbers}
             >
               <input
                 type="checkbox"
@@ -258,7 +262,7 @@ export function ShowcaseTab() {
             </label>
           )}
           {mode === 'browse' && view === 'comics' && (
-            <button className="btn btn-secondary" onClick={() => setShowNewModal(true)} data-tour="showcase-new">
+            <button className="btn btn-secondary" onClick={() => setShowNewModal(true)} data-tour="showcase-new" data-tip={tip.newComic}>
               <FiPlus size={14} /> New Comic
             </button>
           )}
@@ -303,7 +307,7 @@ export function ShowcaseTab() {
                 <select
                   className="input select rating-select"
                   aria-label={t.showcase.ratingLabel}
-                  title={t.showcase.ratingLabel}
+                  data-tip={tip.rating}
                   value={own === 'mature' || own === 'sfw' ? own : ''}
                   onChange={e => handleSetRating(project, e.target.value)}
                 >
@@ -317,21 +321,24 @@ export function ShowcaseTab() {
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleLoadProject(project.id, 'view')}
-                  title="View"
+                  aria-label={tip.view}
+                  data-tip={tip.view}
                 >
                   <FiEye size={14} />
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleLoadProject(project.id, 'edit')}
-                  title="Edit"
+                  aria-label={tip.edit}
+                  data-tip={tip.edit}
                 >
                   <FiEdit2 size={14} />
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleExportProject(project.id)}
-                  title="Export PDF"
+                  aria-label={tip.exportPdf}
+                  data-tip={tip.exportPdf}
                   disabled={exportingId === project.id}
                 >
                   <FiDownload size={14} />
@@ -339,7 +346,8 @@ export function ShowcaseTab() {
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => handleDeleteProject(project.id)}
-                  title="Delete"
+                  aria-label={tip.delete}
+                  data-tip={tip.delete}
                 >
                   <FiTrash2 size={14} />
                 </button>
@@ -367,13 +375,14 @@ export function ShowcaseTab() {
               placeholder={t.showcase.projectName}
               value={newProjectName}
               onChange={(e) => setNewProjectName(e.target.value)}
+              data-tip={tip.projectName}
               autoFocus
             />
             <div className="flex gap-sm mt-lg justify-end">
               <button className="btn btn-secondary" onClick={() => setShowNewModal(false)}>
                 {t.showcase.cancel}
               </button>
-              <button className="btn btn-primary" onClick={handleCreateProject}>
+              <button className="btn btn-primary" onClick={handleCreateProject} data-tip={tip.create}>
                 {t.showcase.create}
               </button>
             </div>
@@ -525,6 +534,7 @@ function ComicReader({ project, page, onPageChange, onBack, onEdit }: {
   onBack: () => void;
   onEdit: () => void;
 }) {
+  const tip = useTips().showcase;
   const pages: ComposerPage[] = project.composerPages || [];
   const total = pages.length;
 
@@ -557,17 +567,17 @@ function ComicReader({ project, page, onPageChange, onBack, onEdit }: {
         ) : null)
       )}
       <div className="comic-reader-nav">
-        <button className="btn btn-secondary" onClick={prev} disabled={page === 0}>
+        <button className="btn btn-secondary" onClick={prev} disabled={page === 0} data-tip={tip.readerPrev}>
           <FiChevronLeft size={16} /> Previous
         </button>
         <span>{total === 0 ? 0 : page + 1} / {total}</span>
-        <button className="btn btn-secondary" onClick={next} disabled={page >= total - 1}>
+        <button className="btn btn-secondary" onClick={next} disabled={page >= total - 1} data-tip={tip.readerNext}>
           Next <FiChevronRight size={16} />
         </button>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-secondary" onClick={onBack}>Back</button>
-        <button className="btn btn-primary" onClick={onEdit}>Edit in Composer</button>
+        <button className="btn btn-secondary" onClick={onBack} data-tip={tip.readerBack}>Back</button>
+        <button className="btn btn-primary" onClick={onEdit} data-tip={tip.readerEdit}>Edit in Composer</button>
       </div>
     </div>
   );

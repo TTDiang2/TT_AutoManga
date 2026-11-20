@@ -20,6 +20,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { Project } from '../../types';
 import { CollectionExportDialog } from './CollectionExportDialog';
 import { MatureCover } from './MatureCover';
@@ -53,6 +54,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
   onOpen: (id: string | null) => void;
 }) {
   const { t } = useTranslation();
+  const tip = useTips().showcase;
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -162,7 +164,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
   const toastEl = toast && (
     <div className={`collection-toast${toast.error ? ' error' : ''}`} role="status">
       <span>{toast.text}</span>
-      <button className="btn btn-ghost btn-sm" onClick={() => setToast(null)}><FiX size={14} /></button>
+      <button className="btn btn-ghost btn-sm" onClick={() => setToast(null)} aria-label={tip.dismiss} data-tip={tip.dismiss}><FiX size={14} /></button>
     </div>
   );
 
@@ -176,6 +178,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
           value={nameModal.name}
           onChange={e => setNameModal({ ...nameModal, name: e.target.value })}
           onKeyDown={e => { if (e.key === 'Enter') void saveNameModal(); }}
+          data-tip={tip.collectionName}
           autoFocus
         />
         <textarea
@@ -184,10 +187,11 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
           placeholder={t.showcase.collectionDescription}
           value={nameModal.description}
           onChange={e => setNameModal({ ...nameModal, description: e.target.value })}
+          data-tip={tip.collectionDescription}
         />
         <div className="flex gap-sm mt-lg justify-end">
           <button className="btn btn-secondary" onClick={() => setNameModal(null)}>{t.showcase.cancel}</button>
-          <button className="btn btn-primary" onClick={saveNameModal} disabled={!nameModal.name.trim()}>
+          <button className="btn btn-primary" onClick={saveNameModal} disabled={!nameModal.name.trim()} data-tip={tip.saveCollection}>
             {nameModal.mode === 'new' ? t.showcase.create : t.showcase.save}
           </button>
         </div>
@@ -200,7 +204,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
     return (
       <div className="collection-detail">
         <div className="collection-detail-head">
-          <button className="btn btn-secondary btn-sm" onClick={() => onOpen(null)}>
+          <button className="btn btn-secondary btn-sm" onClick={() => onOpen(null)} data-tip={tip.allCollections}>
             <FiChevronLeft size={14} /> {t.showcase.allCollections}
           </button>
           <div className="collection-detail-title">
@@ -214,18 +218,18 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
             {open.description && <p className="text-sm text-muted mt-sm">{open.description}</p>}
           </div>
           <div className="flex gap-sm">
-            <button className="btn btn-secondary btn-sm" onClick={() => setPicker([])}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setPicker([])} data-tip={tip.addEpisodes}>
               <FiPlus size={14} /> {t.showcase.addEpisodes}
             </button>
-            <button className="btn btn-secondary btn-sm"
+            <button className="btn btn-secondary btn-sm" data-tip={tip.editCollection}
               onClick={() => setNameModal({ mode: 'edit', name: open.name, description: open.description || '' })}>
               <FiEdit2 size={14} /> {t.showcase.editCollection}
             </button>
-            <button className="btn btn-primary btn-sm" onClick={() => setExporting(open)}
+            <button className="btn btn-primary btn-sm" onClick={() => setExporting(open)} data-tip={tip.exportCollection}
               disabled={open.episodes.every(e => e.pages === 0)}>
               <FiDownload size={14} /> {t.showcase.exportCollection}
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(open)} title={t.showcase.deleteCollection}>
+            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(open)} aria-label={t.showcase.deleteCollection} data-tip={tip.deleteCollection}>
               <FiTrash2 size={14} />
             </button>
           </div>
@@ -255,7 +259,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
               ) : (
                 <div className="collection-picker-list mt-md">
                   {available.map(p => (
-                    <label key={p.id} className="collection-picker-item">
+                    <label key={p.id} className="collection-picker-item" data-tip={tip.pickProject}>
                       <input
                         type="checkbox"
                         checked={picker.includes(p.id)}
@@ -272,7 +276,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
               )}
               <div className="flex gap-sm mt-lg justify-end">
                 <button className="btn btn-secondary" onClick={() => setPicker(null)}>{t.showcase.cancel}</button>
-                <button className="btn btn-primary" disabled={picker.length === 0}
+                <button className="btn btn-primary" disabled={picker.length === 0} data-tip={tip.addPicked}
                   onClick={() => {
                     void patch(open.id, { projectIds: addEpisodes(episodeIds(open), picker) });
                     setPicker(null);
@@ -293,10 +297,10 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
   return (
     <div className="collections-view">
       <div className="flex gap-sm mb-lg">
-        <button className="btn btn-secondary" onClick={() => setNameModal({ mode: 'new', name: '', description: '' })}>
+        <button className="btn btn-secondary" onClick={() => setNameModal({ mode: 'new', name: '', description: '' })} data-tip={tip.newCollection}>
           <FiPlus size={14} /> {t.showcase.newCollection}
         </button>
-        <button className="btn btn-secondary" onClick={handleAutoGroup}>
+        <button className="btn btn-secondary" onClick={handleAutoGroup} data-tip={tip.autoGroup}>
           <FiZap size={14} /> {t.showcase.autoGroup}
         </button>
       </div>
@@ -310,7 +314,7 @@ export function CollectionsView({ projects, openId, onOpen, onView, onEdit, onEx
       ) : (
         <div className="collections-grid">
           {collections.map(col => (
-            <button key={col.id} className="collection-card card" onClick={() => onOpen(col.id)}>
+            <button key={col.id} className="collection-card card" onClick={() => onOpen(col.id)} data-tip={tip.openCollection}>
               <div className="collection-strip">
                 {col.episodes.length === 0 ? (
                   <div className="cover-placeholder"><FiGrid size={24} /></div>
@@ -399,6 +403,7 @@ function EpisodeRow({ ep, index, count, collectionName, isCover, onMove, onRemov
   onSetCover: () => void;
 }) {
   const { t } = useTranslation();
+  const tip = useTips().showcase;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: ep.id });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -407,7 +412,7 @@ function EpisodeRow({ ep, index, count, collectionName, isCover, onMove, onRemov
   };
   return (
     <li ref={setNodeRef} style={style} className="episode-row card">
-      <span className="drag-handle episode-handle" title={t.showcase.dragToReorder} {...attributes} {...listeners}>
+      <span className="drag-handle episode-handle" data-tip={tip.dragEpisode} {...attributes} {...listeners}>
         <FiMove size={14} />
       </span>
       <span className="episode-index">{index + 1}</span>
@@ -426,26 +431,26 @@ function EpisodeRow({ ep, index, count, collectionName, isCover, onMove, onRemov
         </div>
       </div>
       <div className="episode-actions">
-        <button className="btn btn-ghost btn-sm" onClick={() => onMove(index - 1)} disabled={index === 0} title={t.showcase.moveUp}>
+        <button className="btn btn-ghost btn-sm" onClick={() => onMove(index - 1)} disabled={index === 0} aria-label={t.showcase.moveUp} data-tip={tip.moveUp}>
           <FiArrowUp size={14} />
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={() => onMove(index + 1)} disabled={index === count - 1} title={t.showcase.moveDown}>
+        <button className="btn btn-ghost btn-sm" onClick={() => onMove(index + 1)} disabled={index === count - 1} aria-label={t.showcase.moveDown} data-tip={tip.moveDown}>
           <FiArrowDown size={14} />
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={onSetCover} disabled={isCover || ep.pages === 0} title={t.showcase.setCover}>
+        <button className="btn btn-ghost btn-sm" onClick={onSetCover} disabled={isCover || ep.pages === 0} aria-label={t.showcase.setCover} data-tip={tip.setCover}>
           <FiStar size={14} />
         </button>
-        <button className="btn btn-secondary btn-sm" onClick={() => onView(ep.id)} title={t.showcase.view}>
+        <button className="btn btn-secondary btn-sm" onClick={() => onView(ep.id)} aria-label={t.showcase.view} data-tip={tip.viewEpisode}>
           <FiEye size={14} />
         </button>
-        <button className="btn btn-secondary btn-sm" onClick={() => onEdit(ep.id)} title={t.showcase.edit}>
+        <button className="btn btn-secondary btn-sm" onClick={() => onEdit(ep.id)} aria-label={t.showcase.edit} data-tip={tip.editEpisode}>
           <FiEdit2 size={14} />
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => onExport(ep.id)}
-          disabled={exportingId === ep.id} title={t.showcase.exportEpisode}>
+          disabled={exportingId === ep.id} aria-label={t.showcase.exportEpisode} data-tip={tip.exportEpisode}>
           <FiDownload size={14} />
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={onRemove} title={t.showcase.removeEpisode}>
+        <button className="btn btn-ghost btn-sm" onClick={onRemove} aria-label={t.showcase.removeEpisode} data-tip={tip.removeEpisode}>
           <FiX size={14} />
         </button>
       </div>
