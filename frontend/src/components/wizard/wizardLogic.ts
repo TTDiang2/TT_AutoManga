@@ -1,4 +1,5 @@
 import type { Panel } from '../../types';
+import { tagsText } from '../prompt/promptTags';
 
 /** The guided "Create" flow, in order. */
 export const STEPS = ['story', 'panels', 'look', 'art', 'pages', 'finish'] as const;
@@ -117,7 +118,7 @@ export function castFromPanels(panels: Pick<Panel, 'characters'>[]): string[] {
 export function promptForPanel(panel: Panel, format: PromptFormat): string {
   const enhanced = format === 'prose'
     ? panel.prompt?.turbo
-    : (panel.prompt?.tags || []).map(t => t.trim()).filter(Boolean).join(', ');
+    : tagsText(panel.prompt?.tags);
   return (enhanced || '').trim() || panel.scene.trim();
 }
 

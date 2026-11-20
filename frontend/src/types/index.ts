@@ -11,7 +11,8 @@ export interface Panel {
 
 export interface PromptData {
   turbo?: string;
-  tags?: string[];
+  /** a list, or one comma-separated string in Comics conversions: read with tagsText() */
+  tags?: string[] | string;
   enhanced?: string;
   negativePrompt?: string;
   seed?: number;

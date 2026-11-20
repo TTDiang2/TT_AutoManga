@@ -5,6 +5,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useTips } from '../../hooks/useTips';
 import type { TranslationKeys } from '../../i18n';
 import type { Panel } from '../../types';
+import { tagsText } from '../prompt/promptTags';
 
 type ImageStatus = 'empty' | 'pending' | 'ready' | 'error';
 
@@ -394,9 +395,8 @@ export function AssetTab() {
   };
 
   const getPromptForPanel = (panel: Panel): string => {
-    if (promptMode === 'tags' && panel.prompt.tags && panel.prompt.tags.length > 0) {
-      return panel.prompt.tags.join(', ');
-    }
+    const tags = tagsText(panel.prompt.tags);
+    if (promptMode === 'tags' && tags) return tags;
     return panel.prompt.turbo || panel.scene;
   };
 

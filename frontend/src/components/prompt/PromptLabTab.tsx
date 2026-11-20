@@ -4,6 +4,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useTips } from '../../hooks/useTips';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import type { Panel } from '../../types';
+import { tagsText } from './promptTags';
 
 // response shapes of /api/prompt/enhance and /api/prompt/batch-enhance
 interface EnhanceResponse {
@@ -67,7 +68,7 @@ export function PromptLabTab() {
       if (promptMode === 'turbo') {
         setOutputText(panel.prompt.turbo || '');
       } else {
-        setOutputText(panel.prompt.tags?.join(', ') || '');
+        setOutputText(tagsText(panel.prompt.tags));
       }
       setNegativePrompt(panel.prompt.negativePrompt || '');
       setSeed(panel.prompt.seed != null ? String(panel.prompt.seed) : '');
@@ -487,7 +488,7 @@ export function PromptLabTab() {
                 <p className="text-sm text-secondary">
                   {promptMode === 'turbo'
                   ? (panel.prompt.turbo || t.prompt.noPromptYet).substring(0, 100) + '...'
-                  : (panel.prompt.tags?.join(', ') || t.prompt.noTagsYet).substring(0, 100) + '...'
+                  : (tagsText(panel.prompt.tags) || t.prompt.noTagsYet).substring(0, 100) + '...'
                 }
               </p>
             </div>
