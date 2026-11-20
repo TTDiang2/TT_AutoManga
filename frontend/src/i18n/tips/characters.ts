@@ -1,10 +1,82 @@
-// Tooltip text for the characters tab, keyed by control. Shown on hover/keyboard
-// focus by components/tooltip/TooltipLayer via a data-tip attribute.
-// `zh: typeof en` makes the compiler insist both languages have every key.
+// Tooltip text for the Characters tab (CharacterTab + TrainingPanel), keyed by
+// control. Shown on hover/keyboard focus by components/tooltip/TooltipLayer via
+// a data-tip attribute. `zh: typeof en` makes both languages carry every key.
 const en = {
+  // library list
+  newChar: 'Add a new character to the library and open it for editing',
+  templates: 'Show or hide ready-made characters you can start from',
+  useTemplate: 'Add a copy of this template to your library',
+  migrate: 'Move sheet images stored inside the library file into the asset store. Safe to run more than once.',
+  card: 'Open this character',
+  addFromStoryboard: 'Create a library entry for every character named on your storyboard panels',
+  // edit form
+  name: 'The name used on panels. It must match the name in a panel\'s characters list to be applied.',
+  description: 'Notes for you: personality, role, backstory. Not sent to the image model.',
+  appearance: 'How they look, e.g. "white hair, blue eyes, blue kimono". Added to every panel prompt they appear in.',
+  lora: 'A LoRA is a small add-on model trained on this character. Its trigger word and weight are added when they appear.',
+  loraWeight: 'How strongly the LoRA applies. 0.8 is a good start; panels with several characters use 60% of it.',
+  loraTrigger: 'The word the LoRA was trained on. Added to the prompt to activate it; leave empty to use the default.',
+  age: 'Whole years. Under 18, or unknown, keeps every panel with this character SFW, even in Mature projects.',
+  refWeight: 'How strongly the sheet image guides panels where this character is alone (IP-Adapter). Off = not used; 0.5 is a good start.',
+  save: 'Save the changes to the library',
+  saveAsTemplate: 'Save name, description and appearance as a reusable template',
+  cancel: 'Discard the changes',
+  // detail view
+  edit: 'Change name, appearance, LoRA, age and reference settings',
+  remove: 'Delete this character from the library (asks first)',
+  generateSheet: 'Paint a character sheet from the appearance description with SwarmUI. Replaces the current sheet.',
+  uploadSheet: 'Use your own image as this character\'s sheet. Replaces the current sheet.',
+  // LoRA training
+  datasetName: 'Folder name for the training images (letters, numbers, dashes)',
+  trigger: 'A made-up word, e.g. "sfnova", that the trained LoRA will respond to',
+  createDataset: 'Create an empty training set for this character',
+  uploadImages: 'Add images of this character to the training set',
+  importPanels: 'Copy the open project\'s panel images into the training set',
+  genCount: 'How many training images to paint',
+  generateImages: 'Paint training images from the appearance in varied poses, angles and expressions (no LoRA used)',
+  stopGenerating: 'Stop painting after the current image',
+  deleteImage: 'Remove this image from the training set',
+  steps: 'Training length. More steps learn more detail but take longer; 1500 is the usual setting.',
+  start: 'Start training the LoRA on the training machine. Needs at least the minimum number of images.',
+  stop: 'Stop the training job running on the training machine',
+  copy: 'Copy the line that uses this LoRA in a .comic script',
 };
 
 const zh: typeof en = {
+  newChar: '在角色库中新建角色并打开编辑',
+  templates: '显示或隐藏可直接使用的预设角色',
+  useTemplate: '把这个模板复制一份加入角色库',
+  migrate: '把保存在角色库文件里的设定图移到素材库。可以重复运行。',
+  card: '打开这个角色',
+  addFromStoryboard: '为分镜中出现的每个角色在角色库里建一个条目',
+  name: '分镜中使用的名字。必须与分镜人物列表里的名字一致才会生效。',
+  description: '给自己看的备注：性格、身份、背景。不会发送给图像模型。',
+  appearance: '外貌，例如“白发、蓝眼、蓝色和服”。会加入该角色出现的每格提示词。',
+  lora: 'LoRA 是针对这个角色训练的小模型。角色出场时会自动加入它的触发词和权重。',
+  loraWeight: 'LoRA 的强度。0.8 是不错的起点；多人分镜使用其 60%。',
+  loraTrigger: 'LoRA 训练时用的词，加入提示词以激活它；留空则使用默认值。',
+  age: '整数岁数。未满 18 岁或未知时，有这个角色的分镜一律为全年龄，即使项目是成人级。',
+  refWeight: '设定图对该角色单人分镜的引导强度（IP-Adapter）。关闭即不使用；0.5 是不错的起点。',
+  save: '把修改保存到角色库',
+  saveAsTemplate: '把名字、描述和外貌存为可复用的模板',
+  cancel: '放弃修改',
+  edit: '修改名字、外貌、LoRA、年龄和参考设置',
+  remove: '从角色库删除这个角色（会先确认）',
+  generateSheet: '用 SwarmUI 按外貌描述绘制角色设定图，会替换当前设定图。',
+  uploadSheet: '用自己的图片作为角色设定图，会替换当前设定图。',
+  datasetName: '训练图片文件夹的名字（字母、数字、短横线）',
+  trigger: '一个自创的词，例如“sfnova”，训练好的 LoRA 会响应它',
+  createDataset: '为这个角色新建空的训练集',
+  uploadImages: '把这个角色的图片加入训练集',
+  importPanels: '把当前项目的分镜图片复制到训练集',
+  genCount: '要绘制多少张训练图片',
+  generateImages: '按外貌描述绘制不同姿势、角度和表情的训练图片（不使用 LoRA）',
+  stopGenerating: '画完当前这张后停止',
+  deleteImage: '从训练集中删除这张图片',
+  steps: '训练时长。步数越多学到的细节越多，但更慢；通常用 1500。',
+  start: '在训练机上开始训练 LoRA。需要达到最少图片数量。',
+  stop: '停止训练机上正在运行的训练任务',
+  copy: '复制在 .comic 脚本中使用这个 LoRA 的那一行',
 };
 
 export default { en, zh };
