@@ -23,6 +23,7 @@ export const TOURS: Record<TourTab, TourStep[]> = {
   storyboard: [
     { key: 'intro' },
     { key: 'input', target: 'storyboard-input' },
+    { key: 'import', target: 'storyboard-import' },
     { key: 'detail', target: 'storyboard-detail' },
     { key: 'generate', target: 'storyboard-generate' },
     { key: 'panels', target: 'storyboard-panels' },

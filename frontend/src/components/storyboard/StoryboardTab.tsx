@@ -249,6 +249,7 @@ export function StoryboardTab() {
               className="btn btn-secondary"
               onClick={storyImport.open}
               disabled={isGenerating}
+              data-tour="storyboard-import"
               data-tip={tip.importFile}
               style={{ whiteSpace: 'nowrap' }}
             >

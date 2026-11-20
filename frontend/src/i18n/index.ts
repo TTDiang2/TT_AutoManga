@@ -34,6 +34,7 @@ export const translations = {
         storyboard: {
           intro: { title: 'Storyboard', body: 'Turn a piece of story into panels: one picture each, with who is in it and what they say. Every other tab works from these panels.' },
           input: { title: 'Paste your story', body: 'Paste a chapter or a few paragraphs here. The AI reads it and splits it into panels.' },
+          import: { title: 'Or import a file', body: 'Load your story from a .md or .txt file instead, or drop the file on the text box. Chinese GBK and UTF-16 files work too.' },
           detail: { title: 'How many panels', body: 'Slide left for a short summary, right for a detailed, panel-by-panel version.' },
           generate: { title: 'Generate', body: 'Splits the text with the AI model set up in Settings → API. You can edit everything afterwards.' },
           panels: { title: 'Your panels', body: 'Edit a panel to change its scene or dialogue, drag the handle to reorder, or add panels by hand.' },
@@ -840,6 +841,7 @@ export const translations = {
         storyboard: {
           intro: { title: '分镜', body: '把故事拆成分镜：每格一张图，标明人物和台词。其他页面都基于这些分镜工作。' },
           input: { title: '粘贴故事', body: '在这里粘贴一章或几段文字，AI 会把它拆成分镜。' },
+          import: { title: '或导入文件', body: '也可以从 .md 或 .txt 文件载入故事，或把文件直接拖到文本框里。GBK 和 UTF-16 编码的文件同样支持。' },
           detail: { title: '分镜数量', body: '向左更简略，向右更细致、分镜更多。' },
           generate: { title: '生成', body: '使用 设置 → API 中配置的 AI 模型拆分文本，之后可以随意修改。' },
           panels: { title: '你的分镜', body: '编辑分镜的画面或台词，拖动手柄调整顺序，或手动添加分镜。' },
