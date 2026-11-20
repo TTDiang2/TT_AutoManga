@@ -2,6 +2,7 @@ import { useState, useCallback, memo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useComposerStore } from '../../store/composerStore';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { TranslationKeys } from '../../i18n';
 import { DEFAULT_CORNERS } from '../../types';
 import type {
@@ -25,6 +26,7 @@ type CornerKey = 'tl' | 'tr' | 'br' | 'bl';
 // component only when its own store selections change
 export const PropertiesPanel = memo(function PropertiesPanel() {
   const { t } = useTranslation();
+  const tip = useTips().composer;
   const {
     updateElement,
     removeElement,
@@ -113,6 +115,7 @@ export const PropertiesPanel = memo(function PropertiesPanel() {
           )}
           <button
             className="composer-prop-delete"
+            data-tip={tip.deleteElement}
             onClick={() => {
               removeElement(selectedElement.id);
               selectElement(null);
@@ -144,6 +147,7 @@ function PageLevelControls({
   onBorderChange: (width: number) => void;
   onSnap: () => void;
 }) {
+  const tip = useTips().composer;
   const [gapPercent, setGapPercent] = useState(2);
   const [borderWidth, setBorderWidth] = useState(currentBorderWidth);
   const [syncedBorderWidth, setSyncedBorderWidth] = useState(currentBorderWidth);
@@ -169,6 +173,7 @@ function PageLevelControls({
           <button
             className="composer-prop-mini-btn"
             onClick={() => handleBorderChange(1.5)}
+            data-tip={tip.frameBorderDefault}
             style={{ fontSize: 11 }}
           >
             Default
@@ -184,6 +189,7 @@ function PageLevelControls({
             value={borderWidth}
             onChange={e => handleBorderChange(+e.target.value)}
             aria-label="Frame border width"
+            data-tip={tip.frameBorder}
             style={{ width: '70%' }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', width: '30%', textAlign: 'right' }}>
@@ -204,6 +210,7 @@ function PageLevelControls({
         <button
           className="composer-prop-apply-btn"
           onClick={onSnap}
+          data-tip={tip.snapToEdge}
           style={{ width: '100%' }}
         >
           Snap to Edge
@@ -229,6 +236,7 @@ function PageLevelControls({
             value={gapPercent}
             onChange={e => setGapPercent(+e.target.value)}
             aria-label="Auto gap (%)"
+            data-tip={tip.gap}
             style={{ width: '70%' }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-muted)', width: '15%', textAlign: 'right' }}>
@@ -237,6 +245,7 @@ function PageLevelControls({
           <button
             className="composer-prop-apply-btn"
             onClick={() => autoGap(gapPercent)}
+            data-tip={tip.gapApply}
             style={{ width: '15%', padding: 0, fontSize: 11 }}
           >
             Apply
@@ -254,6 +263,7 @@ function PositionSizeProps({
   element: ComposerElement;
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
 }) {
+  const tip = useTips().composer;
   return (
     <div className="composer-prop-group">
       <span className="composer-prop-label">Position &amp; Size</span>
@@ -265,6 +275,7 @@ function PositionSizeProps({
           onChange={e => updateElement(element.id, { x: +e.target.value })}
           placeholder="X"
           aria-label="X (%)"
+          data-tip={tip.x}
           style={{ width: '25%' }}
         />
         <input
@@ -274,6 +285,7 @@ function PositionSizeProps({
           onChange={e => updateElement(element.id, { y: +e.target.value })}
           placeholder="Y"
           aria-label="Y (%)"
+          data-tip={tip.y}
           style={{ width: '25%' }}
         />
         <input
@@ -283,6 +295,7 @@ function PositionSizeProps({
           onChange={e => updateElement(element.id, { width: +e.target.value })}
           placeholder="W"
           aria-label="Width (%)"
+          data-tip={tip.width}
           style={{ width: '25%' }}
         />
         <input
@@ -292,6 +305,7 @@ function PositionSizeProps({
           onChange={e => updateElement(element.id, { height: +e.target.value })}
           placeholder="H"
           aria-label="Height (%)"
+          data-tip={tip.height}
           style={{ width: '25%' }}
         />
       </div>
@@ -303,6 +317,7 @@ function PositionSizeProps({
           onChange={e => updateElement(element.id, { rotation: +e.target.value })}
           placeholder="Rotation"
           aria-label="Rotation (degrees)"
+          data-tip={tip.rotation}
           style={{ width: '50%' }}
         />
       </div>
@@ -321,6 +336,7 @@ function CornerProps({
   element: ComposerElement;
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
 }) {
+  const tip = useTips().composer;
   const corners: QuadCorners = element.corners ?? DEFAULT_CORNERS;
   const labels: Record<CornerKey, string> = {
     tl: 'Top-Left',
@@ -346,7 +362,7 @@ function CornerProps({
         <button
           className="composer-prop-mini-btn"
           onClick={() => updateElement(element.id, { corners: { ...DEFAULT_CORNERS } })}
-          title="Reset to rectangle"
+          data-tip={tip.cornersReset}
         >
           Reset
         </button>
@@ -362,6 +378,7 @@ function CornerProps({
               onChange={e => setCorner(key, 'x', +e.target.value)}
               placeholder="X"
               aria-label={`${labels[key]} corner X (%)`}
+              data-tip={tip.cornerX}
             />
             <input
               className="composer-prop-input"
@@ -370,6 +387,7 @@ function CornerProps({
               onChange={e => setCorner(key, 'y', +e.target.value)}
               placeholder="Y"
               aria-label={`${labels[key]} corner Y (%)`}
+              data-tip={tip.cornerY}
             />
           </div>
         ))}
@@ -385,6 +403,7 @@ function ImageProps({
   element: ImageElement | PageImageElement;
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
 }) {
+  const tip = useTips().composer;
   const openImagePicker = useComposerStore(s => s.openImagePicker);
   const offX = element.imageOffsetX ?? 0;
   const offY = element.imageOffsetY ?? 0;
@@ -403,6 +422,7 @@ function ImageProps({
           className="composer-prop-btn"
           style={{ gap: 4, fontSize: 12, padding: '4px 12px', width: '100%' }}
           onClick={() => openImagePicker({ kind: pickerKind, id: element.id })}
+          data-tip={tip.replaceImage}
         >
           <FiRefreshCw size={12} /> Replace Image
         </button>
@@ -414,6 +434,7 @@ function ImageProps({
         {isOffset && (
           <button
             className="composer-prop-mini-btn"
+            data-tip={tip.offsetReset}
             onClick={() =>
               updateElement(element.id, {
                 imageOffsetX: 0,
@@ -441,7 +462,7 @@ function ImageProps({
           placeholder="Offset X (%)"
           aria-label="Image offset X (%)"
           style={{ width: '50%' }}
-          title="Horizontal image offset (% of frame width)"
+          data-tip={tip.offsetX}
         />
         <input
           className="composer-prop-input"
@@ -458,7 +479,7 @@ function ImageProps({
           placeholder="Offset Y (%)"
           aria-label="Image offset Y (%)"
           style={{ width: '50%' }}
-          title="Vertical image offset (% of frame height)"
+          data-tip={tip.offsetY}
         />
       </div>
 
@@ -467,6 +488,7 @@ function ImageProps({
         {isScaled && (
           <button
             className="composer-prop-mini-btn"
+            data-tip={tip.scaleReset}
             onClick={() =>
               updateElement(element.id, {
                 imageScale: 1,
@@ -490,7 +512,7 @@ function ImageProps({
               imageScale: Math.max(0.1, Math.min(4, +e.target.value || 1)),
             } as Partial<ImageElement>)
           }
-          title="Scale image within the frame"
+          data-tip={tip.scale}
           aria-label="Image scale"
         />
         <input
@@ -501,6 +523,7 @@ function ImageProps({
           max={4}
           value={Number(scale.toFixed(2))}
           aria-label="Image scale (number)"
+          data-tip={tip.scale}
           onChange={e =>
             updateElement(element.id, {
               imageScale: Math.max(0.1, Math.min(4, +e.target.value || 1)),
@@ -528,6 +551,7 @@ function BubbleProps({
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
   t: TranslationKeys;
 }) {
+  const tip = useTips().composer;
   const bubbleTypes: BubbleType[] = ['speech', 'thought', 'shout', 'whisper', 'narration', 'inner-voice'];
   const tailPositions: TailPosition[] = ['top', 'bottom', 'left', 'right'];
   const directions: TextDirection[] = ['horizontal', 'vertical'];
@@ -550,6 +574,7 @@ function BubbleProps({
               key={bt}
               className={`composer-prop-btn ${element.bubbleType === bt ? 'active' : ''}`}
               onClick={() => updateElement(element.id, { bubbleType: bt })}
+              data-tip={tip.bubbleType[bt]}
             >
               {bt === 'inner-voice' ? t.composer.innerVoice : bt}
             </button>
@@ -564,12 +589,13 @@ function BubbleProps({
               key={tp}
               className={`composer-prop-btn ${element.tailPosition === tp ? 'active' : ''}`}
               onClick={() => updateElement(element.id, { tailPosition: tp })}
+              data-tip={tip.tail[tp]}
             >
               {tp}
             </button>
           ))}
         </div>
-        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }} data-tip={tip.pointTail}>
           <input
             type="checkbox"
             checked={!!element.tailTip}
@@ -592,7 +618,7 @@ function BubbleProps({
               } as Partial<BubbleElement>)}
               placeholder="Tail X"
               aria-label="Tail X (% of bubble width)"
-              title="Tail tip X (% of the bubble's width)"
+              data-tip={tip.tailX}
               style={{ width: '50%' }}
             />
             <input
@@ -605,7 +631,7 @@ function BubbleProps({
               } as Partial<BubbleElement>)}
               placeholder="Tail Y"
               aria-label="Tail Y (% of bubble height)"
-              title="Tail tip Y (% of the bubble's height)"
+              data-tip={tip.tailY}
               style={{ width: '50%' }}
             />
           </div>
@@ -621,12 +647,13 @@ function BubbleProps({
               onClick={() => updateElement(element.id, {
                 textAlign: a === 'center' ? undefined : a,
               } as Partial<BubbleElement>)}
+              data-tip={tip.bubbleAlign}
             >
               {a}
             </button>
           ))}
         </div>
-        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
+        <label className="composer-prop-label" style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }} data-tip={tip.stars}>
           <input
             type="checkbox"
             checked={element.markup === 'stars'}
@@ -645,6 +672,7 @@ function BubbleProps({
               key={d}
               className={`composer-prop-btn ${element.direction === d ? 'active' : ''}`}
               onClick={() => updateElement(element.id, { direction: d })}
+              data-tip={tip.direction}
             >
               {d === 'horizontal' ? t.composer.horizontal : t.composer.vertical}
             </button>
@@ -661,6 +689,7 @@ function BubbleProps({
           value={element.fontSize}
           onChange={e => updateElement(element.id, { fontSize: +e.target.value })}
           aria-label={t.composer.fontSize}
+          data-tip={tip.bubbleFontSize}
         />
       </div>
       <div className="composer-prop-group">
@@ -671,6 +700,7 @@ function BubbleProps({
           value={element.backgroundColor}
           onChange={e => updateElement(element.id, { backgroundColor: e.target.value })}
           aria-label={t.composer.bgColor}
+          data-tip={tip.bgColor}
         />
       </div>
       <div className="composer-prop-group">
@@ -681,6 +711,7 @@ function BubbleProps({
           value={element.borderColor}
           onChange={e => updateElement(element.id, { borderColor: e.target.value })}
           aria-label={t.composer.borderColor}
+          data-tip={tip.borderColor}
         />
       </div>
     </>
@@ -696,6 +727,7 @@ function TextProps({
   updateElement: (id: string, u: Partial<ComposerElement>) => void;
   t: TranslationKeys;
 }) {
+  const tip = useTips().composer;
   const directions: TextDirection[] = ['horizontal', 'vertical'];
   const aligns: Array<'left' | 'center' | 'right'> = ['left', 'center', 'right'];
 
@@ -711,6 +743,7 @@ function TextProps({
           value={element.fontSize}
           onChange={e => updateElement(element.id, { fontSize: +e.target.value })}
           aria-label={t.composer.fontSize}
+          data-tip={tip.textFontSize}
         />
       </div>
       <div className="composer-prop-group">
@@ -725,6 +758,7 @@ function TextProps({
             strokeWidth: Math.max(0, Math.min(20, +e.target.value || 0)),
           })}
           aria-label={t.composer.strokeWidth || 'Outline'}
+          data-tip={tip.outline}
         />
       </div>
       <div className="composer-prop-group">
@@ -735,6 +769,7 @@ function TextProps({
               key={w}
               className={`composer-prop-btn ${element.fontWeight === w ? 'active' : ''}`}
               onClick={() => updateElement(element.id, { fontWeight: w })}
+              data-tip={tip.fontWeight}
             >
               {w}
             </button>
@@ -749,6 +784,7 @@ function TextProps({
               key={a}
               className={`composer-prop-btn ${element.textAlign === a ? 'active' : ''}`}
               onClick={() => updateElement(element.id, { textAlign: a })}
+              data-tip={tip.textAlign}
             >
               {a === 'left' ? t.composer.alignLeft : a === 'center' ? t.composer.alignCenter : t.composer.alignRight}
             </button>
@@ -763,6 +799,7 @@ function TextProps({
               key={d}
               className={`composer-prop-btn ${element.direction === d ? 'active' : ''}`}
               onClick={() => updateElement(element.id, { direction: d })}
+              data-tip={tip.direction}
             >
               {d === 'horizontal' ? t.composer.horizontal : t.composer.vertical}
             </button>
@@ -777,6 +814,7 @@ function TextProps({
           value={element.color}
           onChange={e => updateElement(element.id, { color: e.target.value })}
           aria-label={t.composer.fontColor}
+          data-tip={tip.fontColor}
         />
       </div>
     </>
