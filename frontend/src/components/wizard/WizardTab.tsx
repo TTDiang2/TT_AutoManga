@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  FiArrowLeft, FiArrowRight, FiArrowUp, FiArrowDown, FiCheck, FiDownload,
+  FiArrowLeft, FiArrowRight, FiArrowUp, FiArrowDown, FiCheck, FiDownload, FiUpload,
   FiImage, FiLayers, FiPlus, FiRefreshCw, FiTrash2, FiZap, FiEdit3,
 } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
 import { useTips } from '../../hooks/useTips';
 import type { Panel, Project } from '../../types';
+import { useStoryImport } from '../storyboard/useStoryImport';
 import {
   STEPS, STYLE_PRESETS, DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat,
   maxReachableStep, movePanel, newPanel, parseNames, prefersVerticalBubbles, promptForPanel,
@@ -269,6 +270,7 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
   });
 
   const count = ['~1-2', '~3-4', '~5-6', '~7-8', '~10+'][state.detailLevel - 1];
+  const storyImport = useStoryImport(state.storyText, text => update({ storyText: text }));
 
   return (
     <div className="wizard-body">
@@ -278,12 +280,21 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
           placeholder={w.story.namePlaceholder} maxLength={120} data-tip={tip.story.name} />
       </label>
 
-      <label className="wizard-field">
-        <span>{w.story.text}</span>
-        <textarea className="input textarea wizard-story" rows={9} value={state.storyText}
+      <div className="wizard-field">
+        <div className="wizard-field-head">
+          <label htmlFor="wizard-story-text">{w.story.text}</label>
+          {storyImport.fileInput}
+          <button type="button" className="btn btn-ghost" onClick={storyImport.open} disabled={!!busy}
+            data-tip={tip.story.importFile}>
+            <FiUpload size={14} /> {w.story.importFile}
+          </button>
+        </div>
+        <textarea id="wizard-story-text" className={`input textarea wizard-story${storyImport.dragOver ? ' is-drop' : ''}`}
+          rows={9} value={state.storyText}
           onChange={e => update({ storyText: e.target.value })}
+          {...storyImport.dropProps}
           placeholder={w.story.textPlaceholder} data-tip={tip.story.text} />
-      </label>
+      </div>
 
       <div className="wizard-row">
         <label className="wizard-field">

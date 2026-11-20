@@ -85,6 +85,10 @@
 .wizard-field em { font-style: normal; font-weight: 400; }
 .wizard-field .input { width: 100%; }
 .wizard-story { min-height: 200px; }
+.wizard-story.is-drop { outline: 2px dashed var(--accent-primary); outline-offset: 2px; }
+.wizard-field-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-sm); }
+.wizard-field-head label { font-weight: 600; font-size: 14px; }
+.wizard-field-head .btn { display: inline-flex; align-items: center; gap: var(--space-xs); padding: 4px 10px; font-size: 13px; }
 .wizard-range-labels { display: flex; justify-content: space-between; font-size: 11px; }
 
 .wizard-choice { display: flex; flex-wrap: wrap; gap: var(--space-sm); }
