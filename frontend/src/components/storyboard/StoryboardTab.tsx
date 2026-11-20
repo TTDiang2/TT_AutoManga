@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { FiPlus, FiTrash2, FiMove, FiEdit2, FiCheck, FiX, FiFileText } from 'react-icons/fi';
+import { useRef, useState } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
+import { FiPlus, FiTrash2, FiMove, FiEdit2, FiCheck, FiX, FiFileText, FiUpload } from 'react-icons/fi';
 import { 
   DndContext, 
   closestCenter, 
@@ -21,6 +22,8 @@ import { useProjectStore } from '../../store/projectStore';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useTips } from '../../hooks/useTips';
 import type { Panel } from '../../types';
+
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 function SortablePanel({ panel, index, onUpdate, onDelete }: { 
   panel: Panel; 
@@ -127,6 +130,36 @@ export function StoryboardTab() {
   const [novelText, setNovelText] = useState('');
   const [detailLevel, setDetailLevel] = useState(settings.defaults.detailLevel);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const importFile = async (file: File) => {
+    if (!/\.(md|markdown|txt)$/i.test(file.name)) {
+      alert(t.storyboard.importInvalid);
+      return;
+    }
+    if (file.size > MAX_IMPORT_BYTES) {
+      alert(t.storyboard.importTooLarge);
+      return;
+    }
+    const text = (await file.text()).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    if (novelText.trim() && !confirm(t.storyboard.importReplaceConfirm)) return;
+    setNovelText(text);
+  };
+
+  const handleFileChosen = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) void importFile(file);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLTextAreaElement>) => {
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    e.preventDefault();
+    void importFile(file);
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -212,9 +245,17 @@ export function StoryboardTab() {
     <div className="storyboard-tab">
       <div className="input-section" data-tour="storyboard-input">
         <textarea
-          className="input textarea novel-input"
+          className={`input textarea novel-input${isDragOver ? ' drag-over' : ''}`}
           value={novelText}
           onChange={(e) => setNovelText(e.target.value)}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('Files')) {
+              e.preventDefault();
+              setIsDragOver(true);
+            }
+          }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
           data-tip={tip.story}
           placeholder={t.storyboard.inputPlaceholder}
           rows={8}
@@ -240,6 +281,23 @@ export function StoryboardTab() {
               {detailLevel === 1 ? '~1-2' : detailLevel === 2 ? '~3-4' : detailLevel === 3 ? '~5-6' : detailLevel === 4 ? '~7-8' : '~10+'} panels
             </div>
           </div>
+          <div className="flex items-center gap-sm">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".md,.markdown,.txt,text/markdown,text/plain"
+            style={{ display: 'none' }}
+            onChange={handleFileChosen}
+          />
+          <button
+            className="btn btn-secondary"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isGenerating}
+            data-tip={tip.importFile}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            <FiUpload size={16} /> {t.storyboard.importFile}
+          </button>
           <button 
             className="btn btn-primary" 
             data-tour="storyboard-generate"
@@ -249,6 +307,7 @@ export function StoryboardTab() {
           >
             {isGenerating ? <span className="loading-spinner" /> : t.storyboard.generate}
           </button>
+          </div>
         </div>
       </div>
 
@@ -293,6 +352,10 @@ export function StoryboardTab() {
         .novel-input {
           width: 100%;
           min-height: 200px;
+        }
+        .novel-input.drag-over {
+          outline: 2px dashed var(--accent-primary);
+          outline-offset: 2px;
         }
         .precision-control {
           display: flex;
