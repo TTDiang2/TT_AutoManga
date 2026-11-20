@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef } from 'react';
 import { FiChevronDown, FiChevronRight, FiLayers, FiList, FiZap } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { entryAt, entryLabel, listOf, targetLabel, type Outline, type OutlineEntry, type OutlineKind, type OutlinePage, type OutlinePanel as Panel, type OutlineScene, type OutlineWords } from './outline';
 
 interface Props {
@@ -24,6 +25,7 @@ const name = (id: string) => (id ? id[0].toUpperCase() + id.slice(1) : id);
 export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, onToggle, mode, onMode, words, aiBlocked, onPick, onAi, onBatch, batchBlocked }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
+  const tip = useTips().comics;
   const listRef = useRef<HTMLUListElement>(null);
   const entries = listOf(outline, mode);
   const active = open ? entryAt(entries, caret, outline.length) : null;
@@ -69,13 +71,13 @@ export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, o
     <nav className={`comics-outline ${open ? 'open' : 'collapsed'}`} aria-label={c.outline}>
       <div className="comics-outline-head">
         <button className="comics-outline-toggle" onClick={onToggle} aria-expanded={open}
-          title={open ? c.outlineHide : c.outlineShow}>
+          data-tip={open ? c.outlineHide : c.outlineShow}>
           {open ? <FiChevronDown size={13} /> : <FiChevronRight size={13} />} <FiList size={13} /> {c.outline}
         </button>
         {open && (
           <div className="comics-outline-tabs" role="group" aria-label={c.outline}>
             {tabs.map(tab => (
-              <button key={tab.id} className={mode === tab.id ? 'active' : ''} aria-pressed={mode === tab.id} onClick={() => onMode(tab.id)}>
+              <button key={tab.id} className={mode === tab.id ? 'active' : ''} aria-pressed={mode === tab.id} onClick={() => onMode(tab.id)} data-tip={tip.outlineMode}>
                 {tab.label}
               </button>
             ))}
@@ -83,7 +85,7 @@ export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, o
         )}
         {open && (
           <button className="comics-outline-batch" onClick={onBatch} disabled={!!batchBlocked}
-            title={batchBlocked ?? c.batchOpenHint}>
+            data-tip={batchBlocked ?? c.batchOpenHint}>
             <FiLayers size={12} /> {c.batchOpen}
           </button>
         )}
@@ -100,7 +102,7 @@ export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, o
               return (
                 <li key={e.id} className={isActive ? 'active' : ''}>
                   <button className="comics-outline-entry" aria-current={isActive ? 'location' : undefined}
-                    onClick={() => onPick(mode, e)} title={fill(c.outlineSelect, { label: full })}>
+                    onClick={() => onPick(mode, e)} data-tip={fill(c.outlineSelect, { label: full })}>
                     <span className="comics-outline-label">
                       {label}
                       {e.uncut && <span className="comics-badge uncut" title={c.uncutBadgeHint}>{c.uncutBadge}</span>}
@@ -110,7 +112,7 @@ export const OutlinePanel = memo(function OutlinePanel({ outline, caret, open, o
                     {(m1 || m2) && <span className="comics-outline-meta">{[m1, m2].filter(Boolean).join(' · ')}</span>}
                   </button>
                   <button className="comics-outline-ai" disabled={!!aiBlocked} onClick={() => onAi(mode, e)}
-                    aria-label={fill(c.outlineAi, { label: full })} title={aiBlocked ?? fill(c.outlineAi, { label: full })}>
+                    aria-label={fill(c.outlineAi, { label: full })} data-tip={aiBlocked ?? fill(c.outlineAi, { label: full })}>
                     <FiZap size={12} /> AI
                   </button>
                 </li>

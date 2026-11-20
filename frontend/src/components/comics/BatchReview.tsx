@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FiAlertTriangle, FiCheck, FiCheckCircle, FiCircle, FiLoader, FiShield, FiSquare, FiTrash2, FiX, FiXCircle } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { PlanStatus, RewriteDiff } from './AiRewrite';
 import { finished, textHash, type Batch, type BatchResult } from './batchApply';
 import { filterResults, flagged, passing, toApply, useBatchReview, type BatchFilter } from './batchDecisions';
@@ -23,6 +24,7 @@ const NO_APPLIED: number[] = [];
 export function BatchReview({ batch, editorText, onApply, onStop, onClear }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
+  const tip = useTips().comics;
   const decisions = useBatchReview(s => s.decisions[batch.id] ?? NO_DECISIONS) as Record<number, 'accept' | 'reject'>;
   const applied = useBatchReview(s => s.applied[batch.id] ?? NO_APPLIED);
   const decide = useBatchReview(s => s.decide);
@@ -100,9 +102,9 @@ export function BatchReview({ batch, editorText, onApply, onStop, onClear }: Pro
           <div style={{ width: `${pct}%` }} />
         </div>
         {running ? (
-          <button className="btn btn-secondary comics-stop" onClick={onStop}><FiSquare size={14} /> {c.batchStop}</button>
+          <button className="btn btn-secondary comics-stop" onClick={onStop} data-tip={tip.batchStop}><FiSquare size={14} /> {c.batchStop}</button>
         ) : (
-          <button className="btn btn-ghost" onClick={onClear} title={c.batchClearHint}><FiTrash2 size={14} /> {c.batchClear}</button>
+          <button className="btn btn-ghost" onClick={onClear} data-tip={c.batchClearHint}><FiTrash2 size={14} /> {c.batchClear}</button>
         )}
       </div>
       {batch.error && <div className="comics-error">{batch.error}</div>}
@@ -111,21 +113,21 @@ export function BatchReview({ batch, editorText, onApply, onStop, onClear }: Pro
       <div className="ai-batch-tools">
         <div className="comics-outline-tabs ai-batch-filters" role="group" aria-label={c.batchFilter}>
           {filters.map(f => (
-            <button key={f.id} className={filter === f.id ? 'active' : ''} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+            <button key={f.id} className={filter === f.id ? 'active' : ''} aria-pressed={filter === f.id} onClick={() => setFilter(f.id)} data-tip={tip.batchFilter}>
               {f.label} ({f.n})
             </button>
           ))}
         </div>
         <span className="text-sm text-muted ai-batch-keys">{c.batchKeys}</span>
-        <button className="btn btn-ghost" disabled={!decidable.some(passing)}
+        <button className="btn btn-ghost" disabled={!decidable.some(passing)} data-tip={tip.acceptPassing}
           onClick={() => decide(batch.id, decidable.filter(passing).map(r => r.index), 'accept')}>
           <FiCheck size={14} /> {c.batchAcceptAllPassing}
         </button>
-        <button className="btn btn-ghost" disabled={!decidable.length}
+        <button className="btn btn-ghost" disabled={!decidable.length} data-tip={tip.rejectAll}
           onClick={() => decide(batch.id, decidable.map(r => r.index), 'reject')}>
           <FiX size={14} /> {c.batchRejectAll}
         </button>
-        <button className="btn btn-primary" disabled={!pending.length} onClick={() => onApply(pending)} title={c.batchApplyHint}>
+        <button className="btn btn-primary" disabled={!pending.length} onClick={() => onApply(pending)} data-tip={c.batchApplyHint}>
           {fill(c.batchApply, { n: pending.length })}
         </button>
       </div>
@@ -164,9 +166,9 @@ export function BatchReview({ batch, editorText, onApply, onStop, onClear }: Pro
                 {canDecide(current) && (
                   <span className="ai-batch-decide">
                     <button className={`btn ${decisions[current.index] === 'accept' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={decisions[current.index] === 'accept'}
-                      onClick={() => toggle(current, 'accept')} title="A"><FiCheck size={14} /> {c.batchAccept}</button>
+                      onClick={() => toggle(current, 'accept')} data-tip={tip.accept} aria-keyshortcuts="A"><FiCheck size={14} /> {c.batchAccept}</button>
                     <button className={`btn ${decisions[current.index] === 'reject' ? 'btn-primary' : 'btn-secondary'}`} aria-pressed={decisions[current.index] === 'reject'}
-                      onClick={() => toggle(current, 'reject')} title="R"><FiX size={14} /> {c.batchReject}</button>
+                      onClick={() => toggle(current, 'reject')} data-tip={tip.reject} aria-keyshortcuts="R"><FiX size={14} /> {c.batchReject}</button>
                   </span>
                 )}
               </div>

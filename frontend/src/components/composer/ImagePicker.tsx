@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { FiX, FiImage, FiUpload, FiFolder } from 'react-icons/fi';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import { useComposerStore } from '../../store/composerStore';
 
 interface ImagePickerProps {
@@ -33,6 +34,7 @@ type ImageSource = 'panels' | 'archive';
 
 export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
   const { t } = useTranslation();
+  const tip = useTips().composer;
   const composerPages = useComposerStore(s => s.pages);
   const projectId = useComposerStore(s => s.projectId);
   const [uploading, setUploading] = useState(false);
@@ -169,7 +171,7 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
         {/* Header */}
         <div className="composer-image-picker-header">
           <h3>{t.composer.selectImage}</h3>
-          <button className="composer-tool-btn" onClick={onClose} title="Close">
+          <button className="composer-tool-btn" onClick={onClose} data-tip={tip.closePicker} aria-label={tip.closePicker}>
             <FiX size={16} />
           </button>
         </div>
@@ -179,12 +181,14 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
           <button
             className={`composer-source-tab ${source === 'panels' ? 'active' : ''}`}
             onClick={() => setSource('panels')}
+            data-tip={tip.fromPanels}
           >
             {t.composer.fromPanels || 'Panels'}
           </button>
           <button
             className={`composer-source-tab ${source === 'archive' ? 'active' : ''}`}
             onClick={() => setSource('archive')}
+            data-tip={tip.fromArchive}
           >
             {t.composer.fromArchive || 'Archive'}
           </button>
@@ -198,6 +202,7 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
               className="composer-folder-select"
               value={archiveFolder ?? ''}
               onChange={e => setArchiveFolder(e.target.value || null)}
+              data-tip={tip.folder}
             >
               <option value="">{t.composer.allImages || 'All Images'}</option>
               {archiveFolders.map(f => (
@@ -218,7 +223,7 @@ export function ImagePicker({ onSelect, onClose }: ImagePickerProps) {
 
         {/* Footer */}
         <div className="composer-image-picker-footer">
-          <label className="composer-upload-label">
+          <label className="composer-upload-label" data-tip={tip.upload}>
             <FiUpload size={14} />
             {uploading ? 'Uploading…' : t.composer.uploadFile}
             <input type="file" accept="image/*" onChange={handleFileUpload} disabled={uploading} />

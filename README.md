@@ -83,6 +83,7 @@ frame where the art's own perspective calls for it.
 - Plain-language hints at each step, a SwarmUI connection check, a progress bar while panels are drawn, page previews, a cover page and PDF/ZIP download
 - It builds an ordinary project, so you can switch to Storyboard, Prompt Lab or Composer at any point for fine control. The wizard remembers where you were.
 - Every tab, Create included, has a short spotlight tour that starts the first time you open it (on Create it doubles as a welcome for new users). Replay it with the **Tour** button at the top right, or turn tours off from the first step.
+- Hover over (or tab to) any button or field for a short tooltip explaining what it does, in English or Chinese.
 
 **Storyboard & story**
 - LLM storyboard generation from novel text (detail-level slider), or write panels by hand

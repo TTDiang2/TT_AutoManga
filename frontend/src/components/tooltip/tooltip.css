@@ -1,0 +1,26 @@
+/* inverse of the page colours, so it reads in light and dark themes */
+.am-tip {
+  position: fixed;
+  z-index: 10001;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: pre-line;
+  pointer-events: none;
+  box-shadow: var(--shadow-elevated);
+  animation: am-tip-in 120ms ease-out;
+}
+
+@keyframes am-tip-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-tip { animation: none; }
+}

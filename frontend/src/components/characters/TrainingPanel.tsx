@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FiCopy, FiPlay, FiSquare, FiTrash2, FiUpload, FiImage, FiDownload } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { Character } from '../../types';
 import { clampInt } from './clampInt';
 
@@ -57,6 +58,7 @@ async function jsonOrThrow(res: Response) {
 export function TrainingPanel({ character }: { character: Character }) {
   const { t } = useTranslation();
   const tt = t.training;
+  const tip = useTips().characters;
   const currentProject = useProjectStore(s => s.currentProject);
   const updateCharacter = useProjectStore(s => s.updateCharacter);
   const setCharacters = useProjectStore(s => s.setCharacters);
@@ -244,12 +246,12 @@ export function TrainingPanel({ character }: { character: Character }) {
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <p style={{ width: '100%', fontSize: '13px' }}>{tt.noDataset}</p>
           <label style={{ fontSize: '12px' }}>{tt.datasetName}<br />
-            <input className="input" value={form.slug} onChange={e => setForm({ ...form, slug: e.target.value })} />
+            <input className="input" value={form.slug} onChange={e => setForm({ ...form, slug: e.target.value })} data-tip={tip.datasetName} />
           </label>
           <label style={{ fontSize: '12px' }}>{tt.trigger}<br />
-            <input className="input" value={form.trigger} onChange={e => setForm({ ...form, trigger: e.target.value })} />
+            <input className="input" value={form.trigger} onChange={e => setForm({ ...form, trigger: e.target.value })} data-tip={tip.trigger} />
           </label>
-          <button className="btn btn-primary" onClick={create}>{tt.create}</button>
+          <button className="btn btn-primary" onClick={create} data-tip={tip.createDataset}>{tt.create}</button>
         </div>
       )}
 
@@ -258,25 +260,26 @@ export function TrainingPanel({ character }: { character: Character }) {
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '8px' }}>
             <strong style={{ fontSize: '13px' }}>{dataset.slug}</strong>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{dataset.trigger} · {fill(tt.images, { n: count })}</span>
-            <label className="btn btn-secondary" style={{ cursor: 'pointer' }}>
+            <label className="btn btn-secondary" style={{ cursor: 'pointer' }} data-tip={tip.uploadImages}>
               <FiUpload size={14} /> {tt.upload}
               <input type="file" accept="image/*" multiple hidden onChange={e => { upload(e.target.files); e.target.value = ''; }} />
             </label>
             {currentProject?.id && (
-              <button className="btn btn-secondary" onClick={importPanels}><FiDownload size={14} /> {tt.importPanels}</button>
+              <button className="btn btn-secondary" onClick={importPanels} data-tip={tip.importPanels}><FiDownload size={14} /> {tt.importPanels}</button>
             )}
             {generating ? (
               <>
                 <span style={{ fontSize: '12px' }}>{fill(tt.generating, { done: dataset.generation!.done, total: dataset.generation!.total })}</span>
-                <button className="btn btn-ghost" onClick={stopGenerate}>{tt.stopGenerating}</button>
+                <button className="btn btn-ghost" onClick={stopGenerate} data-tip={tip.stopGenerating}>{tt.stopGenerating}</button>
               </>
             ) : (
-              <span title={tt.generateHint} style={{ display: 'inline-flex', gap: '4px' }}>
+              <span style={{ display: 'inline-flex', gap: '4px' }}>
                 <input className="input" type="number" min={GEN_RANGE[0]} max={GEN_RANGE[1]} value={genCount} style={{ width: '64px' }}
                   aria-label={tt.generate}
+                  data-tip={tip.genCount}
                   onChange={e => setGenCount(e.target.value)}
                   onBlur={() => setGenCount(String(clampInt(genCount, ...GEN_RANGE)))} />
-                <button className="btn btn-secondary" onClick={generate}><FiImage size={14} /> {tt.generate}</button>
+                <button className="btn btn-secondary" onClick={generate} data-tip={tip.generateImages}><FiImage size={14} /> {tt.generate}</button>
               </span>
             )}
           </div>
@@ -289,7 +292,7 @@ export function TrainingPanel({ character }: { character: Character }) {
               <div key={img.file} style={{ position: 'relative' }}>
                 <img src={`${img.url}?v=${img.mtime}`} alt={img.file} loading="lazy"
                   style={{ width: '100%', aspectRatio: '2 / 3', objectFit: 'cover', borderRadius: '4px', display: 'block' }} />
-                <button className="btn btn-ghost" title={tt.deleteImage} onClick={() => removeImage(img.file)}
+                <button className="btn btn-ghost" data-tip={tip.deleteImage} aria-label={tt.deleteImage} onClick={() => removeImage(img.file)}
                   style={{ position: 'absolute', top: 2, right: 2, padding: '2px', background: 'rgba(0,0,0,0.55)', color: '#fff' }}>
                   <FiTrash2 size={12} />
                 </button>
@@ -301,12 +304,13 @@ export function TrainingPanel({ character }: { character: Character }) {
             <label style={{ fontSize: '12px' }}>{tt.steps}{' '}
               <input className="input" type="number" min={STEPS_RANGE[0]} max={STEPS_RANGE[1]} step={100} value={steps} style={{ width: '80px' }}
                 onChange={e => setSteps(e.target.value)}
+                data-tip={tip.steps}
                 onBlur={() => setSteps(String(clampInt(steps, ...STEPS_RANGE)))} />
             </label>
             {ownJob?.running ? (
-              <button className="btn btn-secondary" onClick={stop} style={{ color: 'var(--error)' }}><FiSquare size={14} /> {tt.stop}</button>
+              <button className="btn btn-secondary" onClick={stop} style={{ color: 'var(--error)' }} data-tip={tip.stop}><FiSquare size={14} /> {tt.stop}</button>
             ) : (
-              <button className="btn btn-primary" onClick={start} disabled={count < MIN_IMAGES || generating || !!busyElsewhere}>
+              <button className="btn btn-primary" onClick={start} disabled={count < MIN_IMAGES || generating || !!busyElsewhere} data-tip={tip.start}>
                 <FiPlay size={14} /> {tt.start}
               </button>
             )}
@@ -341,7 +345,7 @@ export function TrainingPanel({ character }: { character: Character }) {
         <div style={{ marginTop: '12px', display: 'flex', gap: '8px', alignItems: 'center' }}>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{tt.scriptLine}</span>
           <code style={{ fontSize: '12px', background: 'var(--bg-secondary)', padding: '2px 6px', borderRadius: '4px', userSelect: 'all' }}>{scriptLine}</code>
-          <button className="btn btn-ghost" onClick={copyLine} title={tt.copy}><FiCopy size={14} /> {copied ? tt.copied : tt.copy}</button>
+          <button className="btn btn-ghost" onClick={copyLine} data-tip={tip.copy}><FiCopy size={14} /> {copied ? tt.copied : tt.copy}</button>
         </div>
       )}
     </div>

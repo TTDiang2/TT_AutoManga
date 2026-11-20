@@ -5,6 +5,7 @@ import {
 } from 'react-icons/fi';
 import { useProjectStore } from '../../store/projectStore';
 import { useTranslation, fill } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { Panel, Project } from '../../types';
 import {
   STEPS, STYLE_PRESETS, DEFAULT_STATE, castFromPanels, emptyScenes, guessPromptFormat,
@@ -42,6 +43,7 @@ async function api<T = unknown>(url: string, init?: RequestInit & { json?: unkno
 export function WizardTab() {
   const { t } = useTranslation();
   const w = t.wizard;
+  const tip = useTips().wizard;
   const { setCurrentProject, setComposerProjectId, setActiveTab, settings } = useProjectStore();
 
   const [state, setState] = useState<WizardState>(readSavedState);
@@ -112,6 +114,7 @@ export function WizardTab() {
                 type="button"
                 disabled={status === 'locked' || !!busy}
                 onClick={() => goTo(id)}
+                data-tip={tip.stepper}
                 aria-current={status === 'current' ? 'step' : undefined}
               >
                 <span className="wizard-step-num">{i < stepIndex ? <FiCheck size={14} /> : i + 1}</span>
@@ -131,7 +134,7 @@ export function WizardTab() {
           {project && (
             <div className="wizard-project" data-tour="wizard-project">
               <span className="badge">{project.name}</span>
-              <button type="button" className="btn btn-ghost" onClick={startOver} disabled={!!busy}>
+              <button type="button" className="btn btn-ghost" onClick={startOver} disabled={!!busy} data-tip={tip.startOver}>
                 {w.startOver}
               </button>
             </div>
@@ -183,22 +186,24 @@ interface StepProps {
   pages: NonNullable<WizardProject['composerPages']>;
 }
 
-function Nav({ back, next, nextLabel, nextDisabled, busy, extra }: {
-  back?: () => void; next?: () => void; nextLabel?: string; nextDisabled?: boolean;
+function Nav({ back, next, nextLabel, nextTip, nextDisabled, busy, extra }: {
+  back?: () => void; next?: () => void; nextLabel?: string; nextTip?: string; nextDisabled?: boolean;
   busy: string | null; extra?: React.ReactNode;
 }) {
   const { t } = useTranslation();
+  const tip = useTips().wizard;
   return (
     <div className="wizard-nav" data-tour="wizard-nav">
       {back ? (
-        <button type="button" className="btn btn-secondary" onClick={back} disabled={!!busy}>
+        <button type="button" className="btn btn-secondary" onClick={back} disabled={!!busy} data-tip={tip.back}>
           <FiArrowLeft size={16} /> {t.wizard.back}
         </button>
       ) : <span />}
       <div className="wizard-nav-right">
         {extra}
         {next && (
-          <button type="button" className="btn btn-primary" onClick={next} disabled={!!busy || nextDisabled}>
+          <button type="button" className="btn btn-primary" onClick={next} disabled={!!busy || nextDisabled}
+            data-tip={nextTip || tip.next}>
             {busy ? <span className="loading-spinner" /> : null}
             {nextLabel || t.wizard.next} <FiArrowRight size={16} />
           </button>
@@ -215,6 +220,7 @@ function Tip({ children }: { children: React.ReactNode }) {
 // --- 1. Story --------------------------------------------------------------
 
 function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: StepProps) {
+  const tip = useTips().wizard;
   const [name, setName] = useState(project?.name || '');
   const [existing, setExisting] = useState<{ id: string; name: string; stats: { panels: number } }[]>([]);
   useEffect(() => {
@@ -269,21 +275,21 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
       <label className="wizard-field">
         <span>{w.story.name}</span>
         <input className="input" value={name} onChange={e => setName(e.target.value)}
-          placeholder={w.story.namePlaceholder} maxLength={120} />
+          placeholder={w.story.namePlaceholder} maxLength={120} data-tip={tip.story.name} />
       </label>
 
       <label className="wizard-field">
         <span>{w.story.text}</span>
         <textarea className="input textarea wizard-story" rows={9} value={state.storyText}
           onChange={e => update({ storyText: e.target.value })}
-          placeholder={w.story.textPlaceholder} />
+          placeholder={w.story.textPlaceholder} data-tip={tip.story.text} />
       </label>
 
       <div className="wizard-row">
         <label className="wizard-field">
           <span>{w.story.length} <em className="text-muted">({fill(w.story.panelCount, { n: count })})</em></span>
           <input type="range" className="slider" min={1} max={5} value={state.detailLevel}
-            onChange={e => update({ detailLevel: Number(e.target.value) })} />
+            onChange={e => update({ detailLevel: Number(e.target.value) })} data-tip={tip.story.length} />
           <div className="wizard-range-labels text-muted"><span>{w.story.short}</span><span>{w.story.long}</span></div>
         </label>
         <div className="wizard-field">
@@ -291,7 +297,7 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
           <div className="wizard-choice">
             {(['rtl', 'ltr'] as const).map(r => (
               <button key={r} type="button" className={`wizard-chip ${state.reading === r ? 'is-on' : ''}`}
-                onClick={() => update({ reading: r })}>
+                onClick={() => update({ reading: r })} data-tip={r === 'rtl' ? tip.story.rtl : tip.story.ltr}>
                 {r === 'rtl' ? w.story.rtl : w.story.ltr}
               </button>
             ))}
@@ -305,9 +311,10 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
         busy={busy}
         next={withAI}
         nextLabel={busy === 'ai' ? w.story.writing : w.story.withAI}
+        nextTip={tip.story.withAI}
         nextDisabled={!state.storyText.trim()}
         extra={
-          <button type="button" className="btn btn-secondary" onClick={manually} disabled={!!busy}>
+          <button type="button" className="btn btn-secondary" onClick={manually} disabled={!!busy} data-tip={tip.story.manual}>
             <FiEdit3 size={16} /> {project?.panels.length ? w.story.keepPanels : w.story.manual}
           </button>
         }
@@ -319,7 +326,7 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
           <ul>
             {existing.slice(0, 30).map(p => (
               <li key={p.id}>
-                <button type="button" className="btn btn-ghost" onClick={() => resume(p.id)} disabled={!!busy}>
+                <button type="button" className="btn btn-ghost" onClick={() => resume(p.id)} disabled={!!busy} data-tip={tip.story.resume}>
                   {p.name || p.id} <span className="text-muted">· {fill(w.story.panelsN, { n: p.stats?.panels ?? 0 })}</span>
                 </button>
               </li>
@@ -334,6 +341,7 @@ function StoryStep({ state, update, project, refresh, run, busy, goTo, w }: Step
 // --- 2. Panels -------------------------------------------------------------
 
 function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved }: StepProps) {
+  const tip = useTips().wizard;
   const [list, setList] = useState<Panel[]>(() => (saved.length ? saved : [newPanel([])]));
   const [charText, setCharText] = useState<Record<string, string>>({});
 
@@ -363,11 +371,11 @@ function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved
             <div className="wizard-panel-head">
               <span className="badge">{fill(w.panels.panelN, { n: i + 1 })}</span>
               <div className="wizard-panel-tools">
-                <button type="button" className="btn btn-ghost" title={w.panels.up} aria-label={w.panels.up}
+                <button type="button" className="btn btn-ghost" data-tip={tip.panels.up} aria-label={w.panels.up}
                   disabled={i === 0} onClick={() => setList(l => movePanel(l, i, i - 1))}><FiArrowUp size={14} /></button>
-                <button type="button" className="btn btn-ghost" title={w.panels.down} aria-label={w.panels.down}
+                <button type="button" className="btn btn-ghost" data-tip={tip.panels.down} aria-label={w.panels.down}
                   disabled={i === list.length - 1} onClick={() => setList(l => movePanel(l, i, i + 1))}><FiArrowDown size={14} /></button>
-                <button type="button" className="btn btn-ghost" title={w.panels.remove} aria-label={w.panels.remove}
+                <button type="button" className="btn btn-ghost" data-tip={tip.panels.remove} aria-label={w.panels.remove}
                   disabled={list.length === 1} onClick={() => setList(l => l.filter((_, j) => j !== i))}><FiTrash2 size={14} /></button>
               </div>
             </div>
@@ -376,30 +384,30 @@ function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved
               <label className="wizard-field wizard-span">
                 <span>{w.panels.scene}</span>
                 <textarea className={`input textarea ${!p.scene.trim() ? 'is-missing' : ''}`} rows={2} value={p.scene}
-                  placeholder={w.panels.scenePlaceholder} onChange={e => edit(i, { scene: e.target.value })} />
+                  placeholder={w.panels.scenePlaceholder} onChange={e => edit(i, { scene: e.target.value })} data-tip={tip.panels.scene} />
               </label>
               <label className="wizard-field">
                 <span>{w.panels.characters}</span>
-                <input className="input" placeholder={w.panels.charactersPlaceholder}
+                <input className="input" placeholder={w.panels.charactersPlaceholder} data-tip={tip.panels.characters}
                   value={charText[p.id] ?? (p.characters || []).join(', ')}
                   onChange={e => setCharText(c => ({ ...c, [p.id]: e.target.value }))} />
               </label>
               <label className="wizard-field">
                 <span>{w.panels.shot}</span>
-                <select className="input" value={p.shot || ''} onChange={e => edit(i, { shot: e.target.value || undefined })}>
+                <select className="input" value={p.shot || ''} onChange={e => edit(i, { shot: e.target.value || undefined })} data-tip={tip.panels.shot}>
                   {SHOTS.map(s => <option key={s} value={s}>{w.shots[s || 'auto']}</option>)}
                 </select>
               </label>
               <label className="wizard-field wizard-span">
                 <span>{w.panels.dialogue}</span>
                 <textarea className="input textarea" rows={2} value={p.dialogue}
-                  placeholder={w.panels.dialoguePlaceholder} onChange={e => edit(i, { dialogue: e.target.value })} />
+                  placeholder={w.panels.dialoguePlaceholder} onChange={e => edit(i, { dialogue: e.target.value })} data-tip={tip.panels.dialogue} />
               </label>
             </div>
           </div>
         ))}
       </div>
-      <button type="button" className="btn btn-secondary wizard-add" onClick={() => setList(l => [...l, newPanel(l)])}>
+      <button type="button" className="btn btn-secondary wizard-add" onClick={() => setList(l => [...l, newPanel(l)])} data-tip={tip.panels.add}>
         <FiPlus size={16} /> {w.panels.add}
       </button>
       {empty.length > 0 && <p className="text-sm wizard-warn">{fill(w.panels.needScene, { list: empty.join(', ') })}</p>}
@@ -411,6 +419,7 @@ function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved
 // --- 3. Look ---------------------------------------------------------------
 
 function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels, swarmModel }: StepProps & { swarmModel: string }) {
+  const tip = useTips().wizard;
   const cast = useMemo(() => castFromPanels(panels), [panels]);
   const [style, setStyle] = useState(project?.settings?.style || '');
   const [blocks, setBlocks] = useState<Record<string, string>>(() => {
@@ -441,13 +450,13 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
         <div className="wizard-choice">
           {STYLE_PRESETS.map(p => (
             <button key={p.id} type="button" className={`wizard-chip ${style === p.prompt ? 'is-on' : ''}`}
-              onClick={() => setStyle(p.prompt)}>
+              onClick={() => setStyle(p.prompt)} data-tip={tip.look.preset}>
               {w.look.presets[p.id as keyof typeof w.look.presets]}
             </button>
           ))}
         </div>
         <textarea className="input textarea" rows={2} value={style} placeholder={w.look.stylePlaceholder}
-          onChange={e => setStyle(e.target.value)} />
+          onChange={e => setStyle(e.target.value)} data-tip={tip.look.style} />
       </div>
 
       <div className="wizard-field">
@@ -455,7 +464,7 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
         <div className="wizard-options">
           {(['danbooru', 'prose'] as const).map(f => (
             <button key={f} type="button" className={`wizard-option ${state.promptFormat === f ? 'is-on' : ''}`}
-              onClick={() => update({ promptFormat: f })}>
+              onClick={() => update({ promptFormat: f })} data-tip={f === 'prose' ? tip.look.prose : tip.look.tags}>
               <strong>{w.look.formats[f].title}{f === guessed && swarmModel ? ` · ${w.look.suggested}` : ''}</strong>
               <span className="text-secondary text-sm">{w.look.formats[f].desc}</span>
             </button>
@@ -473,7 +482,7 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
               <label key={n} className="wizard-field">
                 <span className="badge">{n}</span>
                 <input className="input" value={blocks[n] || ''} placeholder={w.look.appearancePlaceholder}
-                  onChange={e => setBlocks(b => ({ ...b, [n]: e.target.value }))} />
+                  onChange={e => setBlocks(b => ({ ...b, [n]: e.target.value }))} data-tip={tip.look.appearance} />
               </label>
             ))}
           </div>
@@ -490,6 +499,7 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
 type JobSnap = { status: string; total: number; done: number; items: { panel_id: string; status: string; error?: string }[] };
 
 function ArtStep({ state, project, refresh, run, busy, goTo, w, panels }: StepProps) {
+  const tip = useTips().wizard;
   const [swarm, setSwarm] = useState<'checking' | 'ok' | 'down'>('checking');
   const [job, setJob] = useState<JobSnap | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -555,7 +565,7 @@ function ArtStep({ state, project, refresh, run, busy, goTo, w, panels }: StepPr
 
       <div className="wizard-art-bar">
         <button type="button" className="btn btn-primary" disabled={!!busy || running || swarm === 'down' || !missing.length}
-          onClick={() => generate(missing)}>
+          onClick={() => generate(missing)} data-tip={tip.art.generate}>
           {running ? <span className="loading-spinner" /> : <FiZap size={16} />}
           {missing.length ? fill(w.art.generateMissing, { n: missing.length }) : w.art.allDone}
         </button>
@@ -580,7 +590,7 @@ function ArtStep({ state, project, refresh, run, busy, goTo, w, panels }: StepPr
               <figcaption>
                 <span className="badge">{i + 1}</span>
                 <span className="wizard-art-scene" title={p.scene}>{p.scene}</span>
-                <button type="button" className="btn btn-ghost" title={w.art.redo} aria-label={w.art.redo}
+                <button type="button" className="btn btn-ghost" data-tip={tip.art.redo} aria-label={w.art.redo}
                   disabled={!!busy || running || swarm === 'down'} onClick={() => generate([p])}>
                   <FiRefreshCw size={14} />
                 </button>
@@ -601,6 +611,7 @@ function ArtStep({ state, project, refresh, run, busy, goTo, w, panels }: StepPr
 // --- 5. Pages --------------------------------------------------------------
 
 function PagesStep({ state, update, project, refresh, run, busy, goTo, w, pages, panels }: StepProps) {
+  const tip = useTips().wizard;
   const [stamp, setStamp] = useState(() => Date.now());
 
   const build = () => run('build', async () => {
@@ -628,16 +639,16 @@ function PagesStep({ state, update, project, refresh, run, busy, goTo, w, pages,
           <div className="wizard-choice">
             {[2, 3, 4, 5, 6].map(n => (
               <button key={n} type="button" className={`wizard-chip ${state.panelsPerPage === n ? 'is-on' : ''}`}
-                onClick={() => update({ panelsPerPage: n })}>{n}</button>
+                onClick={() => update({ panelsPerPage: n })} data-tip={tip.pages.perPage}>{n}</button>
             ))}
           </div>
         </div>
         <label className="wizard-toggle">
-          <input type="checkbox" checked={state.dynamic} onChange={e => update({ dynamic: e.target.checked })} />
+          <input type="checkbox" checked={state.dynamic} onChange={e => update({ dynamic: e.target.checked })} data-tip={tip.pages.dynamic} />
           <span><strong>{w.pages.dynamic}</strong><br /><span className="text-sm text-secondary">{w.pages.dynamicDesc}</span></span>
         </label>
       </div>
-      <button type="button" className="btn btn-primary" onClick={build} disabled={!!busy}>
+      <button type="button" className="btn btn-primary" onClick={build} disabled={!!busy} data-tip={tip.pages.build}>
         {busy === 'build' ? <span className="loading-spinner" /> : <FiLayers size={16} />}
         {pages.length ? w.pages.rebuild : w.pages.build}
       </button>
@@ -664,6 +675,7 @@ function PagesStep({ state, update, project, refresh, run, busy, goTo, w, pages,
 
 function FinishStep({ state, update, project, refresh, run, busy, goTo, w, panels, pages, openComposer, startNew }:
   StepProps & { openComposer: () => void; startNew: () => void }) {
+  const tip = useTips().wizard;
   const [title, setTitle] = useState(project?.name || '');
   const [subtitle, setSubtitle] = useState('');
   const [numbers, setNumbers] = useState(true);
@@ -700,14 +712,14 @@ function FinishStep({ state, update, project, refresh, run, busy, goTo, w, panel
       <div className="wizard-row">
         <label className="wizard-field">
           <span>{w.finish.coverTitle}</span>
-          <input className="input" value={title} onChange={e => setTitle(e.target.value)} />
+          <input className="input" value={title} onChange={e => setTitle(e.target.value)} data-tip={tip.finish.coverTitle} />
         </label>
         <label className="wizard-field">
           <span>{w.finish.coverSubtitle}</span>
-          <input className="input" value={subtitle} placeholder={w.finish.optional} onChange={e => setSubtitle(e.target.value)} />
+          <input className="input" value={subtitle} placeholder={w.finish.optional} onChange={e => setSubtitle(e.target.value)} data-tip={tip.finish.subtitle} />
         </label>
       </div>
-      <button type="button" className="btn btn-secondary" onClick={addCover} disabled={!!busy || !title.trim()}>
+      <button type="button" className="btn btn-secondary" onClick={addCover} disabled={!!busy || !title.trim()} data-tip={tip.finish.cover}>
         {busy === 'cover' ? <span className="loading-spinner" /> : <FiImage size={16} />}
         {hasCover ? w.finish.replaceCover : w.finish.addCover}
       </button>
@@ -715,12 +727,12 @@ function FinishStep({ state, update, project, refresh, run, busy, goTo, w, panel
       <hr className="wizard-sep" />
 
       <label className="wizard-toggle">
-        <input type="checkbox" checked={numbers} onChange={e => setNumbers(e.target.checked)} />
+        <input type="checkbox" checked={numbers} onChange={e => setNumbers(e.target.checked)} data-tip={tip.finish.pageNumbers} />
         <span>{w.finish.pageNumbers}</span>
       </label>
       <div className="wizard-choice">
         {(['pdf', 'zip'] as const).map(f => (
-          <button key={f} type="button" className="btn btn-primary" onClick={() => exportAs(f)} disabled={!!busy}>
+          <button key={f} type="button" className="btn btn-primary" onClick={() => exportAs(f)} disabled={!!busy} data-tip={f === 'pdf' ? tip.finish.pdf : tip.finish.zip}>
             {busy === f ? <span className="loading-spinner" /> : <FiDownload size={16} />}
             {f === 'pdf' ? w.finish.pdf : w.finish.zip}
           </button>
@@ -738,10 +750,10 @@ function FinishStep({ state, update, project, refresh, run, busy, goTo, w, panel
       <Tip>{w.finish.tip}</Tip>
       <Nav busy={busy} back={() => goTo('pages')}
         extra={<>
-          <button type="button" className="btn btn-secondary" onClick={openComposer} disabled={!!busy}>
+          <button type="button" className="btn btn-secondary" onClick={openComposer} disabled={!!busy} data-tip={tip.finish.composer}>
             <FiLayers size={16} /> {w.finish.composer}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={startNew} disabled={!!busy}>
+          <button type="button" className="btn btn-secondary" onClick={startNew} disabled={!!busy} data-tip={tip.finish.newComic}>
             <FiPlus size={16} /> {w.finish.newComic}
           </button>
         </>} />

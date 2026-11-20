@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FiLayers, FiX, FiZap } from 'react-icons/fi';
 import { fill, useTranslation } from '../../hooks/useTranslation';
+import { useTips } from '../../hooks/useTips';
 import type { AiAction } from './AiRewrite';
 import { batchCandidates, chooseBlocks, draftUncutAllowed, estimate, requestBlocks, type BatchScope } from './batchPlan';
 import type { OutlineKind, OutlineWords } from './outline';
@@ -28,6 +29,7 @@ interface Props {
 export function BatchDialog({ text, words, model, blocked, replaces, onStart, onClose }: Props) {
   const { t } = useTranslation();
   const c = t.comics;
+  const tip = useTips().comics;
   const ref = useRef<HTMLDialogElement>(null);
   const [kind, setKind] = useState<OutlineKind>('scene');
   const [scope, setScope] = useState<BatchScope>('all');
@@ -93,7 +95,7 @@ export function BatchDialog({ text, words, model, blocked, replaces, onStart, on
       <div className="ai-rewrite-head">
         <FiLayers size={14} />
         <b id="ai-batch-title">{c.batchTitle}</b>
-        <button className="btn btn-ghost btn-icon ai-rewrite-close" onClick={onClose} disabled={busy} title={`${c.batchClose} (Esc)`} aria-label={c.batchClose}>
+        <button className="btn btn-ghost btn-icon ai-rewrite-close" onClick={onClose} disabled={busy} data-tip={`${c.batchClose} (Esc)`} aria-label={c.batchClose}>
           <FiX size={14} />
         </button>
       </div>
@@ -103,7 +105,7 @@ export function BatchDialog({ text, words, model, blocked, replaces, onStart, on
         <div className="ai-rewrite-actions" role="radiogroup" aria-label={c.batchGrouping}>
           {kinds.map(k => (
             <button key={k.id} role="radio" aria-checked={kind === k.id} disabled={busy}
-              className={`ai-rewrite-action ${kind === k.id ? 'active' : ''}`} onClick={() => pickKind(k.id)}>{k.label}</button>
+              className={`ai-rewrite-action ${kind === k.id ? 'active' : ''}`} onClick={() => pickKind(k.id)} data-tip={tip.batchKind}>{k.label}</button>
           ))}
         </div>
       </fieldset>
@@ -114,7 +116,7 @@ export function BatchDialog({ text, words, model, blocked, replaces, onStart, on
           {([['all', fill(c.batchScopeAll, { n: cands.length })], ['uncut', fill(c.batchScopeUncut, { n: uncutCount })],
             ['chosen', fill(c.batchScopeChosen, { n: chooseBlocks(cands, 'chosen', chosen).length })]] as [BatchScope, string][]).map(([id, label]) => (
             <button key={id} role="radio" aria-checked={scope === id} disabled={busy || (id === 'uncut' && !uncutCount)}
-              className={`ai-rewrite-action ${scope === id ? 'active' : ''}`} onClick={() => setScope(id)}>{label}</button>
+              className={`ai-rewrite-action ${scope === id ? 'active' : ''}`} onClick={() => setScope(id)} data-tip={id === 'all' ? tip.scopeAll : id === 'uncut' ? tip.scopeUncut : tip.scopeChosen}>{label}</button>
           ))}
         </div>
         {scope === 'chosen' && (
@@ -145,7 +147,7 @@ export function BatchDialog({ text, words, model, blocked, replaces, onStart, on
         <div className="ai-rewrite-actions" role="radiogroup" aria-label={c.batchAction}>
           {actions.map(a => (
             <button key={a.id} role="radio" aria-checked={chosenAction === a.id} disabled={busy || a.off}
-              className={`ai-rewrite-action ${chosenAction === a.id ? 'active' : ''}`} onClick={() => setAction(a.id)} title={a.hint}>
+              className={`ai-rewrite-action ${chosenAction === a.id ? 'active' : ''}`} onClick={() => setAction(a.id)} data-tip={a.hint}>
               {a.label}
             </button>
           ))}
@@ -153,9 +155,9 @@ export function BatchDialog({ text, words, model, blocked, replaces, onStart, on
         <textarea className="input ai-rewrite-instruction" rows={2} maxLength={2000} disabled={busy}
           placeholder={chosenAction === 'custom' ? c.aiInstructionCustom : c.aiInstruction}
           aria-label={chosenAction === 'custom' ? c.aiInstructionCustom : c.aiInstruction}
-          value={instruction} onChange={e => setInstruction(e.target.value)} />
+          value={instruction} onChange={e => setInstruction(e.target.value)} data-tip={tip.batchInstruction} />
         {chosenAction === 'draft_uncut' && blocks.some(b => b.todo) && (
-          <label className="comics-check">
+          <label className="comics-check" data-tip={tip.aiRemoveTodo}>
             <input type="checkbox" checked={removeTodo} disabled={busy} onChange={e => setRemoveTodo(e.target.checked)} /> {c.aiRemoveTodo}
           </label>
         )}
@@ -170,7 +172,7 @@ export function BatchDialog({ text, words, model, blocked, replaces, onStart, on
           {fill(c.aiModel, { model: model || '—' })} · {fill(c.batchEstimate, { n: est.blocks, m: est.minutes, s: est.secondsPerBlock })}
         </span>
         <button className="btn btn-secondary" onClick={onClose} disabled={busy}>{c.batchClose}</button>
-        <button className="btn btn-primary" onClick={start} disabled={busy || !!blocked || !blocks.length || needsInstruction}>
+        <button className="btn btn-primary" onClick={start} disabled={busy || !!blocked || !blocks.length || needsInstruction} data-tip={tip.batchStart}>
           <FiZap size={14} /> {c.batchStart}
         </button>
       </div>
