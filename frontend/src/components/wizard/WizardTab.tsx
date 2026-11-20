@@ -15,6 +15,7 @@ import {
   readSavedState, writeSavedState, type StepId, type WizardState,
   castNote, castSuggestions, findInLibrary, libraryLook, type LibraryCharacter,
 } from './wizardLogic';
+import { previewKey, previewPrompt, useStylePreviews, type PreviewState } from './stylePreviews';
 import './wizard.css';
 
 type ProjectSettings = {
@@ -481,6 +482,36 @@ function PanelsStep({ state, project, refresh, run, busy, goTo, w, panels: saved
 
 // --- 3. Look ---------------------------------------------------------------
 
+function StyleCard({ label, style, selected, onSelect, selectTip, keyOf, previews, canDraw, onDraw, w, tip, compact }: {
+  label: string; style: string; selected: boolean; onSelect: () => void; selectTip: string;
+  keyOf: (s: string) => string; previews: PreviewState; canDraw: boolean;
+  onDraw: (s: string) => void; w: W; tip: ReturnType<typeof useTips>['wizard']; compact?: boolean;
+}) {
+  const key = keyOf(style);
+  const url = previews.images[key];
+  const pending = !!previews.pending[key];
+  const error = previews.errors[key];
+  return (
+    <div className={`wizard-style ${selected ? 'is-on' : ''} ${compact ? 'is-compact' : ''}`}>
+      <button type="button" className="wizard-style-pick" onClick={onSelect} aria-pressed={selected} data-tip={selectTip}>
+        <span className="wizard-style-img">
+          {url
+            ? <img src={url} alt="" loading="lazy" onError={() => previews.forget(key)} />
+            : <FiImage size={22} />}
+          {pending && <span className="wizard-art-overlay"><span className="loading-spinner" /></span>}
+        </span>
+        <span className="wizard-style-label">{label}</span>
+      </button>
+      <button type="button" className="btn btn-ghost wizard-style-draw" onClick={() => onDraw(style)}
+        disabled={!canDraw || pending} data-tip={error ? `${tip.look.previewFailed} ${error}` : url ? tip.look.redraw : tip.look.preview}>
+        {pending ? w.look.previewing : url ? w.look.redraw : w.look.preview}
+        {error && !pending ? ' ⚠' : ''}
+      </button>
+    </div>
+  );
+}
+
+
 function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels, swarmModel, library }: StepProps & { swarmModel: string }) {
   const tip = useTips().wizard;
   const cast = useMemo(() => castFromPanels(panels), [panels]);
@@ -491,6 +522,27 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
     return out;
   });
   const guessed = guessPromptFormat(swarmModel || '');
+
+  // art-style previews, drawn with the user's model (see stylePreviews.ts)
+  const [swarm, setSwarm] = useState<'checking' | 'ok' | 'down'>('checking');
+  useEffect(() => {
+    api<{ connected: boolean }>('/api/assets/swarmui/test')
+      .then(d => setSwarm(d.connected ? 'ok' : 'down'))
+      .catch(() => setSwarm('down'));
+  }, []);
+  const previews = useStylePreviews();
+  const keyOf = (s: string) => previewKey(swarmModel, state.promptFormat, s);
+  const drawStyles = (styles: string[]) => previews.draw(
+    styles.map(s => ({ key: keyOf(s), prompt: previewPrompt(state.promptFormat, s) })),
+    { format: state.promptFormat, projectId: project?.id },
+  );
+  const missing = STYLE_PRESETS.filter(p => !previews.images[keyOf(p.prompt)] && !previews.pending[keyOf(p.prompt)]);
+  const previewAll = () => { void drawStyles(missing.map(p => p.prompt)); };
+  const previewProps = {
+    keyOf, previews, canDraw: swarm === 'ok' && !busy,
+    onDraw: (s: string) => { void drawStyles([s]); },
+    w, tip,
+  };
 
   const save = () => run('save', async () => {
     if (!project) return;
@@ -510,16 +562,30 @@ function LookStep({ state, update, project, refresh, run, busy, goTo, w, panels,
     <div className="wizard-body">
       <div className="wizard-field">
         <span>{w.look.style}</span>
-        <div className="wizard-choice">
+        <div className="wizard-styles">
           {STYLE_PRESETS.map(p => (
-            <button key={p.id} type="button" className={`wizard-chip ${style === p.prompt ? 'is-on' : ''}`}
-              onClick={() => setStyle(p.prompt)} data-tip={tip.look.preset}>
-              {w.look.presets[p.id as keyof typeof w.look.presets]}
-            </button>
+            <StyleCard key={p.id} label={w.look.presets[p.id as keyof typeof w.look.presets]}
+              style={p.prompt} selected={style === p.prompt} onSelect={() => setStyle(p.prompt)}
+              selectTip={tip.look.preset} {...previewProps} />
           ))}
         </div>
-        <textarea className="input textarea" rows={2} value={style} placeholder={w.look.stylePlaceholder}
-          onChange={e => setStyle(e.target.value)} data-tip={tip.look.style} />
+        <div className="wizard-preview-bar">
+          <button type="button" className="btn btn-secondary" onClick={previewAll}
+            disabled={!!busy || swarm !== 'ok' || missing.length === 0} data-tip={tip.look.previewAll}>
+            <FiImage size={16} /> {missing.length ? fill(w.look.previewAll, { n: missing.length }) : w.look.previewAllDone}
+          </button>
+          <span className="text-sm text-muted">
+            {swarm === 'down' ? w.look.previewOffline : swarm === 'ok' ? w.look.previewHint : ''}
+          </span>
+        </div>
+        <div className="wizard-custom-style">
+          <textarea className="input textarea" rows={2} value={style} placeholder={w.look.stylePlaceholder}
+            onChange={e => setStyle(e.target.value)} data-tip={tip.look.style} />
+          {style.trim() && !STYLE_PRESETS.some(p => p.prompt === style) && (
+            <StyleCard label={w.look.yourStyle} style={style} selected onSelect={() => {}}
+              selectTip={tip.look.style} compact {...previewProps} />
+          )}
+        </div>
       </div>
 
       <div className="wizard-field">

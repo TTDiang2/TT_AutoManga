@@ -32,6 +32,10 @@ const en = {
   },
   look: {
     preset: 'Use this art style. You can still edit the text below.',
+    previewAll: 'Draw a small sample picture for every style that has none yet: your image model, the same scene and the same seed.',
+    preview: 'Draw a sample picture of this style with your image model',
+    redraw: 'Draw this sample again, e.g. after changing the model or its settings',
+    previewFailed: 'The last preview failed:',
     style: 'Style words added to every picture, e.g. "watercolor, muted colors"',
     tags: 'Pick this for SDXL-style models (Illustrious, NoobAI) that understand short keywords',
     prose: 'Pick this for models that read full sentences (Qwen Image, Flux)',
@@ -90,6 +94,10 @@ const zh: typeof en = {
   },
   look: {
     preset: '使用这种画风，仍可在下方修改文字。',
+    previewAll: '为还没有预览的画风各画一张示例图：使用你的图像模型、同一场景和同一种子。',
+    preview: '用你的图像模型画一张这种画风的示例图',
+    redraw: '重新画这张示例图，例如更换模型或修改设置之后',
+    previewFailed: '上次预览失败：',
     style: '加到每张图的画风描述，例如“水彩，低饱和色彩”',
     tags: '适用于理解短关键词的 SDXL 类模型（Illustrious、NoobAI）',
     prose: '适用于能读懂完整句子的模型（Qwen Image、Flux）',
