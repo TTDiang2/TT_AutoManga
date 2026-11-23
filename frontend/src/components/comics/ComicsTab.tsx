@@ -599,7 +599,7 @@ export function ComicsTab() {
   // .comic files from the upload button or dropped on the list; an existing script is replaced only after a confirm
   const upload = async (all: File[]) => {
     const files = comicFiles(all);
-    if (!files.length) { if (all.length) setUploadNotice({ text: `${all.map(f => f.name).join(', ')}: not a .comic file`, warn: true }); return; }
+    if (!files.length) { if (all.length) setUploadNotice({ text: `${all.map(f => f.name).join(', ')}: not a .comic, .txt or .md file`, warn: true }); return; }
     setUploadNotice(null);
     try {
       let results: UploadResult[] = await postUpload(files, false);
@@ -732,7 +732,7 @@ export function ComicsTab() {
             <button className="btn btn-ghost btn-icon" onClick={loadScripts} data-tip={tip.refresh} aria-label={tip.refresh}><FiRefreshCw size={14} /></button>
             <button className="btn btn-ghost btn-icon" onClick={() => uploadInput.current?.click()} data-tip={tip.upload} aria-label={c.uploadOpen}><FiUpload size={14} /></button>
             <button className="btn btn-secondary btn-icon" onClick={() => setNewName('')} data-tip={tip.newScript} aria-label={tip.newScript}><FiPlus size={14} /></button>
-            <input ref={uploadInput} type="file" accept=".comic,.txt" multiple hidden
+            <input ref={uploadInput} type="file" accept=".comic,.txt,.md" multiple hidden
               onChange={e => { upload([...(e.target.files ?? [])]); e.target.value = ''; }} />
           </div>
         </div>

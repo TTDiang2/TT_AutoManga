@@ -300,3 +300,63 @@ def test_upload_refuses_the_running_script(client, repo, monkeypatch):
     r = _upload(client, [("ok.comic", b"title: X\n", "text/plain")], overwrite=True)
     assert r.json()["results"][0]["status"] == "busy"
     assert (repo / "scripts" / "ok.comic").read_text(encoding="utf-8") == "title: Saved\n"
+
+
+# ---------------------------------------------------------------------------
+# upload: writer's scripts converted with convert.js
+# ---------------------------------------------------------------------------
+
+_REAL_COMICS = Path(os.environ.get("COMICS_DIR", Path.home() / "Projects" / "Comics")).expanduser()
+_WRITER = b"""TITLE: THE SPACE BETWEEN US
+ISSUE: #1
+
+PAGE 1 (6 Panels)
+
+PANEL 1
+VISUAL: Tight shot on JACK (47, reserved) staring at a laptop screen. The glow illuminates his face.
+CAPTION (Jack): The solitude had a weight.
+"""
+
+
+def test_is_writer_script():
+    assert cm.is_writer_script("PAGE 1 (6 Panels)\n\nPANEL 1\nVISUAL: x\n")
+    assert cm.is_writer_script("## Page 1\n\n**Panel 1.** A café.\n")
+    assert cm.is_writer_script("PAGE 1\nVISUAL: a street\n")
+    assert not cm.is_writer_script("title: A\nPAGE\nPANEL h=1.2\ncast: kim\nKIM: hi\n")
+    assert not cm.is_writer_script("PAGE 3\nlayout: 1-2\nPANEL uncut\nPANEL seed=77\n")
+
+
+@pytest.fixture
+def converter(repo):
+    if not (_REAL_COMICS / "convert.js").exists():
+        pytest.skip("no Comics repo with convert.js")
+    (repo / "lib").mkdir(exist_ok=True)
+    shutil.copy(_REAL_COMICS / "convert.js", repo / "convert.js")
+    shutil.copy(_REAL_COMICS / "lib" / "convert.js", repo / "lib" / "convert.js")
+    return repo
+
+
+def test_upload_converts_writer_scripts(client, converter):
+    r = _upload(client, [("Space Between Us 1.txt", _WRITER, "text/plain"),
+                         ("notes.md", b"PAGE 1\nPANEL 1\n", "text/markdown"),
+                         ("plain.txt", b"title: Plain\nPAGE\n", "text/plain")])
+    res = {x["file"]: x for x in r.json()["results"]}
+    a = res["Space Between Us 1.txt"]
+    assert a["status"] == "saved" and a["name"] == "space-between-us-1" and a["converted"] is True
+    text = (converter / "scripts" / "space-between-us-1.comic").read_text(encoding="utf-8")
+    assert "converted from Space Between Us 1.txt" in text
+    assert "character JACK: 1boy, solo, man, 47 years old, reserved" in text
+    assert "CAPTION: The solitude had a weight." in text
+    assert any("6 panels, it has 1" in w for w in a["warnings"])
+    # a heading with nothing under it converts to nothing: not saved
+    assert res["notes.md"]["status"] == "invalid" and res["notes.md"]["error"].startswith("could not convert")
+    assert not (converter / "scripts" / "notes.comic").exists()
+    # .comic text in a .txt is saved as it is
+    assert "converted" not in res["plain.txt"]
+    assert (converter / "scripts" / "plain.comic").read_text(encoding="utf-8") == "title: Plain\nPAGE\n"
+
+
+def test_upload_writer_script_without_convert_js(client, repo):
+    r = _upload(client, [("s.txt", _WRITER, "text/plain")])
+    x = r.json()["results"][0]
+    assert x["status"] == "invalid" and "no convert.js" in x["error"]

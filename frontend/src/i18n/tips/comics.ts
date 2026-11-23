@@ -6,7 +6,7 @@
 const en = {
   // script list
   refresh: 'Reload the script list from the Comics folder',
-  upload: 'Upload .comic or .txt scripts (or drop them on this list). An existing script is never overwritten.',
+  upload: 'Upload .comic, .txt or .md scripts (or drop them on this list). A writer\'s script (PAGE 1 / PANEL 1 / VISUAL: ...) is converted to .comic. An existing script is never overwritten.',
   newScript: 'Create a new, empty script',
   newName: 'File name for the new script: letters, digits, - and _, no extension',
   dismiss: 'Click to dismiss',
@@ -65,7 +65,7 @@ const en = {
 
 const zh: typeof en = {
   refresh: '从 Comics 文件夹重新载入脚本列表',
-  upload: '上传 .comic 或 .txt 脚本（也可以拖到这个列表上）。不会覆盖已有脚本。',
+  upload: '上传 .comic、.txt 或 .md 脚本（也可以拖到这个列表上）。编剧格式的脚本（PAGE 1 / PANEL 1 / VISUAL: ...）会转换为 .comic。不会覆盖已有脚本。',
   newScript: '新建一个空白脚本',
   newName: '新脚本的文件名：字母、数字、- 和 _，不带扩展名',
   dismiss: '点击关闭',

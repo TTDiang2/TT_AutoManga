@@ -627,10 +627,17 @@ which paints with comic.js and rebuilds the project here. Names are
   while that script is being converted).
 - `POST /api/comics/scripts/upload` (multipart: `files` up to 20, `overwrite`
   false by default; the Comics tab's upload button and drop on the script list)
-  adds `.comic`/`.txt` files to `scripts/`. The name comes from the file name
+  adds `.comic`/`.txt`/`.md` files to `scripts/`. The name comes from the file name
   (lower-cased, accents dropped, other characters `-`: "Rooftop Static.comic" →
-  `rooftop-static`); UTF-8 only (a BOM is dropped), ≤ 1 MB each. Per file
-  `{file, name, status: saved|replaced|exists|busy|invalid, error?, plan?}`:
+  `rooftop-static`); UTF-8 only (a BOM is dropped), ≤ 1 MB each. A `.txt`/`.md`
+  in the writer's layout (`TITLE:` / `PAGE 1 (6 Panels)` / `PANEL 1` /
+  `VISUAL:` / `CAPTION (Jack):` / `JACK (O.S.):`, or Markdown `## Page 1`,
+  `**Panel 1.**`; `comics.is_writer_script`) is converted first by the Comics
+  repo's `convert.js --json` and the `.comic` saved, with `converted: true` and
+  `warnings` (missing ages, unknown looks, panel counts; the script carries
+  `// TODO` lines); a conversion error is `invalid`. Per file
+  `{file, name, status: saved|replaced|exists|busy|invalid, error?, plan?,
+  converted?, warnings?}`:
   an existing script is replaced only with `overwrite` (else `exists`, nothing
   written) and never while it is being converted (`busy`); a saved script is
   checked with `comic.js --plan` (`plan {ok, error, line}`) and kept even when

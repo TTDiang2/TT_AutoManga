@@ -166,11 +166,51 @@ async def save_script(name: str, req: SaveScriptRequest):
 
 UPLOAD_MAX_FILES = 20
 UPLOAD_MAX_BYTES = 1024 * 1024
-_UPLOAD_EXT = (".comic", ".txt")
+_UPLOAD_EXT = (".comic", ".txt", ".md")
+_CONVERT_TIMEOUT = 20       # seconds for convert.js
+
+# A writer's script (TITLE: / PAGE 1 (6 Panels) / PANEL 1 / VISUAL: ..., or Markdown "## Page 1", "**Panel 1.**"),
+# not .comic: a numbered PANEL heading, a VISUAL: line or a Markdown page/panel heading. A .comic PANEL line takes
+# key=value arguments or "uncut", never a bare number.
+_WRITER_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*|\*\*\s*)?panel\s+\d+\b(?!\s*=)"
+    r"|^\s*(?:visual|visuals|art|description)\s*:"
+    r"|^\s*#{1,6}\s*(?:page|panel)\b",
+    re.IGNORECASE | re.MULTILINE)
+
+
+def is_writer_script(text: str) -> bool:
+    """True for a script in the writer's layout that convert.js turns into .comic (see _WRITER_RE)."""
+    return bool(_WRITER_RE.search(text))
+
+
+def _run_convert(text: str, source: str) -> Dict[str, Any]:
+    """convert.js --json of a writer's script: {ok: true, text, title, warnings} or {ok: false, error}.
+    Blocking: call it from a thread."""
+    if not (COMICS_DIR / "convert.js").exists():
+        return {"ok": False, "error": f"no convert.js in {COMICS_DIR} (update the Comics repo)"}
+    node = _node()
+    try:
+        proc = subprocess.run([node, str(COMICS_DIR / "convert.js"), "-", "--json", "--source", source],
+                              cwd=str(COMICS_DIR), env=_node_env(node), input=text,
+                              capture_output=True, text=True, timeout=_CONVERT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"convert.js took over {_CONVERT_TIMEOUT}s"}
+    except OSError as e:
+        return {"ok": False, "error": f"could not run convert.js: {e}"}
+    lines = [l for l in proc.stdout.splitlines() if l.strip()]
+    try:
+        res = json.loads(lines[-1])
+        if not isinstance(res, dict) or "ok" not in res:
+            raise ValueError("no ok field")
+    except (IndexError, ValueError):
+        tail = (proc.stderr or proc.stdout or "").strip()[-300:]
+        return {"ok": False, "error": f"convert.js failed (exit {proc.returncode}): {tail}"}
+    return res
 
 
 def upload_name(filename: str) -> Optional[str]:
-    """The script name for an uploaded file: its base name without .comic/.txt, spaces and other characters a
+    """The script name for an uploaded file: its base name without .comic/.txt/.md, spaces and other characters a
     name can't hold turned into "-" ("Rooftop Static.comic" -> "rooftop-static"); None when nothing is left."""
     base = re.split(r"[\\/]", filename or "")[-1]
     for ext in _UPLOAD_EXT:
@@ -185,7 +225,9 @@ def upload_name(filename: str) -> Optional[str]:
 @router.post("/scripts/upload")
 async def upload_scripts(files: List[UploadFile] = File(...), overwrite: bool = Form(False)):
     """Add .comic files to the Comics repo's scripts/. Each file gets its own result:
-    {file, name, status: saved|replaced|exists|busy|invalid, error?, plan?}. An existing script is only replaced
+    {file, name, status: saved|replaced|exists|busy|invalid, error?, plan?, converted?, warnings?}.
+    A .txt/.md script in the writer's layout (is_writer_script) is converted with convert.js first and the
+    .comic is saved: converted true, warnings = what to check (the script's // TODO lines). An existing script is only replaced
     with overwrite (status "exists" otherwise, nothing written), never while it is being converted ("busy").
     A saved script is checked with comic.js --plan; a script error still saves (fix it in the editor)."""
     if len(files) > UPLOAD_MAX_FILES:
@@ -197,7 +239,7 @@ async def upload_scripts(files: List[UploadFile] = File(...), overwrite: bool = 
         res: Dict[str, Any] = {"file": f.filename or "", "name": None}
         results.append(res)
         if not (f.filename or "").lower().endswith(_UPLOAD_EXT):
-            res.update(status="invalid", error="not a .comic file")
+            res.update(status="invalid", error="not a .comic, .txt or .md file")
             continue
         name = upload_name(f.filename or "")
         if not name:
@@ -228,6 +270,13 @@ async def upload_scripts(files: List[UploadFile] = File(...), overwrite: bool = 
         if existed and not overwrite:
             res.update(status="exists", error=f"{name}.comic already exists")
             continue
+        if not (f.filename or "").lower().endswith(".comic") and is_writer_script(text):
+            conv = await asyncio.to_thread(_run_convert, text, re.split(r"[\\/]", f.filename or "")[-1])
+            if not conv.get("ok"):
+                res.update(status="invalid", error=f"could not convert: {conv.get('error')}")
+                continue
+            text = conv["text"]
+            res.update(converted=True, warnings=list(conv.get("warnings") or []))
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".comic.tmp")
         tmp.write_text(text, encoding="utf-8")

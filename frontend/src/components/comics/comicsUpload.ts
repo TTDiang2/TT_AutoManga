@@ -1,4 +1,5 @@
-/** Uploading .comic files to the Comics repo (POST /api/comics/scripts/upload). */
+/** Uploading .comic files to the Comics repo (POST /api/comics/scripts/upload). A .txt/.md script in the writer's
+    layout (TITLE: / PAGE 1 (6 Panels) / PANEL 1 / VISUAL:) is converted to .comic by the server (converted, warnings). */
 import { fill } from '../../hooks/useTranslation';
 
 export interface UploadResult {
@@ -7,9 +8,11 @@ export interface UploadResult {
   status: 'saved' | 'replaced' | 'exists' | 'busy' | 'invalid';
   error?: string;
   plan?: { ok: boolean; error: string | null; line: number | null };
+  converted?: boolean;
+  warnings?: string[];
 }
 
-export interface UploadWords { uploadDone: string; uploadSkipped: string; uploadCheck: string }
+export interface UploadWords { uploadDone: string; uploadSkipped: string; uploadCheck: string; uploadConverted: string }
 
 export async function postUpload(files: File[], overwrite: boolean): Promise<UploadResult[]> {
   const fd = new FormData();
@@ -23,9 +26,9 @@ export async function postUpload(files: File[], overwrite: boolean): Promise<Upl
 
 export const uploaded = (r: UploadResult) => r.status === 'saved' || r.status === 'replaced';
 
-/** Files that are only .comic/.txt by name: the rest is reported by the server too, but a folder or an image
+/** Files that are only .comic/.txt/.md by name: the rest is reported by the server too, but a folder or an image
     dropped by mistake needn't be sent. */
-export const comicFiles = (files: Iterable<File>) => [...files].filter(f => /\.(comic|txt)$/i.test(f.name));
+export const comicFiles = (files: Iterable<File>) => [...files].filter(f => /\.(comic|txt|md)$/i.test(f.name));
 
 /** One line for the notice: what was added, what was kept, what failed and which saved scripts have errors. */
 export function uploadSummary(results: UploadResult[], w: UploadWords): { text: string; warn: boolean } {
@@ -35,10 +38,11 @@ export function uploadSummary(results: UploadResult[], w: UploadWords): { text: 
   const kept = results.filter(r => r.status === 'exists');
   if (kept.length) parts.push(fill(w.uploadSkipped, { names: kept.map(r => `${r.name}.comic`).join(', ') }));
   for (const r of results) {
+    if (uploaded(r) && r.converted) parts.push(fill(w.uploadConverted, { name: `${r.name}.comic`, file: r.file, n: r.warnings?.length ?? 0 }));
     if (r.status === 'invalid' || r.status === 'busy') parts.push(`${r.file}: ${r.error}`);
     else if (uploaded(r) && r.plan && !r.plan.ok)
       parts.push(fill(w.uploadCheck, { name: `${r.name}.comic`, line: r.plan.line ?? '?', error: (r.plan.error ?? '').replace(/^.*?\.comic:\d+:\s*/, '') }));
   }
-  const warn = results.some(r => !uploaded(r) || (r.plan && !r.plan.ok));
+  const warn = results.some(r => !uploaded(r) || (r.plan && !r.plan.ok) || !!r.warnings?.length);
   return { text: parts.join(' · '), warn };
 }
